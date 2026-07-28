@@ -39,6 +39,9 @@ These can be found at the path:
 target/wasm32v1-none/optimized
 ```
 
+The build includes the pool factory, backstop, pool, and immutable v3
+backstop valuation contract.
+
 For help with deployment to a network, please visit the [Blend Utils](https://github.com/blend-capital/blend-utils) repo.
 
 ## Contributing

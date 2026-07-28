@@ -12,6 +12,8 @@ build:
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package pool --locked \
 		--out-dir target/wasm32v1-none/optimized
+	stellar contract build --package blend-v3-backstop-valuation --locked \
+		--out-dir target/wasm32v1-none/optimized
 	cd target/wasm32v1-none/optimized/ && \
 		for i in *.wasm ; do \
 			ls -l "$$i"; \

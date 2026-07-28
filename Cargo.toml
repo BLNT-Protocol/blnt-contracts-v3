@@ -15,7 +15,8 @@ members = [
     "mocks/mock-emitter",
     "mocks/moderc3156",
     "pool-factory",
-    "test-suites"
+    "test-suites",
+    "backstop-valuation",
 ]
 
 [workspace.package]
