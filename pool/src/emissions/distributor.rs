@@ -266,7 +266,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -326,7 +326,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -366,7 +366,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -415,7 +415,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1510000000, // 10^7 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -479,7 +479,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -540,7 +540,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -580,7 +580,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -618,7 +618,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1601000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -667,7 +667,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -716,7 +716,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -765,7 +765,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -814,7 +814,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1700000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -860,7 +860,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000005,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -909,7 +909,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -957,7 +957,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1005,7 +1005,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1060,7 +1060,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1114,7 +1114,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1169,7 +1169,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1225,7 +1225,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1276,7 +1276,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1500000000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1344,7 +1344,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1387,7 +1387,7 @@ mod tests {
                 index: 12345670000000,
                 accrued: 0_1000000,
             };
-            let res_token_index_0 = 0 * 2 + 0; // d_token for reserve 0
+            let res_token_index_0 = 0; // d_token for reserve 0
 
             let reserve_emission_data_1 = ReserveEmissionData {
                 expiration: 1600000000,
@@ -1469,7 +1469,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1512,7 +1512,7 @@ mod tests {
                 index: 12345670000000,
                 accrued: 0_1000000,
             };
-            let res_token_index_0 = 0 * 2 + 0; // d_token for reserve 0
+            let res_token_index_0 = 0; // d_token for reserve 0
 
             let reserve_emission_data_1 = ReserveEmissionData {
                 expiration: 1600000000,
@@ -1595,7 +1595,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1638,7 +1638,7 @@ mod tests {
                 index: 1234567,
                 accrued: 0_1000000,
             };
-            let res_token_index_0 = 0 * 2 + 0; // d_token for reserve 0
+            let res_token_index_0 = 0; // d_token for reserve 0
 
             let reserve_emission_data_1 = ReserveEmissionData {
                 expiration: 1600000000,

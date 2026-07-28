@@ -8,7 +8,7 @@ use soroban_sdk::{
 use crate::{PoolFactoryClient, PoolFactoryContract, PoolInitMeta};
 
 mod pool {
-    soroban_sdk::contractimport!(file = "../target/wasm32-unknown-unknown/optimized/pool.wasm");
+    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/pool.wasm");
 }
 
 #[test]
@@ -50,7 +50,7 @@ fn test_pool_factory() {
         &min_collateral,
     );
 
-    let event = vec![&e, e.events().all().last_unchecked()];
+    let event = e.events().all().filter_by_contract(&pool_factory_address);
     assert_eq!(
         event,
         vec![

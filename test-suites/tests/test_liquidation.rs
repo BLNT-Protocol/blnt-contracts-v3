@@ -4,12 +4,11 @@ use cast::i128;
 use pool::{AuctionData, FlashLoan, PoolDataKey, Request, RequestType, ReserveConfig};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    map,
-    testutils::{Address as AddressTestTrait, Events},
-    vec, Address, Env, Error, FromVal, IntoVal, Symbol, TryFromVal, Val, Vec,
+    map, testutils::Address as AddressTestTrait, vec, Address, Env, Error, FromVal, IntoVal,
+    Symbol, TryFromVal, Val, Vec,
 };
 use test_suites::{
-    assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
+    assertions::{assert_approx_eq_abs, assert_approx_eq_rel, event_from_end},
     create_fixture_with_data,
     moderc3156::create_flashloan_receiver,
     test_fixture::{TokenIndex, SCALAR_7},
@@ -226,8 +225,7 @@ fn test_liquidations() {
     assert_approx_eq_abs(lp_donate_bid_amount, 268_9213686, SCALAR_7);
     assert_eq!(auction_data.block, 151);
     let liq_pct = 30;
-    let events = fixture.env.events().all();
-    let event = vec![&fixture.env, events.get_unchecked(events.len() - 1)];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -294,8 +292,7 @@ fn test_liquidations() {
         .lot
         .get_unchecked(fixture.tokens[TokenIndex::WETH].address.clone());
     assert_approx_eq_abs(weth_lot_amount, 4_260750195, 1000);
-    let events = fixture.env.events().all();
-    let event = vec![&fixture.env, events.get_unchecked(events.len() - 1)];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -382,10 +379,9 @@ fn test_liquidations() {
         8_000 * 10i128.pow(6) + 559_285757,
         100000,
     );
-    let events = fixture.env.events().all();
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 16),
+        event_from_end(&fixture.env, 16),
         &pool_fixture.pool.address,
         &samwise,
         auct_type_1,
@@ -394,7 +390,7 @@ fn test_liquidations() {
     );
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 15),
+        event_from_end(&fixture.env, 15),
         &pool_fixture.pool.address,
         &samwise,
         auct_type_1,
@@ -403,7 +399,7 @@ fn test_liquidations() {
     );
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 9),
+        event_from_end(&fixture.env, 9),
         &pool_fixture.pool.address,
         &fixture.backstop.address,
         auct_type_2,
@@ -412,7 +408,7 @@ fn test_liquidations() {
     );
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 3),
+        event_from_end(&fixture.env, 3),
         &pool_fixture.pool.address,
         &fixture.backstop.address,
         auct_type_2,
@@ -630,8 +626,7 @@ fn test_liquidations() {
         6146_6087407, // lp_token value is $1.25 each
         SCALAR_7,
     );
-    let events = fixture.env.events().all();
-    let event = vec![&fixture.env, events.get_unchecked(events.len() - 1)];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -678,10 +673,9 @@ fn test_liquidations() {
         new_frodo_positions.liabilities.get(1).unwrap()
             + xlm_bad_debt.fixed_mul_ceil(20, 100).unwrap(),
     );
-    let events = fixture.env.events().all();
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 1),
+        event_from_end(&fixture.env, 1),
         &pool_fixture.pool.address,
         &fixture.backstop.address,
         auction_type,
@@ -761,10 +755,9 @@ fn test_liquidations() {
         post_bd_fill_frodo_positions.liabilities.get(1).unwrap(),
         new_frodo_positions.liabilities.get(1).unwrap() + xlm_bad_debt,
     );
-    let events = fixture.env.events().all();
     assert_fill_auction_event_no_data(
         &fixture.env,
-        events.get_unchecked(events.len() - 1),
+        event_from_end(&fixture.env, 1),
         &pool_fixture.pool.address,
         &fixture.backstop.address,
         auction_type,
@@ -886,9 +879,8 @@ fn test_liquidations() {
     pool_fixture
         .pool
         .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
-    let events = fixture.env.events().all();
     // bad debt event occurs before the auction fill event
-    let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 2)];
     let bad_debt: i128 = 9_2903008;
     assert_eq!(
         event,
@@ -950,8 +942,7 @@ fn test_liquidations() {
             .pool
             .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
     let defaulted_debt = bad_debt.fixed_mul_floor(75, 100).unwrap();
-    let events = fixture.env.events().all();
-    let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 2)];
     assert_eq!(
         event,
         vec![
@@ -1248,7 +1239,7 @@ fn test_stale_liquidation_deletion() {
         .pool
         .del_auction(&2u32, &fixture.backstop.address);
     assert!(fixture.env.auths().is_empty());
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![

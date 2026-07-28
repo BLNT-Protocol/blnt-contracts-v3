@@ -6,13 +6,13 @@ use crate::{
     storage::{self, ReserveConfig, ReserveData},
     PoolContract,
 };
-use blend_contract_sdk::emitter::{Client as EmitterClient, WASM as EmitterWASM};
-use sep_40_oracle::testutils::{MockPriceOracleClient, MockPriceOracleWASM};
-use sep_41_token::testutils::{MockTokenClient, MockTokenWASM};
+use mock_emitter::MockEmitter;
+use sep_40_oracle::testutils::{MockPriceOracle, MockPriceOracleClient};
+use sep_41_token::testutils::{MockToken, MockTokenClient};
 use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, IntoVal, String};
 
-use backstop::{BackstopClient, BackstopContract};
+use backstop::{BackstopClient, BackstopContract, EmitterClient};
 use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
 use moderc3156_example::{
     FlashLoanReceiverModifiedERC3156, FlashLoanReceiverModifiedERC3156Client,
@@ -49,7 +49,7 @@ pub(crate) fn create_token_contract<'a>(
     admin: &Address,
 ) -> (Address, MockTokenClient<'a>) {
     let contract_address = Address::generate(e);
-    e.register_at(&contract_address, MockTokenWASM, ());
+    e.register_at(&contract_address, MockToken, ());
     let client = MockTokenClient::new(e, &contract_address);
     client.initialize(admin, &7, &"unit".into_val(e), &"test".into_val(e));
     (contract_address, client)
@@ -70,8 +70,8 @@ pub(crate) fn create_blnd_token<'a>(
 
 //***** Oracle ******
 
-pub(crate) fn create_mock_oracle(e: &Env) -> (Address, MockPriceOracleClient) {
-    let contract_address = e.register(MockPriceOracleWASM, ());
+pub(crate) fn create_mock_oracle(e: &Env) -> (Address, MockPriceOracleClient<'_>) {
+    let contract_address = e.register(MockPriceOracle, ());
     (
         contract_address.clone(),
         MockPriceOracleClient::new(e, &contract_address),
@@ -80,7 +80,7 @@ pub(crate) fn create_mock_oracle(e: &Env) -> (Address, MockPriceOracleClient) {
 
 //***** Pool Factory ******
 
-pub(crate) fn create_mock_pool_factory(e: &Env) -> (Address, MockPoolFactoryClient) {
+pub(crate) fn create_mock_pool_factory(e: &Env) -> (Address, MockPoolFactoryClient<'_>) {
     let pool_init_meta = PoolInitMeta {
         backstop: Address::generate(e),
         pool_hash: BytesN::<32>::from_array(&e, &[0u8; 32]),
@@ -101,7 +101,7 @@ pub(crate) fn create_emitter<'a>(
     backstop_token: &Address,
     blnd_token: &Address,
 ) -> (Address, EmitterClient<'a>) {
-    let contract_address = e.register(EmitterWASM, ());
+    let contract_address = e.register(MockEmitter, ());
     let client = EmitterClient::new(e, &contract_address);
     client.initialize(blnd_token, backstop_id, backstop_token);
     (contract_address.clone(), client)

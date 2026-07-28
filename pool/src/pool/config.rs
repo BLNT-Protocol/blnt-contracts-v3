@@ -356,7 +356,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -394,7 +394,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -982,7 +982,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 500,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1008,7 +1008,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 10000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1064,7 +1064,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 500,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1086,7 +1086,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 10000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1142,7 +1142,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 500,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,

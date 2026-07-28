@@ -3,11 +3,11 @@
 use pool::{Request, RequestType, ReserveEmissionMetadata};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Events},
+    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
     vec, Address, IntoVal, Symbol, Val,
 };
 use test_suites::{
-    assertions::assert_approx_eq_abs,
+    assertions::{assert_approx_eq_abs, event_from_end, legacy_events},
     create_fixture_with_data,
     pool::default_reserve_metadata,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
@@ -80,7 +80,7 @@ fn test_pool_user() {
             }
         )
     );
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
     let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
     let event_data: soroban_sdk::Vec<Val> = vec![
         &fixture.env,
@@ -155,7 +155,7 @@ fn test_pool_user() {
             }
         )
     );
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
     let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
     let reserve_data = fixture.read_reserve_data(0, TokenIndex::WETH);
     pool_weth_balance -= amount;
@@ -237,7 +237,7 @@ fn test_pool_user() {
             }
         )
     );
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
     let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
     let reserve_data = fixture.read_reserve_data(0, TokenIndex::XLM);
     pool_xlm_balance += amount;
@@ -308,7 +308,7 @@ fn test_pool_user() {
             }
         )
     );
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
     let event = vec![&fixture.env, events.get_unchecked(events.len() - 2)];
     let reserve_data = fixture.read_reserve_data(0, TokenIndex::WETH);
     pool_weth_balance -= amount;
@@ -408,7 +408,7 @@ fn test_pool_user() {
             }
         )
     );
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
     // @dev: three transfer events follow the pool events, 1 pool event follows
     let event = vec![&fixture.env, events.get_unchecked(events.len() - 5)];
     let xlm_reserve_data = fixture.read_reserve_data(0, TokenIndex::XLM);
@@ -508,7 +508,7 @@ fn test_pool_user() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -536,7 +536,7 @@ fn test_pool_user() {
     let pre_gulp_reserve = pool_fixture.pool.get_reserve(&xlm.address);
     let gulp_result = pool_fixture.pool.gulp(&xlm.address);
     assert_eq!(fixture.env.auths().len(), 0); // no auth required
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -590,7 +590,7 @@ fn test_pool_config() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -639,7 +639,7 @@ fn test_pool_config() {
     fixture.jump(604800); // 1 week
 
     pool_fixture.pool.set_reserve(&blnd.address);
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     let event_data: soroban_sdk::Vec<Val> = vec![
         &fixture.env,
         blnd.address.into_val(&fixture.env),
@@ -697,7 +697,7 @@ fn test_pool_config() {
             )
         ]
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -753,7 +753,7 @@ fn test_pool_config() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -787,7 +787,7 @@ fn test_pool_config() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -818,7 +818,7 @@ fn test_pool_config() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -843,7 +843,7 @@ fn test_pool_config() {
     // Update status (backstop is unhealthy, so this should update to backstop on-ice)
     pool_fixture.pool.update_status();
     assert_eq!(fixture.env.auths().len(), 0);
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -868,7 +868,7 @@ fn test_pool_config() {
     // Update status (backstop is healthy, so this should update to active)
     pool_fixture.pool.update_status();
     assert_eq!(fixture.env.auths().len(), 0);
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![

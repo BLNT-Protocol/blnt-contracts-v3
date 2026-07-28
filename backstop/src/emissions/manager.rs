@@ -321,7 +321,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -397,7 +397,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -542,7 +542,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -648,7 +648,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -755,7 +755,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -802,7 +802,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -885,7 +885,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -956,7 +956,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1039,7 +1039,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1145,7 +1145,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1227,7 +1227,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1314,7 +1314,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1384,7 +1384,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1481,7 +1481,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             base_reserve: 10,
             network_id: Default::default(),
@@ -1531,7 +1531,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200 - 100000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1595,7 +1595,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             base_reserve: 10,
             network_id: Default::default(),
@@ -1647,7 +1647,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1701,7 +1701,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1782,7 +1782,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1846,7 +1846,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1910,7 +1910,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1973,7 +1973,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2046,7 +2046,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2122,7 +2122,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2186,7 +2186,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2250,7 +2250,7 @@ mod tests {
         let e = Env::default();
         e.ledger().set(LedgerInfo {
             timestamp: 1713139200,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 0,
             network_id: Default::default(),
             base_reserve: 10,

@@ -1,3 +1,3 @@
 use soroban_sdk::contractimport;
 
-contractimport!(file = "../target/wasm32-unknown-unknown/release/backstop.wasm");
+contractimport!(file = "../target/wasm32v1-none/release/backstop.wasm");

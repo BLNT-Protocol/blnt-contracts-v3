@@ -1,7 +1,7 @@
 use soroban_sdk::{Address, Env, Vec};
 
 mod backstop_contract_wasm {
-    soroban_sdk::contractimport!(file = "../target/wasm32-unknown-unknown/optimized/backstop.wasm");
+    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/backstop.wasm");
 }
 use backstop::{BackstopClient, BackstopContract};
 

@@ -2,15 +2,15 @@
 #![allow(unused)]
 #![no_main]
 
-use soroban_fixed_point_math::FixedPoint;
-use pool::{PoolState, PositionData, Request, RequestType};
 use libfuzzer_sys::fuzz_target;
-use soroban_sdk::testutils::arbitrary::{fuzz_catch_panic, arbitrary::{self, Arbitrary, Unstructured}};
-use soroban_sdk::{testutils::Address as _, vec, Address, token::TokenClient};
+use pool::{PoolState, PositionData, Request, RequestType};
+use soroban_fixed_point_math::FixedPoint;
+use soroban_sdk::testutils::arbitrary::arbitrary::{self, Arbitrary, Unstructured};
+use soroban_sdk::{testutils::Address as _, token::TokenClient, vec, Address};
 use test_suites::{
     assertions::assert_approx_eq_abs,
     create_fixture_with_data,
-    test_fixture::{PoolFixture, TestFixture, TokenIndex, SCALAR_7, SCALAR_12},
+    test_fixture::{PoolFixture, TestFixture, TokenIndex, SCALAR_12, SCALAR_7},
 };
 
 #[derive(Arbitrary, Debug)]
@@ -38,7 +38,15 @@ pub fn verify_contract_result<T>(env: &soroban_sdk::Env, r: &ContractResult<T>) 
                 let msg = "contract failed with InvalidAction - unexpected panic?";
                 eprintln!("{msg}");
                 eprintln!("recent events (10):");
-                for (i, event) in env.events().all().iter().rev().take(10).enumerate() {
+                for (i, event) in env
+                    .events()
+                    .all()
+                    .events()
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .enumerate()
+                {
                     eprintln!("{i}: {event:?}");
                 }
                 panic!("{msg}");
@@ -245,7 +253,7 @@ impl ClaimBackstop {
         let r = fixture.backstop.try_claim(
             &user,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
-            &user,
+            &0,
         );
         verify_contract_result(&fixture.env, &r);
     }
