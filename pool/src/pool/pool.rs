@@ -16,6 +16,7 @@ pub struct Pool {
     reserves_to_store: Vec<Address>,
     price_decimals: Option<u32>,
     prices: Map<Address, i128>,
+    price_valid_until: Map<Address, u64>,
 }
 
 impl Pool {
@@ -28,6 +29,7 @@ impl Pool {
             reserves_to_store: vec![e],
             price_decimals: None,
             prices: map![e],
+            price_valid_until: map![e],
         }
     }
 
@@ -117,17 +119,30 @@ impl Pool {
     /// ### Panics
     /// If the price is invalid due to being over a day old or being less than or equal to 0
     pub fn load_price(&mut self, e: &Env, asset: &Address) -> i128 {
-        if let Some(price) = self.prices.get(asset.clone()) {
-            return price;
+        self.load_price_with_valid_until(e, asset).0
+    }
+
+    /// Load a price and its inclusive one-day validity boundary.
+    pub fn load_price_with_valid_until(&mut self, e: &Env, asset: &Address) -> (i128, u64) {
+        if let (Some(price), Some(valid_until)) = (
+            self.prices.get(asset.clone()),
+            self.price_valid_until.get(asset.clone()),
+        ) {
+            return (price, valid_until);
         }
         let oracle_client = PriceFeedClient::new(e, &self.config.oracle);
         let oracle_asset = Asset::Stellar(asset.clone());
         let price_data = oracle_client.lastprice(&oracle_asset).unwrap_optimized();
-        if price_data.timestamp + 24 * 60 * 60 < e.ledger().timestamp() || price_data.price <= 0 {
+        let valid_until = price_data
+            .timestamp
+            .checked_add(24 * 60 * 60)
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        if valid_until < e.ledger().timestamp() || price_data.price <= 0 {
             panic_with_error!(e, PoolError::InvalidPrice);
         }
         self.prices.set(asset.clone(), price_data.price);
-        price_data.price
+        self.price_valid_until.set(asset.clone(), valid_until);
+        (price_data.price, valid_until)
     }
 }
 

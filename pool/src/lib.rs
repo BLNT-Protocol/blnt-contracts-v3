@@ -20,7 +20,8 @@ mod validator;
 
 pub use auctions::{
     AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtAuctionFill,
-    BadDebtContinuation, BadDebtLotQuote,
+    BadDebtContinuation, BadDebtLotQuote, InterestAuctionData, InterestAuctionFill,
+    InterestLotQuote, InterestReserveState,
 };
 pub use contract::*;
 pub use emissions::ReserveEmissionMetadata;

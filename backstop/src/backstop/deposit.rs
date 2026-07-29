@@ -2,7 +2,9 @@ use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{require_compatible_pool, tier_token, update_tier_totals, BackstopTier};
+use super::{
+    interest_tier_locked, require_compatible_pool, tier_token, update_tier_totals, BackstopTier,
+};
 
 /// Perform a deposit into one fixed backstop tier.
 pub fn execute_deposit_for_tier(
@@ -17,6 +19,9 @@ pub fn execute_deposit_for_tier(
         panic_with_error!(e, &BackstopError::BadRequest)
     }
     require_compatible_pool(e, pool_address);
+    if interest_tier_locked(e, tier, pool_address) {
+        panic_with_error!(e, BackstopError::InterestTierLocked);
+    }
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
 

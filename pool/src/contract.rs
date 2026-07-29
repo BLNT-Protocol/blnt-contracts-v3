@@ -1,5 +1,8 @@
 use crate::{
-    auctions::{self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill, BadDebtContinuation},
+    auctions::{
+        self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill, BadDebtContinuation,
+        InterestAuctionData, InterestAuctionFill, InterestReserveState,
+    },
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
@@ -266,16 +269,16 @@ pub trait Pool {
 
     /***** Auction / Liquidation Functions *****/
 
-    /// Create a new auction. Auctions are used to process liquidations, bad debt, and interest.
+    /// Create a user-liquidation auction.
+    ///
+    /// Bad-debt and interest auctions use their dedicated v3 entry points.
     ///
     /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
-    /// * `user` - The Address involved in the auction. This is generally the source of the assets being auctioned.
-    ///            For bad debt and interest auctions, this is expected to be the backstop address.
+    /// * `auction_type` - Must be 0 for a user-liquidation auction
+    /// * `user` - The Address whose positions are being liquidated
     /// * `bid` - The set of assets to include in the auction bid, or what the filler spends when filling the auction.
     /// * `lot` - The set of assets to include in the auction lot, or what the filler receives when filling the auction.
-    /// * `percent` - The percent of the assets to be auctioned off as a percentage (15 => 15%). For bad debt and interest auctions.
-    ///               this is expected to be 100.
+    /// * `percent` - The percent of the user's positions to auction (15 => 15%)
     fn new_auction(
         e: Env,
         auction_type: u32,
@@ -304,11 +307,31 @@ pub trait Pool {
     /// Release a prepared bad-debt auction after the inherited stale boundary.
     fn delete_stale_bad_debt_auction(e: Env);
 
+    /// Checkpoint a bounded reserve-credit batch and create one tier-specific
+    /// interest auction from the next qualifying cyclic tier.
+    fn new_interest_auction(
+        e: Env,
+        auction_id: BytesN<32>,
+        lot_assets: Vec<Address>,
+    ) -> InterestAuctionData;
+
+    /// Return this pool's single active tier-specific interest auction.
+    fn get_interest_auction(e: Env) -> InterestAuctionData;
+
+    /// Fill part or all of the active tier-specific interest auction.
+    fn fill_interest_auction(e: Env, filler: Address, percent: u32) -> InterestAuctionFill;
+
+    /// Return one reserve's pending tier-specific interest-credit state.
+    fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState;
+
+    /// Permissionlessly release an interest auction after 500 ledgers.
+    fn delete_stale_interest_auction(e: Env);
+
     /// Fetch an auction from the ledger. Returns the base auction. On fill, this will be scaled based on the
     /// number of blocks that have passed since the auction was created.
     ///
     /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
+    /// * `auction_type` - The legacy auction type
     /// * `user` - The Address involved in the auction
     ///
     /// ### Panics
@@ -320,7 +343,7 @@ pub trait Pool {
     /// and it should be re-created.
     ///
     /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
+    /// * `auction_type` - The legacy auction type
     /// * `user` - The Address involved in the auction
     ///
     /// ### Panics
@@ -645,12 +668,50 @@ impl Pool for PoolContract {
         PoolEvents::delete_bad_debt_auction(&e, auction_id);
     }
 
+    fn new_interest_auction(
+        e: Env,
+        auction_id: BytesN<32>,
+        lot_assets: Vec<Address>,
+    ) -> InterestAuctionData {
+        storage::extend_instance(&e);
+        let auction = auctions::create_interest_auction(&e, &auction_id, &lot_assets);
+        PoolEvents::new_interest_auction(&e, auction.clone());
+        auction
+    }
+
+    fn get_interest_auction(e: Env) -> InterestAuctionData {
+        auctions::get_interest_auction(&e)
+    }
+
+    fn fill_interest_auction(e: Env, filler: Address, percent: u32) -> InterestAuctionFill {
+        storage::extend_instance(&e);
+        let fill = auctions::fill_interest_auction(&e, &filler, percent);
+        PoolEvents::fill_interest_auction(&e, filler, percent, fill.clone());
+        fill
+    }
+
+    fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState {
+        auctions::interest_reserve_state(&e, &asset)
+    }
+
+    fn delete_stale_interest_auction(e: Env) {
+        storage::extend_instance(&e);
+        let auction_id = auctions::delete_stale_interest_auction(&e);
+        PoolEvents::delete_interest_auction(&e, auction_id);
+    }
+
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {
+        if auction_type == auctions::AuctionType::InterestAuction as u32 {
+            panic_with_error!(&e, PoolError::BadRequest);
+        }
         storage::get_auction(&e, &auction_type, &user)
     }
 
     fn del_auction(e: Env, auction_type: u32, user: Address) {
         storage::extend_instance(&e);
+        if auction_type == auctions::AuctionType::InterestAuction as u32 {
+            panic_with_error!(&e, PoolError::BadRequest);
+        }
 
         auctions::delete_stale_auction(&e, auction_type, &user);
 

@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use pool::{PoolClient, Request, RequestType};
+use pool::PoolClient;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{testutils::Address as _, vec, Address, Error, String};
 use test_suites::{
@@ -142,32 +142,15 @@ fn test_backstop_interest_auction_inflation_attack() {
     pool_client.gulp(&fixture.tokens[TokenIndex::XLM].address);
 
     // -> start and fill interest auction
-    pool_client.new_auction(
-        &2,
-        &fixture.backstop.address,
-        &vec![&fixture.env, fixture.lp.address.clone()],
+    pool_client.new_interest_auction(
+        &soroban_sdk::BytesN::from_array(&fixture.env, &[1; 32]),
         &vec![
             &fixture.env,
             fixture.tokens[TokenIndex::XLM].address.clone(),
         ],
-        &100,
     );
     fixture.jump_with_sequence(201 * 5);
-    fixture.lp.approve(
-        &sauron,
-        &fixture.backstop.address,
-        &inflation_amount,
-        &fixture.env.ledger().sequence(),
-    );
-    let fill_requests = vec![
-        &fixture.env,
-        Request {
-            request_type: RequestType::FillInterestAuction as u32,
-            address: fixture.backstop.address.clone(),
-            amount: 100,
-        },
-    ];
-    pool_client.submit(&sauron, &sauron, &sauron, &fill_requests);
+    pool_client.fill_interest_auction(&sauron, &100);
 
     // -> check new backstop share value
     let backstop_data = fixture.backstop.pool_data(&pool_address);

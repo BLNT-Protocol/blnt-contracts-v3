@@ -3,8 +3,8 @@ use crate::{
         self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
         preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
         user_queued_shares, user_total_shares, ActivationQuote, ActivationValues, BackstopTier,
-        BadDebtLotQuote, PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation,
-        TierTotals, Q4W,
+        BadDebtLotQuote, InterestLotQuote, PoolBackstopData, PoolStatusQuote, PoolTierState,
+        PoolValuation, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
     },
     constants::{
         ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
@@ -19,7 +19,7 @@ use crate::{
     storage,
 };
 use soroban_sdk::{
-    contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, Vec,
+    contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, Map, Vec,
 };
 
 /// ### Backstop
@@ -193,6 +193,45 @@ pub trait Backstop {
         pool: Address,
         auction_id: BytesN<32>,
     ) -> Option<BadDebtLotQuote>;
+
+    /// Quote one reserve-credit allocation from verified tier values.
+    fn quote_take_rate(e: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote;
+
+    /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
+    fn quote_pool_take_rate_batch(
+        e: Env,
+        pool: Address,
+        distributions: Map<Address, i128>,
+    ) -> Map<Address, TakeRateQuote>;
+
+    /// Reserve the selected tier-token bid for one pool interest auction.
+    fn commit_interest_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        tier: BackstopTier,
+        lot_value: i128,
+    ) -> InterestLotQuote;
+
+    /// Release a pool-authorized interest commitment.
+    fn release_interest_lot(e: Env, pool: Address, auction_id: BytesN<32>);
+
+    /// Donate one time-scaled bid and resize or complete its commitment.
+    fn settle_interest_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_bid_amount: i128,
+        bid_amount: i128,
+        from: Address,
+    ) -> Option<InterestLotQuote>;
+
+    /// Return one matching interest commitment quote.
+    fn interest_commitment(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+    ) -> Option<InterestLotQuote>;
 
     /********** Emissions **********/
 
@@ -604,6 +643,84 @@ impl Backstop for BackstopContract {
     ) -> Option<BadDebtLotQuote> {
         storage::extend_instance(&e);
         backstop::bad_debt_commitment(&e, &pool, &auction_id)
+    }
+
+    fn quote_take_rate(e: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote {
+        storage::extend_instance(&e);
+        backstop::quote_take_rate(&e, distribution, &values)
+    }
+
+    fn quote_pool_take_rate_batch(
+        e: Env,
+        pool: Address,
+        distributions: Map<Address, i128>,
+    ) -> Map<Address, TakeRateQuote> {
+        storage::extend_instance(&e);
+        backstop::quote_pool_take_rate_batch(&e, &pool, &distributions)
+    }
+
+    fn commit_interest_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        tier: BackstopTier,
+        lot_value: i128,
+    ) -> InterestLotQuote {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        let quote = backstop::commit_interest_lot(&e, &pool, &auction_id, tier, lot_value);
+        BackstopEvents::interest_lot_committed(&e, pool, auction_id, quote.clone());
+        quote
+    }
+
+    fn release_interest_lot(e: Env, pool: Address, auction_id: BytesN<32>) {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        backstop::release_interest_lot(&e, &pool, &auction_id);
+        BackstopEvents::interest_lot_released(&e, pool, auction_id);
+    }
+
+    fn settle_interest_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_bid_amount: i128,
+        bid_amount: i128,
+        from: Address,
+    ) -> Option<InterestLotQuote> {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        let tier = backstop::interest_commitment(&e, &pool, &auction_id)
+            .unwrap_or_else(|| panic_with_error!(&e, BackstopError::InterestCommitmentNotFound))
+            .tier;
+        let remaining = backstop::settle_interest_lot(
+            &e,
+            &pool,
+            &auction_id,
+            base_bid_amount,
+            bid_amount,
+            &from,
+        );
+        BackstopEvents::interest_lot_settled(
+            &e,
+            pool,
+            auction_id,
+            base_bid_amount,
+            bid_amount,
+            from,
+            tier,
+            remaining.is_none(),
+        );
+        remaining
+    }
+
+    fn interest_commitment(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+    ) -> Option<InterestLotQuote> {
+        storage::extend_instance(&e);
+        backstop::interest_commitment(&e, &pool, &auction_id)
     }
 
     /********** Emissions **********/

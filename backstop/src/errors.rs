@@ -39,4 +39,9 @@ pub enum BackstopError {
     BadDebtCommitmentExists = 1019,
     BadDebtCommitmentNotFound = 1020,
     NoBadDebtLossCapacity = 1021,
+    InterestCommitmentExists = 1022,
+    InterestCommitmentNotFound = 1023,
+    InvalidInterestLot = 1024,
+    InterestTierLocked = 1025,
+    InvalidTakeRateValue = 1026,
 }

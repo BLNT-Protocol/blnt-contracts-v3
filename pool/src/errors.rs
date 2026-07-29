@@ -56,4 +56,8 @@ pub enum PoolError {
     // Backstop Loss Record Errors
     InvalidLossAmount = 1225,
     TooManyLossRecords = 1226,
+
+    // Tier-specific interest auction errors
+    InvalidInterestAuction = 1227,
+    NoInterestAuctionCapacity = 1228,
 }

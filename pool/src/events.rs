@@ -1,6 +1,9 @@
 use soroban_sdk::{Address, BytesN, Env, Symbol, Vec};
 
-use crate::{AuctionData, BadDebtAuctionData, BadDebtAuctionFill, ReserveConfig};
+use crate::{
+    AuctionData, BadDebtAuctionData, BadDebtAuctionFill, InterestAuctionData, InterestAuctionFill,
+    ReserveConfig,
+};
 
 pub struct PoolEvents {}
 
@@ -17,6 +20,26 @@ impl PoolEvents {
 
     pub fn fill_bad_debt_auction(e: &Env, filler: Address, percent: u32, fill: BadDebtAuctionFill) {
         let topics = (Symbol::new(e, "fill_bad_debt_auction"),);
+        e.events().publish(topics, (filler, percent, fill));
+    }
+
+    pub fn new_interest_auction(e: &Env, auction: InterestAuctionData) {
+        let topics = (Symbol::new(e, "new_interest_auction"),);
+        e.events().publish(topics, auction);
+    }
+
+    pub fn delete_interest_auction(e: &Env, auction_id: BytesN<32>) {
+        let topics = (Symbol::new(e, "delete_interest_auction"),);
+        e.events().publish(topics, auction_id);
+    }
+
+    pub fn fill_interest_auction(
+        e: &Env,
+        filler: Address,
+        percent: u32,
+        fill: InterestAuctionFill,
+    ) {
+        let topics = (Symbol::new(e, "fill_interest_auction"),);
         e.events().publish(topics, (filler, percent, fill));
     }
 

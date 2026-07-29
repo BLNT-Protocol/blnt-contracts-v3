@@ -246,23 +246,9 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillInterestAuction => {
-                // Note: will fail if input address is not the backstop since there cannot be an interest auction for a different address in storage
-                let filled_auction = auctions::fill(
-                    e,
-                    pool,
-                    2,
-                    &request.address,
-                    from_state,
-                    request.amount as u64,
-                );
-                PoolEvents::fill_auction(
-                    e,
-                    2u32,
-                    request.address.clone(),
-                    from_state.address.clone(),
-                    request.amount,
-                    filled_auction,
-                );
+                // Preserve the v2 request discriminant but reject the legacy
+                // single-token path. V3 uses `fill_interest_auction`.
+                panic_with_error!(e, PoolError::BadRequest);
             }
             RequestType::DeleteLiquidationAuction => {
                 // Note: request object is ignored besides type
@@ -1752,7 +1738,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_interest_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_fill_interest_auction_rejects_legacy_request() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();

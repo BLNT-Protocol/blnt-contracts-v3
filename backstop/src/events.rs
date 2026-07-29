@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, BytesN, Env, Symbol};
 
-use crate::backstop::{BackstopTier, BadDebtLotQuote};
+use crate::backstop::{BackstopTier, BadDebtLotQuote, InterestLotQuote};
 
 pub struct BackstopEvents {}
 
@@ -35,6 +35,46 @@ impl BackstopEvents {
         e.events().publish(
             topics,
             (auction_id, base_lot_amount, lot_amount, to, tier, complete),
+        );
+    }
+
+    pub fn interest_lot_committed(
+        e: &Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        quote: InterestLotQuote,
+    ) {
+        let topics = (Symbol::new(e, "interest_lot_committed"), pool);
+        e.events().publish(topics, (auction_id, quote));
+    }
+
+    pub fn interest_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
+        let topics = (Symbol::new(e, "interest_lot_released"), pool);
+        e.events().publish(topics, auction_id);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn interest_lot_settled(
+        e: &Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_bid_amount: i128,
+        bid_amount: i128,
+        from: Address,
+        tier: BackstopTier,
+        complete: bool,
+    ) {
+        let topics = (Symbol::new(e, "interest_lot_settled"), pool);
+        e.events().publish(
+            topics,
+            (
+                auction_id,
+                base_bid_amount,
+                bid_amount,
+                from,
+                tier,
+                complete,
+            ),
         );
     }
 

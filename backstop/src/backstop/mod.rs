@@ -12,6 +12,13 @@ pub(crate) use bad_debt::{
     release_bad_debt_lot, settle_bad_debt_lot,
 };
 
+mod interest;
+pub(crate) use interest::{
+    commit_interest_lot, interest_commitment, interest_tier_locked, quote_pool_take_rate_batch,
+    quote_take_rate, release_interest_lot, settle_interest_lot,
+};
+pub use interest::{InterestLotQuote, TakeRateQuote, TakeRateValues};
+
 mod withdrawal;
 pub use withdrawal::{
     execute_dequeue_withdrawal_for_tier, execute_queue_withdrawal_for_tier,
