@@ -3,7 +3,8 @@ use crate::{
         self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
         preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
         user_queued_shares, user_total_shares, ActivationQuote, ActivationValues, BackstopTier,
-        PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation, TierTotals, Q4W,
+        BadDebtLotQuote, PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation,
+        TierTotals, Q4W,
     },
     constants::{
         ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
@@ -17,7 +18,9 @@ use crate::{
     events::BackstopEvents,
     storage,
 };
-use soroban_sdk::{contract, contractclient, contractimpl, panic_with_error, Address, Env, Vec};
+use soroban_sdk::{
+    contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, Vec,
+};
 
 /// ### Backstop
 ///
@@ -153,6 +156,33 @@ pub trait Backstop {
         current_status: u32,
         requested_status: u32,
     ) -> PoolStatusQuote;
+
+    /// Quote the first qualifying single-tier bad-debt lot.
+    fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote>;
+
+    /// Reserve one pool-authorized single-tier bad-debt lot.
+    fn commit_bad_debt_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        debt_value: i128,
+    ) -> BadDebtLotQuote;
+
+    /// Release a pool-authorized bad-debt commitment.
+    fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>);
+
+    /// Return token units reserved by a pool in one tier.
+    fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128;
+
+    /// Return the bounded number of active commitments for a pool.
+    fn pool_bad_debt_commitment_count(e: Env, pool: Address) -> u32;
+
+    /// Return one matching commitment quote.
+    fn bad_debt_commitment(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+    ) -> Option<BadDebtLotQuote>;
 
     /********** Emissions **********/
 
@@ -492,6 +522,50 @@ impl Backstop for BackstopContract {
             &valuation.active_values,
             &valuation.queued_values,
         )
+    }
+
+    fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote> {
+        storage::extend_instance(&e);
+        backstop::quote_bad_debt_lot(&e, &pool, debt_value)
+    }
+
+    fn commit_bad_debt_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        debt_value: i128,
+    ) -> BadDebtLotQuote {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        let quote = backstop::commit_bad_debt_lot(&e, &pool, &auction_id, debt_value);
+        BackstopEvents::bad_debt_lot_committed(&e, pool, auction_id, quote.clone());
+        quote
+    }
+
+    fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>) {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        backstop::release_bad_debt_lot(&e, &pool, &auction_id);
+        BackstopEvents::bad_debt_lot_released(&e, pool, auction_id);
+    }
+
+    fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128 {
+        storage::extend_instance(&e);
+        backstop::pool_tier_committed_assets(&e, tier, &pool)
+    }
+
+    fn pool_bad_debt_commitment_count(e: Env, pool: Address) -> u32 {
+        storage::extend_instance(&e);
+        backstop::pool_bad_debt_commitment_count(&e, &pool)
+    }
+
+    fn bad_debt_commitment(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+    ) -> Option<BadDebtLotQuote> {
+        storage::extend_instance(&e);
+        backstop::bad_debt_commitment(&e, &pool, &auction_id)
     }
 
     /********** Emissions **********/

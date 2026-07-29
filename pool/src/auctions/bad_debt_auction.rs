@@ -1,15 +1,202 @@
 use crate::{
     constants::SCALAR_7,
-    dependencies::BackstopClient,
+    dependencies::{BackstopClient, BackstopContractBadDebtLotQuote, BackstopContractTier},
     errors::PoolError,
-    pool::{check_and_handle_backstop_bad_debt, Pool, User},
+    pool::{backstop_liability, check_and_handle_backstop_bad_debt, Pool, User},
     storage,
 };
 use cast::i128;
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{map, panic_with_error, Address, Env, Vec};
+use soroban_sdk::{contracttype, map, panic_with_error, Address, BytesN, Env, Map, Vec};
 
 use super::{AuctionData, AuctionType};
+
+const ONE_DAY_LEDGERS: u32 = 17_280;
+const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
+const AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
+const AUCTION_STALE_LEDGERS: u32 = 500;
+
+/// The fixed v3 backstop tiers in first-loss order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopTier {
+    BlndUsdc,
+    BlndXlm,
+    Usdc,
+}
+
+/// Canonical single-tier lot returned by the configured backstop.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BadDebtLotQuote {
+    pub committed_value: i128,
+    pub debt_value: i128,
+    pub tier: BackstopTier,
+    pub lot_amount: i128,
+    pub unfilled_target_value: i128,
+    pub target_value: i128,
+    pub valid_until: u64,
+}
+
+/// Prepared single-tier bad-debt auction data. Filling is ported separately.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BadDebtAuctionData {
+    pub auction_id: BytesN<32>,
+    pub bid: Map<Address, i128>,
+    pub block: u32,
+    pub lot_quote: BadDebtLotQuote,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum PreparedBadDebtDataKey {
+    Auction,
+}
+
+/// Prepare a pool-authorized bad-debt lot without moving positions or assets.
+pub fn create_prepared_bad_debt_auction(
+    e: &Env,
+    auction_id: &BytesN<32>,
+    bid: &Vec<Address>,
+) -> BadDebtAuctionData {
+    let backstop = storage::get_backstop(e);
+    if has_prepared_bad_debt_auction(e)
+        || storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop)
+    {
+        panic_with_error!(e, PoolError::AuctionInProgress);
+    }
+
+    let mut pool = Pool::load(e);
+    if pool.config.max_positions <= bid.len() {
+        panic_with_error!(e, PoolError::MaxPositionsExceeded);
+    }
+    require_unique_bid_assets(e, bid);
+
+    let oracle_scalar = 10i128.pow(pool.load_price_decimals(e));
+    let backstop_positions = storage::get_user_positions(e, &backstop);
+    let mut bid_amounts = Map::<Address, i128>::new(e);
+    let mut debt_value = 0_i128;
+    for bid_asset in bid {
+        let reserve = pool.load_reserve(e, &bid_asset, false);
+        let liability_balance = backstop_positions
+            .liabilities
+            .get(reserve.config.index)
+            .unwrap_or(0);
+        if liability_balance <= 0 || backstop_liability(e, &reserve.asset) != liability_balance {
+            panic_with_error!(e, PoolError::InvalidBid);
+        }
+        let asset_to_base = pool.load_price(e, &reserve.asset);
+        let asset_balance = reserve.to_asset_from_d_token(e, liability_balance);
+        let asset_value = i128(asset_to_base).fixed_mul_floor(e, &asset_balance, &reserve.scalar);
+        debt_value = debt_value
+            .checked_add(asset_value)
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        bid_amounts.set(reserve.asset, liability_balance);
+    }
+
+    let debt_value_usdc = debt_value.fixed_mul_ceil(e, &SCALAR_7, &oracle_scalar);
+    if bid_amounts.is_empty() || debt_value_usdc <= 0 {
+        panic_with_error!(e, PoolError::InvalidBid);
+    }
+
+    let pool_address = e.current_contract_address();
+    let backstop_quote = BackstopClient::new(e, &backstop).commit_bad_debt_lot(
+        &pool_address,
+        auction_id,
+        &debt_value_usdc,
+    );
+    let lot_quote = convert_backstop_quote(backstop_quote);
+    if lot_quote.debt_value != debt_value_usdc
+        || lot_quote.committed_value <= 0
+        || lot_quote.lot_amount <= 0
+        || lot_quote.valid_until < e.ledger().timestamp()
+    {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+
+    let block = e
+        .ledger()
+        .sequence()
+        .checked_add(1)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let auction = BadDebtAuctionData {
+        auction_id: auction_id.clone(),
+        bid: bid_amounts,
+        block,
+        lot_quote,
+    };
+    set_prepared_bad_debt_auction(e, &auction);
+    auction
+}
+
+pub fn get_prepared_bad_debt_auction(e: &Env) -> BadDebtAuctionData {
+    e.storage()
+        .temporary()
+        .get(&PreparedBadDebtDataKey::Auction)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
+}
+
+pub fn delete_stale_prepared_bad_debt_auction(e: &Env) -> BytesN<32> {
+    let auction = get_prepared_bad_debt_auction(e);
+    let stale_at = auction
+        .block
+        .checked_add(AUCTION_STALE_LEDGERS)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    if e.ledger().sequence() < stale_at {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+
+    BackstopClient::new(e, &storage::get_backstop(e))
+        .release_bad_debt_lot(&e.current_contract_address(), &auction.auction_id);
+    e.storage()
+        .temporary()
+        .remove(&PreparedBadDebtDataKey::Auction);
+    auction.auction_id
+}
+
+pub fn has_prepared_bad_debt_auction(e: &Env) -> bool {
+    e.storage()
+        .temporary()
+        .has(&PreparedBadDebtDataKey::Auction)
+}
+
+fn set_prepared_bad_debt_auction(e: &Env, auction: &BadDebtAuctionData) {
+    e.storage()
+        .temporary()
+        .set(&PreparedBadDebtDataKey::Auction, auction);
+    e.storage().temporary().extend_ttl(
+        &PreparedBadDebtDataKey::Auction,
+        AUCTION_TTL_THRESHOLD,
+        AUCTION_TTL_BUMP,
+    );
+}
+
+fn require_unique_bid_assets(e: &Env, bid: &Vec<Address>) {
+    let mut assets = Map::<Address, bool>::new(e);
+    for asset in bid {
+        if assets.contains_key(asset.clone()) {
+            panic_with_error!(e, PoolError::BadRequest);
+        }
+        assets.set(asset, true);
+    }
+}
+
+fn convert_backstop_quote(quote: BackstopContractBadDebtLotQuote) -> BadDebtLotQuote {
+    BadDebtLotQuote {
+        committed_value: quote.committed_value,
+        debt_value: quote.debt_value,
+        tier: match quote.tier {
+            BackstopContractTier::BlndUsdc => BackstopTier::BlndUsdc,
+            BackstopContractTier::BlndXlm => BackstopTier::BlndXlm,
+            BackstopContractTier::Usdc => BackstopTier::Usdc,
+        },
+        lot_amount: quote.lot_amount,
+        unfilled_target_value: quote.unfilled_target_value,
+        target_value: quote.target_value,
+        valid_until: quote.valid_until,
+    }
+}
 
 pub fn create_bad_debt_auction_data(
     e: &Env,
@@ -25,7 +212,9 @@ pub fn create_bad_debt_auction_data(
     if percent != 100 {
         panic_with_error!(e, PoolError::BadRequest);
     }
-    if storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop) {
+    if has_prepared_bad_debt_auction(e)
+        || storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop)
+    {
         panic_with_error!(e, PoolError::AuctionInProgress);
     }
 
@@ -142,7 +331,7 @@ mod tests {
     use sep_40_oracle::testutils::Asset;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
-        vec, Symbol,
+        vec, Error, Symbol,
     };
 
     #[test]
@@ -938,6 +1127,116 @@ mod tests {
                 100,
             );
         });
+    }
+
+    #[test]
+    fn prepared_bad_debt_auction_commits_and_stale_delete_releases_lot() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 12_345,
+            protocol_version: 27,
+            sequence_number: 50,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let depositor = Address::generate(&e);
+        let pool_address = create_pool(&e);
+        let (blnd, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &admin);
+        let (usdc, usdc_client) = testutils::create_token_contract(&e, &admin);
+        let (lp_token, lp_token_client) = testutils::create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (backstop_address, backstop_client) =
+            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
+
+        blnd_client.mint(&depositor, &500_001_0000000);
+        blnd_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
+        usdc_client.mint(&depositor, &12_501_0000000);
+        usdc_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
+        lp_token_client.join_pool(
+            &50_000_0000000,
+            &vec![&e, 500_001_0000000, 12_501_0000000],
+            &depositor,
+        );
+        backstop_client.deposit_blnd_usdc(&depositor, &pool_address, &50_000_0000000);
+
+        let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
+        let (debt_asset, _) = testutils::create_token_contract(&e, &admin);
+        let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_config.index = 0;
+        reserve_data.last_time = 12_345;
+        testutils::create_reserve(
+            &e,
+            &pool_address,
+            &debt_asset,
+            &reserve_config,
+            &reserve_data,
+        );
+        oracle_client.set_data(
+            &admin,
+            &Asset::Other(Symbol::new(&e, "USD")),
+            &vec![&e, Asset::Stellar(debt_asset.clone())],
+            &7,
+            &300,
+        );
+        oracle_client.set_price_stable(&vec![&e, SCALAR_7]);
+
+        let positions = Positions {
+            collateral: map![&e],
+            liabilities: map![&e, (reserve_config.index, 50 * SCALAR_7)],
+            supply: map![&e],
+        };
+        let pool_config = PoolConfig {
+            oracle: oracle_id,
+            min_collateral: SCALAR_7,
+            bstop_rate: 0_1000000,
+            status: 0,
+            max_positions: 4,
+        };
+        let auction_id = BytesN::from_array(&e, &[7; 32]);
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(&e, &pool_config);
+            storage::set_user_positions(&e, &backstop_address, &positions);
+        });
+        let pool_client = crate::PoolClient::new(&e, &pool_address);
+        let auction = pool_client.new_bad_debt_auction(&auction_id, &vec![&e, debt_asset.clone()]);
+
+        assert_eq!(auction.auction_id, auction_id);
+        assert_eq!(auction.bid.get(debt_asset), Some(50 * SCALAR_7));
+        assert_eq!(auction.lot_quote.debt_value, 50 * SCALAR_7);
+        assert_eq!(auction.lot_quote.target_value, 60 * SCALAR_7);
+        assert_eq!(auction.lot_quote.tier, crate::BackstopTier::BlndUsdc);
+        assert_eq!(auction.lot_quote.lot_amount, 60 * SCALAR_7);
+        assert_eq!(
+            backstop_client.pool_bad_debt_commitment_count(&pool_address),
+            1
+        );
+        assert_eq!(
+            pool_client.backstop_loss_state(),
+            crate::BackstopLossState {
+                committed_loss_entries: 1,
+                liability_entries: 1,
+                unresolved_bad_debt_entries: 0,
+            }
+        );
+        assert_eq!(
+            pool_client.try_bad_debt(&backstop_address).err(),
+            Some(Ok(Error::from_contract_error(1212)))
+        );
+
+        e.ledger().set_sequence_number(auction.block + 500);
+        pool_client.delete_stale_bad_debt_auction();
+        assert!(!e.as_contract(&pool_address, || has_prepared_bad_debt_auction(&e)));
+        assert_eq!(
+            backstop_client.pool_bad_debt_commitment_count(&pool_address),
+            0
+        );
+        assert_eq!(pool_client.backstop_loss_state().committed_loss_entries, 0);
     }
 
     #[test]

@@ -36,4 +36,7 @@ pub enum BackstopError {
     StaleValuation = 1016,
     InvalidActivationValue = 1017,
     InvalidPoolStatus = 1018,
+    BadDebtCommitmentExists = 1019,
+    BadDebtCommitmentNotFound = 1020,
+    NoBadDebtLossCapacity = 1021,
 }

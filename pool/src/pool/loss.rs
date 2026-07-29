@@ -44,11 +44,23 @@ pub(crate) fn initialize_loss_records(e: &Env) {
 
 pub(crate) fn backstop_loss_state(e: &Env) -> BackstopLossState {
     let records = get_loss_records(e);
+    let committed_loss_entries = records
+        .committed_losses
+        .len()
+        .checked_add(u32::from(crate::auctions::has_prepared_bad_debt_auction(e)))
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
     BackstopLossState {
-        committed_loss_entries: records.committed_losses.len(),
+        committed_loss_entries,
         liability_entries: records.liabilities.len(),
         unresolved_bad_debt_entries: records.unresolved_bad_debt.len(),
     }
+}
+
+pub(crate) fn backstop_liability(e: &Env, reserve: &Address) -> i128 {
+    get_loss_records(e)
+        .liabilities
+        .get(reserve.clone())
+        .unwrap_or(0)
 }
 
 /// Mirror the configured backstop's existing v2 dToken positions into

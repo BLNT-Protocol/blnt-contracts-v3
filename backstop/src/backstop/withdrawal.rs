@@ -5,7 +5,7 @@ use crate::{
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
-use super::{tier_token, update_tier_totals, BackstopTier, Q4W};
+use super::{pool_bad_debt_commitment_count, tier_token, update_tier_totals, BackstopTier, Q4W};
 
 /// Perform a queue for withdrawal from one fixed backstop tier.
 pub fn execute_queue_withdrawal_for_tier(
@@ -73,7 +73,9 @@ pub fn execute_withdraw_for_tier(
     require_nonnegative(e, amount);
 
     let pool_client = PoolClient::new(e, pool_address);
-    if !pool_client.backstop_withdrawal_allowed(&e.current_contract_address()) {
+    if pool_bad_debt_commitment_count(e, pool_address) != 0
+        || !pool_client.backstop_withdrawal_allowed(&e.current_contract_address())
+    {
         panic_with_error!(e, &BackstopError::BadDebtExists);
     }
 

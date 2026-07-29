@@ -4,6 +4,14 @@ pub use deposit::execute_deposit_for_tier;
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
+mod bad_debt;
+pub use bad_debt::BadDebtLotQuote;
+pub(crate) use bad_debt::{
+    available_pool_tier_assets, bad_debt_commitment, commit_bad_debt_lot,
+    pool_bad_debt_commitment_count, pool_tier_committed_assets, quote_bad_debt_lot,
+    release_bad_debt_lot,
+};
+
 mod withdrawal;
 pub use withdrawal::{
     execute_dequeue_withdrawal_for_tier, execute_queue_withdrawal_for_tier,

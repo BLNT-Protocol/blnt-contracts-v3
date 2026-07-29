@@ -1,5 +1,5 @@
 use crate::{
-    auctions::{self, AuctionData},
+    auctions::{self, AuctionData, BadDebtAuctionData},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
@@ -7,7 +7,7 @@ use crate::{
     PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
 use soroban_sdk::{
-    contract, contractclient, contractimpl, panic_with_error, Address, Env, String, Vec,
+    contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, String, Vec,
 };
 
 /// ### Pool
@@ -284,6 +284,19 @@ pub trait Pool {
         lot: Vec<Address>,
         percent: u32,
     ) -> AuctionData;
+
+    /// Prepare a single-tier bad-debt auction from canonical backstop liabilities.
+    fn new_bad_debt_auction(
+        e: Env,
+        auction_id: BytesN<32>,
+        bid: Vec<Address>,
+    ) -> BadDebtAuctionData;
+
+    /// Return the prepared single-tier bad-debt auction.
+    fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData;
+
+    /// Release a prepared bad-debt auction after the inherited stale boundary.
+    fn delete_stale_bad_debt_auction(e: Env);
 
     /// Fetch an auction from the ledger. Returns the base auction. On fill, this will be scaled based on the
     /// number of blocks that have passed since the auction was created.
@@ -587,6 +600,27 @@ impl Pool for PoolContract {
 
         PoolEvents::new_auction(&e, auction_type, user, percent, auction_data.clone());
         auction_data
+    }
+
+    fn new_bad_debt_auction(
+        e: Env,
+        auction_id: BytesN<32>,
+        bid: Vec<Address>,
+    ) -> BadDebtAuctionData {
+        storage::extend_instance(&e);
+        let auction = auctions::create_prepared_bad_debt_auction(&e, &auction_id, &bid);
+        PoolEvents::new_bad_debt_auction(&e, auction.clone());
+        auction
+    }
+
+    fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData {
+        auctions::get_prepared_bad_debt_auction(&e)
+    }
+
+    fn delete_stale_bad_debt_auction(e: Env) {
+        storage::extend_instance(&e);
+        let auction_id = auctions::delete_stale_prepared_bad_debt_auction(&e);
+        PoolEvents::delete_bad_debt_auction(&e, auction_id);
     }
 
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {

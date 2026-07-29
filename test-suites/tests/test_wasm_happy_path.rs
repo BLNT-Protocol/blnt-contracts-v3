@@ -1,13 +1,99 @@
 #![cfg(test)]
 
-use pool::{BackstopLossState, Request, RequestType};
+use pool::{BackstopLossState, BackstopTier, PoolDataKey, Positions, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{testutils::Address as _, vec, Address};
+use soroban_sdk::{
+    contracttype, map,
+    testutils::{Address as _, Ledger},
+    vec, Address, BytesN, Map, Symbol,
+};
 use test_suites::{
     assertions::assert_approx_eq_abs,
     create_fixture_with_data,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
 };
+
+#[derive(Clone)]
+#[contracttype]
+struct CanonicalBackstopLossRecords {
+    committed_losses: Map<BytesN<32>, bool>,
+    liabilities: Map<Address, i128>,
+    unresolved_bad_debt: Map<Address, i128>,
+}
+
+#[test]
+fn test_wasm_prepares_and_releases_bad_debt_lot() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let debt = 50 * 10i128.pow(6);
+    let positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    let records = CanonicalBackstopLossRecords {
+        committed_losses: map![&fixture.env],
+        liabilities: map![&fixture.env, (stable.clone(), debt)],
+        unresolved_bad_debt: map![&fixture.env],
+    };
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+        fixture
+            .env
+            .storage()
+            .instance()
+            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
+    });
+
+    let auction_id = BytesN::from_array(&fixture.env, &[9; 32]);
+    let auction = pool_fixture
+        .pool
+        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable]);
+    assert_eq!(auction.auction_id, auction_id);
+    assert_eq!(auction.lot_quote.tier, BackstopTier::BlndUsdc);
+    assert!(auction.lot_quote.lot_amount > 0);
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
+        1
+    );
+    assert_eq!(
+        pool_fixture.pool.backstop_loss_state(),
+        BackstopLossState {
+            committed_loss_entries: 1,
+            liability_entries: 1,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 500);
+    pool_fixture.pool.delete_stale_bad_debt_auction();
+    assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
+        0
+    );
+    assert_eq!(
+        pool_fixture.pool.backstop_loss_state(),
+        BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 1,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+}
 
 /// Smoke test for managing positions, tracking emissions, and accruing interest
 #[test]

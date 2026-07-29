@@ -10,7 +10,9 @@ use crate::{
     storage,
 };
 
-use super::{require_registered_pool, tier_token, BackstopTier, PoolBalance};
+use super::{
+    available_pool_tier_assets, require_registered_pool, tier_token, BackstopTier, PoolBalance,
+};
 
 const STATUS_ADMIN_ACTIVE: u32 = 0;
 const STATUS_ACTIVE: u32 = 1;
@@ -217,7 +219,8 @@ pub fn quote_status_set(
 }
 
 fn pool_tier_asset_partition(e: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128) {
-    let balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    let mut balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    balance.tokens = available_pool_tier_assets(e, tier, pool);
     let active_shares = balance
         .shares
         .checked_sub(balance.q4w)

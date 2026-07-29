@@ -14,8 +14,9 @@ mod storage;
 mod testutils;
 
 pub use backstop::{
-    ActivationQuote, ActivationValues, BackstopTier, BlndEmissionValues, PoolBackstopData,
-    PoolBalance, PoolStatusQuote, PoolTierState, PoolValuation, TierTotals, UserBalance, Q4W,
+    ActivationQuote, ActivationValues, BackstopTier, BadDebtLotQuote, BlndEmissionValues,
+    PoolBackstopData, PoolBalance, PoolStatusQuote, PoolTierState, PoolValuation, TierTotals,
+    UserBalance, Q4W,
 };
 pub use contract::*;
 pub use dependencies::{

@@ -1,10 +1,25 @@
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{Address, BytesN, Env, Symbol};
 
-use crate::backstop::BackstopTier;
+use crate::backstop::{BackstopTier, BadDebtLotQuote};
 
 pub struct BackstopEvents {}
 
 impl BackstopEvents {
+    pub fn bad_debt_lot_committed(
+        e: &Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        quote: BadDebtLotQuote,
+    ) {
+        let topics = (Symbol::new(e, "bad_debt_lot_committed"), pool);
+        e.events().publish(topics, (auction_id, quote));
+    }
+
+    pub fn bad_debt_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
+        let topics = (Symbol::new(e, "bad_debt_lot_released"), pool);
+        e.events().publish(topics, auction_id);
+    }
+
     /// Emit a v2-shaped deposit event scoped to a v3 tier.
     pub fn tier_deposit(
         e: &Env,

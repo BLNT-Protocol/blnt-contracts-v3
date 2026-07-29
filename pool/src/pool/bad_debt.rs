@@ -12,7 +12,9 @@ pub fn bad_debt(e: &Env, user: &Address) {
     let backstop = storage::get_backstop(e);
 
     let had_bad_debt = if user == &backstop {
-        if storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop) {
+        if storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop)
+            || crate::auctions::has_prepared_bad_debt_auction(e)
+        {
             panic_with_error!(e, PoolError::AuctionInProgress);
         }
         check_and_handle_backstop_bad_debt(e, &mut pool, user, &mut user_state)
