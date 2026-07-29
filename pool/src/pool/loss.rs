@@ -63,6 +63,10 @@ pub(crate) fn backstop_liability(e: &Env, reserve: &Address) -> i128 {
         .unwrap_or(0)
 }
 
+pub(crate) fn backstop_liabilities(e: &Env) -> Map<Address, i128> {
+    get_loss_records(e).liabilities
+}
+
 /// Mirror the configured backstop's existing v2 dToken positions into
 /// reserve-addressed canonical loss records.
 pub(crate) fn sync_backstop_liabilities(e: &Env, positions: &Positions) {

@@ -88,6 +88,9 @@ pub fn update_emissions(
     user: &Address,
     balance: i128,
 ) {
+    if !storage::is_res_emis_configured(e, &res_token_id) {
+        return;
+    }
     if let Some(res_emis_data) = update_emission_data(e, res_token_id, supply, supply_scalar) {
         update_user_emissions(
             e,

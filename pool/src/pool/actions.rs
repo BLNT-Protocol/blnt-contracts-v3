@@ -1630,7 +1630,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_bad_debt_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_fill_bad_debt_auction_rejects_legacy_entrypoint() {
         let e = Env::default();
 
         e.mock_all_auths();

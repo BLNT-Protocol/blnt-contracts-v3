@@ -1,7 +1,7 @@
 #![cfg(test)]
-use pool::{Request, RequestType};
+use pool::{BackstopTier, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{testutils::Address as AddressTestTrait, vec, Address};
+use soroban_sdk::{testutils::Address as AddressTestTrait, vec, Address, BytesN};
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
     create_fixture_with_data,
@@ -206,30 +206,7 @@ fn test_backstop_and_pool_failure() {
     assert!(pool_backstop_data.tokens > 0);
     assert!(pool_backstop_data.shares > 0);
 
-    let bad_debt_auction = pool_fixture.pool.new_auction(
-        &1,
-        &fixture.backstop.address,
-        &vec![&fixture.env, stable.address.clone()],
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &100,
-    );
-    assert_eq!(bad_debt_auction.bid.len(), 1);
-    assert_eq!(
-        bad_debt_auction.bid.get_unchecked(stable.address.clone()),
-        bad_debt_1
-    );
-    assert_eq!(bad_debt_auction.lot.len(), 1);
-    assert_eq!(
-        bad_debt_auction
-            .lot
-            .get_unchecked(fixture.lp.address.clone()),
-        pool_backstop_data.tokens
-    );
-
-    // wait 200 blocks (plus 1 block for auction to start)
-    // to fill the full auction (take all backstop tokens)
-    fixture.jump_with_sequence(200 * 5 + 5);
-
+    let elrond_backstop_collateral = 100_000 * stable_scalar;
     pool_fixture.pool.submit(
         &elrond,
         &elrond,
@@ -237,14 +214,48 @@ fn test_backstop_and_pool_failure() {
         &vec![
             &fixture.env,
             Request {
-                request_type: RequestType::FillBadDebtAuction as u32,
-                address: fixture.backstop.address.clone(),
-                amount: 100,
+                request_type: RequestType::SupplyCollateral as u32,
+                address: stable.address.clone(),
+                amount: elrond_backstop_collateral,
             },
+        ],
+    );
+    let bad_debt_auction = pool_fixture.pool.new_bad_debt_auction(
+        &BytesN::from_array(&fixture.env, &[1; 32]),
+        &vec![&fixture.env, stable.address.clone()],
+    );
+    assert_eq!(bad_debt_auction.bid.len(), 1);
+    assert_eq!(
+        bad_debt_auction.bid.get_unchecked(stable.address.clone()),
+        bad_debt_1
+    );
+    assert_eq!(bad_debt_auction.lot_quote.tier, BackstopTier::BlndUsdc);
+    assert_eq!(
+        bad_debt_auction.lot_quote.lot_amount,
+        pool_backstop_data.tokens
+    );
+
+    // wait 200 blocks (plus 1 block for auction to start)
+    // to fill the full auction (take all backstop tokens)
+    fixture.jump_with_sequence(200 * 5 + 5);
+
+    let fill = pool_fixture.pool.fill_bad_debt_auction(&elrond, &100);
+    assert!(fill.complete);
+    pool_fixture.pool.submit(
+        &elrond,
+        &elrond,
+        &elrond,
+        &vec![
+            &fixture.env,
             Request {
                 request_type: RequestType::Repay as u32,
                 address: stable.address.clone(),
                 amount: elrond_stable_balance / 2,
+            },
+            Request {
+                request_type: RequestType::WithdrawCollateral as u32,
+                address: stable.address.clone(),
+                amount: elrond_backstop_collateral * 2,
             },
         ],
     );
@@ -321,8 +332,15 @@ fn test_backstop_and_pool_failure() {
     // d_rate is barely above 1
     assert_approx_eq_rel(bad_debt_2, 60_000 * stable_scalar, 0_001000);
 
-    // default the bad debt
-    pool_fixture.pool.bad_debt(&fixture.backstop.address);
+    // default the bad debt after every tier is verified below the minimum
+    let continuation = pool_fixture
+        .pool
+        .continue_bad_debt_resolution(&BytesN::from_array(&fixture.env, &[2; 32]));
+    assert!(!continuation.auction_created);
+    assert_eq!(
+        continuation.defaulted.get(stable.address.clone()),
+        Some(bad_debt_2)
+    );
 
     // check b_rate loss (7 decimals)
     let post_stable_reserve = pool_fixture.pool.get_reserve(&stable.address);

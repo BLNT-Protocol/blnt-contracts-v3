@@ -106,6 +106,7 @@ const BLND_TOKEN_KEY: &str = "BLNDTkn";
 const POOL_CONFIG_KEY: &str = "Config";
 const RES_LIST_KEY: &str = "ResList";
 const POOL_EMIS_KEY: &str = "PoolEmis";
+const RES_EMIS_CONFIGURED_KEY: &str = "ResEmisSet";
 
 #[derive(Clone)]
 #[contracttype]
@@ -519,12 +520,49 @@ pub fn get_res_emis_data(e: &Env, res_token_index: &u32) -> Option<ReserveEmissi
     )
 }
 
+/// Return whether a reserve stream has ever had emission data.
+///
+/// The compact index avoids a separate negative ledger read for every
+/// unconfigured stream during bounded multi-reserve operations. Bits remain
+/// set after an allocation changes so accrued historical emissions continue
+/// to use the inherited update path. The index is instance storage so it
+/// cannot expire independently from the pool contract while persistent
+/// emission data remains live.
+pub fn is_res_emis_configured(e: &Env, res_token_index: &u32) -> bool {
+    if *res_token_index >= 2 * MAX_RESERVES {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let configured = e
+        .storage()
+        .instance()
+        .get::<Symbol, u128>(&Symbol::new(e, RES_EMIS_CONFIGURED_KEY))
+        .unwrap_or(0);
+    configured & (1_u128 << *res_token_index) != 0
+}
+
 /// Set the emission data for the reserve b or d token
 ///
 /// ### Arguments
 /// * `res_token_index` - The d/bToken index for the reserve
 /// * `res_emis_data` - The new emission data for the reserve token
 pub fn set_res_emis_data(e: &Env, res_token_index: &u32, res_emis_data: &ReserveEmissionData) {
+    if *res_token_index >= 2 * MAX_RESERVES {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let configured_key = Symbol::new(e, RES_EMIS_CONFIGURED_KEY);
+    let mut configured = e
+        .storage()
+        .instance()
+        .get::<Symbol, u128>(&configured_key)
+        .unwrap_or(0);
+    let mask = 1_u128 << *res_token_index;
+    if configured & mask == 0 {
+        configured |= mask;
+        e.storage()
+            .instance()
+            .set::<Symbol, u128>(&configured_key, &configured);
+    }
+
     let key = PoolDataKey::EmisData(*res_token_index);
     e.storage()
         .persistent()
@@ -665,4 +703,42 @@ pub fn del_auction(e: &Env, auction_type: &u32, user: &Address) {
         auct_type: *auction_type,
     });
     e.storage().temporary().remove(&key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutils;
+
+    #[test]
+    fn reserve_emission_configuration_index_is_instance_bound() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+
+        e.as_contract(&pool, || {
+            let stream = 59;
+            assert!(!is_res_emis_configured(&e, &stream));
+
+            set_res_emis_data(
+                &e,
+                &stream,
+                &ReserveEmissionData {
+                    expiration: 100,
+                    eps: 1,
+                    index: 0,
+                    last_time: 0,
+                },
+            );
+
+            assert!(is_res_emis_configured(&e, &stream));
+            assert!(e
+                .storage()
+                .instance()
+                .has(&Symbol::new(&e, RES_EMIS_CONFIGURED_KEY)));
+            assert!(!e
+                .storage()
+                .persistent()
+                .has(&Symbol::new(&e, RES_EMIS_CONFIGURED_KEY)));
+        });
+    }
 }

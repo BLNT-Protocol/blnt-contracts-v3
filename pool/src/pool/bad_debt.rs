@@ -12,12 +12,9 @@ pub fn bad_debt(e: &Env, user: &Address) {
     let backstop = storage::get_backstop(e);
 
     let had_bad_debt = if user == &backstop {
-        if storage::has_auction(e, &(AuctionType::BadDebtAuction as u32), &backstop)
-            || crate::auctions::has_prepared_bad_debt_auction(e)
-        {
-            panic_with_error!(e, PoolError::AuctionInProgress);
-        }
-        check_and_handle_backstop_bad_debt(e, &mut pool, user, &mut user_state)
+        // Backstop liabilities must use the v3 tier waterfall. The inherited
+        // v2 threshold default would bypass verified exhaustion of all tiers.
+        panic_with_error!(e, PoolError::BadRequest);
     } else {
         if storage::has_auction(e, &(AuctionType::UserLiquidation as u32), &user) {
             panic_with_error!(e, PoolError::AuctionInProgress);
@@ -99,6 +96,7 @@ pub fn check_and_handle_user_bad_debt(
 ///
 /// ### Returns
 /// * `true` if the backstop's bad debt was defaulted, `false` otherwise
+#[allow(dead_code)]
 pub fn check_and_handle_backstop_bad_debt(
     e: &Env,
     pool: &mut Pool,
@@ -471,7 +469,8 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_debt_backstop() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_bad_debt_backstop_rejects_legacy_default() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths();
@@ -561,8 +560,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1212)")]
-    fn test_bad_debt_backstop_ongoing_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_bad_debt_backstop_ongoing_auction_rejects_legacy_default() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths();

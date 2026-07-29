@@ -54,6 +54,7 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
 ///         - 0_0000100 = ~10%
 ///         - 0_0000003 = ~5%
 ///         - 0_0000000 = ~0-4%
+#[allow(dead_code)]
 pub fn calc_pool_backstop_threshold(pool_backstop_data: &PoolBackstopData) -> i128 {
     // @dev: Calculation for pools product constant of underlying will often overflow i128
     //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the

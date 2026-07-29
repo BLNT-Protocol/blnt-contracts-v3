@@ -19,7 +19,8 @@ mod testutils;
 mod validator;
 
 pub use auctions::{
-    AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtAuctionFill, BadDebtLotQuote,
+    AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtAuctionFill,
+    BadDebtContinuation, BadDebtLotQuote,
 };
 pub use contract::*;
 pub use emissions::ReserveEmissionMetadata;

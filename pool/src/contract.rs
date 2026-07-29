@@ -1,5 +1,5 @@
 use crate::{
-    auctions::{self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill},
+    auctions::{self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill, BadDebtContinuation},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
@@ -297,6 +297,9 @@ pub trait Pool {
 
     /// Fill part or all of the prepared single-tier bad-debt auction.
     fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill;
+
+    /// Continue the waterfall or default residual debt after verified exhaustion.
+    fn continue_bad_debt_resolution(e: Env, auction_id: BytesN<32>) -> BadDebtContinuation;
 
     /// Release a prepared bad-debt auction after the inherited stale boundary.
     fn delete_stale_bad_debt_auction(e: Env);
@@ -625,6 +628,15 @@ impl Pool for PoolContract {
         let fill = auctions::fill_prepared_bad_debt_auction(&e, &filler, percent);
         PoolEvents::fill_bad_debt_auction(&e, filler, percent, fill.clone());
         fill
+    }
+
+    fn continue_bad_debt_resolution(e: Env, auction_id: BytesN<32>) -> BadDebtContinuation {
+        storage::extend_instance(&e);
+        let continuation = auctions::continue_bad_debt_resolution(&e, &auction_id);
+        if continuation.auction_created {
+            PoolEvents::new_bad_debt_auction(&e, auctions::get_prepared_bad_debt_auction(&e));
+        }
+        continuation
     }
 
     fn delete_stale_bad_debt_auction(e: Env) {

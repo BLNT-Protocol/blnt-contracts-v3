@@ -10,7 +10,6 @@ use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
 use super::{
     backstop_interest_auction::{create_interest_auction_data, fill_interest_auction},
-    bad_debt_auction::{create_bad_debt_auction_data, fill_bad_debt_auction},
     user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction},
 };
 
@@ -86,7 +85,9 @@ pub fn create_auction(
     let auction_type_enum = AuctionType::from_u32(e, auction_type);
     let auction_data = match auction_type_enum {
         AuctionType::UserLiquidation => create_user_liq_auction_data(e, user, bid, lot, percent),
-        AuctionType::BadDebtAuction => create_bad_debt_auction_data(e, user, bid, lot, percent),
+        // V3 bad debt requires a pool/backstop commitment and must use the
+        // dedicated single-tier lifecycle.
+        AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
         AuctionType::InterestAuction => create_interest_auction_data(e, user, bid, lot, percent),
     };
     storage::set_auction(e, &auction_type, user, &auction_data);
@@ -155,9 +156,8 @@ pub fn fill(
         AuctionType::UserLiquidation => {
             fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill)
         }
-        AuctionType::BadDebtAuction => {
-            fill_bad_debt_auction(e, pool, &to_fill_auction, filler_state, is_full_fill);
-        }
+        // Legacy v2 bad-debt auctions are not a valid v3 settlement path.
+        AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
         AuctionType::InterestAuction => {
             fill_interest_auction(e, pool, &to_fill_auction, &filler_state.address)
         }
@@ -295,7 +295,8 @@ mod tests {
     };
 
     #[test]
-    fn test_create_bad_debt_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_create_bad_debt_auction_rejects_legacy_entrypoint() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
