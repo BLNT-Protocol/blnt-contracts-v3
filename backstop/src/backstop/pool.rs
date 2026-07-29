@@ -3,7 +3,7 @@ use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Addre
 
 use crate::{
     constants::SCALAR_7,
-    dependencies::{CometClient, PoolFactoryClient},
+    dependencies::{CometClient, PoolClient, PoolFactoryClient},
     errors::BackstopError,
     storage,
 };
@@ -31,10 +31,10 @@ pub fn load_pool_backstop_data(e: &Env, address: &Address) -> PoolBackstopData {
         0
     };
 
-    let backstop_token = storage::get_backstop_token(e);
+    let blnd_usdc_token = storage::get_blnd_usdc_token(e);
     let blnd_token = storage::get_blnd_token(e);
     let usdc_token = storage::get_usdc_token(e);
-    let comet_client = CometClient::new(e, &backstop_token);
+    let comet_client = CometClient::new(e, &blnd_usdc_token);
     let total_comet_shares = comet_client.get_total_supply();
     let total_blnd = comet_client.get_balance(&blnd_token);
     let total_usdc = comet_client.get_balance(&usdc_token);
@@ -97,6 +97,16 @@ pub fn require_is_from_pool_factory(e: &Env, address: &Address, balance: i128) {
             panic_with_error!(e, BackstopError::NotPool);
         }
     }
+}
+
+/// Verify a pool is registered and exposes the permanent fail-closed
+/// withdrawal callback before accepting attributed custody.
+pub fn require_compatible_pool(e: &Env, address: &Address) {
+    let pool_factory_client = PoolFactoryClient::new(e, &storage::get_pool_factory(e));
+    if !pool_factory_client.is_pool(address) {
+        panic_with_error!(e, BackstopError::NotPool);
+    }
+    let _ = PoolClient::new(e, address).backstop_withdrawal_allowed(&e.current_contract_address());
 }
 
 /// Calculate the threshold for the pool's backstop balance
@@ -361,7 +371,7 @@ mod tests {
         let pool_address = Address::generate(&e);
 
         let (_, mock_pool_factory) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory.set_pool(&pool_address);
+        mock_pool_factory.set_mock_pool(&pool_address);
 
         e.as_contract(&backstop_address, || {
             require_is_from_pool_factory(&e, &pool_address, 0);
@@ -394,7 +404,7 @@ mod tests {
         let not_pool_address = Address::generate(&e);
 
         let (_, mock_pool_factory) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory.set_pool(&pool_address);
+        mock_pool_factory.set_mock_pool(&pool_address);
 
         e.as_contract(&backstop_address, || {
             require_is_from_pool_factory(&e, &not_pool_address, 0);

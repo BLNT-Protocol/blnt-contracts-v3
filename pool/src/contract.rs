@@ -100,6 +100,10 @@ pub trait Pool {
     /// * `address` - The address to fetch positions for
     fn get_positions(e: Env, address: Address) -> Positions;
 
+    /// Return true only for this pool's configured backstop and only while the
+    /// backstop has no outstanding liabilities in this pool.
+    fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool;
+
     /// Submit a set of requests to the pool where `from` takes on the position, `spender` sends any
     /// required tokens to the pool and `to` receives any tokens sent from the pool.
     ///
@@ -449,6 +453,14 @@ impl Pool for PoolContract {
         storage::get_user_positions(&e, &address)
     }
 
+    fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool {
+        storage::extend_instance(&e);
+        backstop == storage::get_backstop(&e)
+            && storage::get_user_positions(&e, &backstop)
+                .liabilities
+                .is_empty()
+    }
+
     fn submit(
         e: Env,
         from: Address,
@@ -593,5 +605,33 @@ impl Pool for PoolContract {
         storage::extend_instance(&e);
 
         pool::bad_debt(&e, &user);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use soroban_sdk::{testutils::Address as _, Address};
+
+    use crate::{pool::Positions, storage, testutils::create_pool};
+
+    use super::*;
+
+    #[test]
+    fn backstop_withdrawal_callback_checks_identity_and_liabilities() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let pool = create_pool(&e);
+        let client = PoolClient::new(&e, &pool);
+        let backstop = e.as_contract(&pool, || storage::get_backstop(&e));
+        assert!(client.backstop_withdrawal_allowed(&backstop));
+        assert!(!client.backstop_withdrawal_allowed(&Address::generate(&e)));
+
+        let mut positions = Positions::env_default(&e);
+        positions.liabilities.set(0, 1);
+        e.as_contract(&pool, || {
+            storage::set_user_positions(&e, &backstop, &positions);
+        });
+        assert!(!client.backstop_withdrawal_allowed(&backstop));
     }
 }

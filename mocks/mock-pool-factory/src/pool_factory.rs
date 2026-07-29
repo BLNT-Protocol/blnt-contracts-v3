@@ -7,12 +7,19 @@ use soroban_sdk::{
     String, Symbol,
 };
 
+use mock_pool::{MockPool, MockPoolClient};
 use pool::PoolContract;
 
 #[contract]
 pub struct MockPoolFactory;
 
 pub trait MockPoolFactoryTrait {
+    /// Fetch the immutable backstop used by pools from this factory.
+    fn backstop(e: Env) -> Address;
+
+    /// Fetch the immutable pool WASM hash used by this factory.
+    fn pool_wasm_hash(e: Env) -> BytesN<32>;
+
     /// Deploys and initializes a lending pool
     ///
     /// # Arguments
@@ -46,6 +53,9 @@ pub trait MockPoolFactoryTrait {
     /// ### Arguments
     /// * `pool_address` - The pool address to set
     fn set_pool(e: Env, pool_address: Address);
+
+    /// Mock only: register a compatible mock pool and mark it deployed.
+    fn set_mock_pool(e: Env, pool_address: Address);
 }
 
 #[contractimpl]
@@ -61,6 +71,14 @@ impl MockPoolFactory {
 
 #[contractimpl]
 impl MockPoolFactoryTrait for MockPoolFactory {
+    fn backstop(e: Env) -> Address {
+        storage::get_pool_init_meta(&e).backstop
+    }
+
+    fn pool_wasm_hash(e: Env) -> BytesN<32> {
+        storage::get_pool_init_meta(&e).pool_hash
+    }
+
     fn deploy(
         e: Env,
         admin: Address,
@@ -108,6 +126,13 @@ impl MockPoolFactoryTrait for MockPoolFactory {
     }
 
     fn set_pool(e: Env, pool_address: Address) {
+        storage::set_deployed(&e, &pool_address);
+    }
+
+    fn set_mock_pool(e: Env, pool_address: Address) {
+        let backstop = storage::get_pool_init_meta(&e).backstop;
+        e.register_at(&pool_address, MockPool, ());
+        MockPoolClient::new(&e, &pool_address).set_backstop(&backstop);
         storage::set_deployed(&e, &pool_address);
     }
 }

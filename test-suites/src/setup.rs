@@ -76,7 +76,7 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     // deposit into backstop, add to reward zone
     fixture
         .backstop
-        .deposit(&frodo, &pool_fixture.pool.address, &(50_000 * SCALAR_7));
+        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &(50_000 * SCALAR_7));
     fixture
         .backstop
         .add_reward(&pool_fixture.pool.address, &None);

@@ -1,3 +1,8 @@
-use soroban_sdk::contractimport;
+use soroban_sdk::{contractclient, Address, Env};
 
-contractimport!(file = "../target/wasm32v1-none/release/pool_factory.wasm");
+#[contractclient(name = "PoolFactoryClient")]
+#[allow(dead_code)]
+pub trait PoolFactory {
+    fn backstop(e: Env) -> Address;
+    fn is_pool(e: Env, pool: Address) -> bool;
+}

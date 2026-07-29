@@ -35,6 +35,8 @@ fn test_pool_factory() {
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
+    assert_eq!(pool_factory_client.backstop(), backstop_id);
+    assert_eq!(pool_factory_client.pool_wasm_hash(), wasm_hash);
 
     let name1 = String::from_str(&e, "pool1");
     let name2 = String::from_str(&e, "pool2");

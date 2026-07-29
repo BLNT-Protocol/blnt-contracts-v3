@@ -1,77 +1,63 @@
 use soroban_sdk::{Address, Env, Symbol};
 
+use crate::backstop::BackstopTier;
+
 pub struct BackstopEvents {}
 
 impl BackstopEvents {
-    /// Emitted when tokens are deposited into a backstop
-    ///
-    /// - topics - `["deposit", pool_address: Address, from: Address]`
-    /// - data - `[tokens_in: i128, backstop_shares_minted: i128]`
-    ///
-    /// ### Arguments
-    /// * `pool_address` - The address of the pool
-    /// * `from` - The address of the user depositing tokens
-    /// * `tokens_in` - The amount of tokens sent to the backstop
-    /// * `backstop_shares_minted` - The amount of backstop shares minted
-    pub fn deposit(
+    /// Emit a v2-shaped deposit event scoped to a v3 tier.
+    pub fn tier_deposit(
         e: &Env,
+        tier: BackstopTier,
         pool_address: Address,
         from: Address,
         tokens_in: i128,
-        backstop_shares_minted: i128,
+        shares_minted: i128,
     ) {
-        let topics = (Symbol::new(e, "deposit"), pool_address, from);
-        e.events()
-            .publish(topics, (tokens_in, backstop_shares_minted));
+        let topics = (Symbol::new(e, "deposit"), tier, pool_address, from);
+        e.events().publish(topics, (tokens_in, shares_minted));
     }
 
-    /// Emitted when a withdrawal is queued
-    ///
-    /// - topics - `["queue_withdrawal", pool_address: Address, from: Address]`
-    /// - data - `[amount: i128, expiration: u64]`
-    ///
-    /// ### Arguments
-    /// * `pool_address` - The address of the pool
-    /// * `from` - The address of the user queuing the withdrawal
-    /// * `amount` - The amount of shares being queued for withdrawal
-    /// * `expiration` - The expiration timestamp of the withdrawal request
-    pub fn queue_withdrawal(
+    /// Emit a v2-shaped queue event scoped to a v3 tier.
+    pub fn tier_queue_withdrawal(
         e: &Env,
+        tier: BackstopTier,
         pool_address: Address,
         from: Address,
         amount: i128,
         expiration: u64,
     ) {
-        let topics = (Symbol::new(e, "queue_withdrawal"), pool_address, from);
+        let topics = (Symbol::new(e, "queue_withdrawal"), tier, pool_address, from);
         e.events().publish(topics, (amount, expiration));
     }
 
-    /// Emitted when a withdrawal is dequeued
-    ///
-    /// - topics - `["dequeue_withdrawal", pool_address: Address, from: Address]`
-    /// - data - `[amount: i128]`
-    ///
-    /// ### Arguments
-    /// * `pool_address` - The address of the pool
-    /// * `from` - The address of the user dequeuing the withdrawal
-    /// * `amount` - The amount of shares being dequeued
-    pub fn dequeue_withdrawal(e: &Env, pool_address: Address, from: Address, amount: i128) {
-        let topics = (Symbol::new(e, "dequeue_withdrawal"), pool_address, from);
+    /// Emit a v2-shaped dequeue event scoped to a v3 tier.
+    pub fn tier_dequeue_withdrawal(
+        e: &Env,
+        tier: BackstopTier,
+        pool_address: Address,
+        from: Address,
+        amount: i128,
+    ) {
+        let topics = (
+            Symbol::new(e, "dequeue_withdrawal"),
+            tier,
+            pool_address,
+            from,
+        );
         e.events().publish(topics, amount);
     }
 
-    /// Emitted when tokens are withdrawn from the backstop
-    ///
-    /// - topics - `["withdraw", pool_address: Address, from: Address]`
-    /// - data - `[amount: i128, tokens_out: i128]`
-    ///
-    /// ### Arguments
-    /// * `pool_address` - The address of the pool
-    /// * `from` - The address of the user withdrawing tokens
-    /// * `amount` - The amount of backstop shares being burned
-    /// * `tokens_out` - The amount of tokens being withdrawn
-    pub fn withdraw(e: &Env, pool_address: Address, from: Address, amount: i128, tokens_out: i128) {
-        let topics = (Symbol::new(e, "withdraw"), pool_address, from);
+    /// Emit a v2-shaped withdrawal event scoped to a v3 tier.
+    pub fn tier_withdraw(
+        e: &Env,
+        tier: BackstopTier,
+        pool_address: Address,
+        from: Address,
+        amount: i128,
+        tokens_out: i128,
+    ) {
+        let topics = (Symbol::new(e, "withdraw"), tier, pool_address, from);
         e.events().publish(topics, (amount, tokens_out));
     }
 

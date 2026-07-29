@@ -72,7 +72,7 @@ fn test_pool_interest() {
     );
     fixture
         .backstop
-        .deposit(&whale, &pool_client.address, &(50_000 * SCALAR_7));
+        .deposit_blnd_usdc(&whale, &pool_client.address, &(50_000 * SCALAR_7));
     pool_client.set_status(&0);
     fixture.jump_with_sequence(60);
 

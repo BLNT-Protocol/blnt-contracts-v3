@@ -36,18 +36,23 @@ fn test_backstop_rz_changes_handle_emissions() {
     );
     fixture
         .backstop
-        .deposit(&sam, &pool_fixture.pool.address, &(12500 * SCALAR_7));
-    fixture
-        .backstop
-        .queue_withdrawal(frodo, &pool_fixture.pool.address, &(45000 * SCALAR_7));
+        .deposit_blnd_usdc(&sam, &pool_fixture.pool.address, &(12500 * SCALAR_7));
+    fixture.backstop.queue_blnd_usdc_withdrawal(
+        frodo,
+        &pool_fixture.pool.address,
+        &(45000 * SCALAR_7),
+    );
 
     fixture.jump(60 * 60 * 24 * 21);
     fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
-    fixture
-        .backstop
-        .withdraw(frodo, &pool_fixture.pool.address, &(45000 * SCALAR_7));
+    fixture.backstop.withdraw_blnd_usdc(
+        frodo,
+        &pool_fixture.pool.address,
+        &(45000 * SCALAR_7),
+        frodo,
+    );
 
     fixture.backstop.remove_reward(&pool_fixture.pool.address);
 
@@ -81,7 +86,7 @@ fn test_backstop_rz_changes_handle_emissions() {
 
     fixture
         .backstop
-        .deposit(frodo, &pool_fixture.pool.address, &(50000 * SCALAR_7));
+        .deposit_blnd_usdc(frodo, &pool_fixture.pool.address, &(50000 * SCALAR_7));
 
     fixture
         .backstop
@@ -136,7 +141,7 @@ fn test_backstop_full_rz_under_limits() {
         );
         fixture
             .backstop
-            .deposit(&sam, &pool_address, &per_pool_lp_deposit);
+            .deposit_blnd_usdc(&sam, &pool_address, &per_pool_lp_deposit);
         fixture.backstop.add_reward(&pool_address, &None);
         pools.push_back(pool_address);
     }

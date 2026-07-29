@@ -1,10 +1,11 @@
 #![cfg(test)]
 
-use backstop::{BackstopClient, BackstopContract};
+use backstop::{BackstopClient, BackstopContract, BackstopTier};
+use mock_pool_factory::{MockPoolFactory, PoolInitMeta};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
-    vec, Address, Env, IntoVal, Symbol, Val, Vec,
+    vec, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, event_from_end},
@@ -64,7 +65,9 @@ fn test_backstop() {
 
     // Sam deposits 12.5k backstop tokens
     let amount = 12_500 * SCALAR_7;
-    let result = fixture.backstop.deposit(&sam, &pool.address, &amount);
+    let result = fixture
+        .backstop
+        .deposit_blnd_usdc(&sam, &pool.address, &amount);
     sam_bstop_token_balance -= amount;
     bstop_bstop_token_balance += amount;
     assert_eq!(
@@ -74,7 +77,7 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "deposit"),
+                    Symbol::new(&fixture.env, "deposit_blnd_usdc"),
                     vec![
                         &fixture.env,
                         sam.to_val(),
@@ -112,6 +115,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "deposit"),
+                    BackstopTier::BlndUsdc,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -222,7 +226,7 @@ fn test_backstop() {
     let amount = 12_500 * SCALAR_7; // shares
     let result = fixture
         .backstop
-        .queue_withdrawal(&sam, &pool.address, &amount);
+        .queue_blnd_usdc_withdrawal(&sam, &pool.address, &amount);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -230,7 +234,7 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "queue_withdrawal"),
+                    Symbol::new(&fixture.env, "queue_blnd_usdc_withdrawal"),
                     vec![
                         &fixture.env,
                         sam.to_val(),
@@ -256,6 +260,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "queue_withdrawal"),
+                    BackstopTier::BlndUsdc,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -286,7 +291,7 @@ fn test_backstop() {
     let amount = 6_250 * SCALAR_7; // shares
     fixture
         .backstop
-        .dequeue_withdrawal(&sam, &pool.address, &amount);
+        .dequeue_blnd_usdc_withdrawal(&sam, &pool.address, &amount);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -294,7 +299,7 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "dequeue_withdrawal"),
+                    Symbol::new(&fixture.env, "dequeue_blnd_usdc_withdrawal"),
                     vec![
                         &fixture.env,
                         sam.to_val(),
@@ -315,6 +320,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "dequeue_withdrawal"),
+                    BackstopTier::BlndUsdc,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -382,7 +388,9 @@ fn test_backstop() {
     fixture.jump(60 * 60 * 24 * 16 + 1);
     // Sam withdraws the queue position
     let amount = 6_250 * SCALAR_7; // shares
-    let result = fixture.backstop.withdraw(&sam, &pool.address, &amount);
+    let result = fixture
+        .backstop
+        .withdraw_blnd_usdc(&sam, &pool.address, &amount, &sam);
     sam_bstop_token_balance += result; // sam caught 20% of 1k profit and is withdrawing half his position
     bstop_bstop_token_balance -= result;
     assert_eq!(
@@ -392,12 +400,13 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "withdraw"),
+                    Symbol::new(&fixture.env, "withdraw_blnd_usdc"),
                     vec![
                         &fixture.env,
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env),
+                        sam.to_val(),
                     ]
                 )),
                 sub_invocations: std::vec![]
@@ -418,6 +427,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "withdraw"),
+                    BackstopTier::BlndUsdc,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -470,6 +480,18 @@ fn test_backstop() {
     let emitted_blnd_2 = ((14 * 24 * 60 * 60 + 1) * SCALAR_7)
         .fixed_mul_floor(emission_share_2, SCALAR_7)
         .unwrap();
+    let compounded_deposit_event = event_from_end(&fixture.env, 2);
+    assert_eq!(compounded_deposit_event.0, fixture.backstop.address);
+    assert_eq!(
+        compounded_deposit_event.1,
+        (
+            Symbol::new(&fixture.env, "deposit"),
+            BackstopTier::BlndUsdc,
+            pool.address.clone(),
+            sam.clone()
+        )
+            .into_val(&fixture.env)
+    );
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
@@ -500,10 +522,19 @@ fn test_backstop_constructor() {
     let e = Env::default();
 
     let backstop_token = Address::generate(&e);
+    let blnd_xlm_token = Address::generate(&e);
     let emitter = Address::generate(&e);
     let blnd_token = Address::generate(&e);
     let usdc_token = Address::generate(&e);
-    let pool_factory = Address::generate(&e);
+    let contract_id = Address::generate(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: blnd_token.clone(),
+        },),
+    );
     let drop_list: Vec<(Address, i128)> = vec![
         &e,
         (Address::generate(&e), 10_000_000_0000000),
@@ -511,10 +542,12 @@ fn test_backstop_constructor() {
         (Address::generate(&e), 10_000_000_0000000),
         (Address::generate(&e), 10_000_000_0000000),
     ];
-    let contract_id = e.register(
+    e.register_at(
+        &contract_id,
         BackstopContract {},
         (
             backstop_token.clone(),
+            blnd_xlm_token.clone(),
             emitter.clone(),
             blnd_token.clone(),
             usdc_token.clone(),
@@ -552,6 +585,13 @@ fn test_backstop_constructor() {
             .unwrap();
         assert_eq!(contract_usdc_token, usdc_token);
 
+        let contract_blnd_xlm_token = e
+            .storage()
+            .instance()
+            .get::<Symbol, Address>(&Symbol::new(&e, "BXLMTkn"))
+            .unwrap();
+        assert_eq!(contract_blnd_xlm_token, blnd_xlm_token);
+
         let contract_pool_factory = e
             .storage()
             .instance()
@@ -565,15 +605,52 @@ fn test_backstop_constructor() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #1012)")]
+fn test_backstop_constructor_rejects_wrong_factory_binding() {
+    let e = Env::default();
+    let contract_id = Address::generate(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: Address::generate(&e),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: Address::generate(&e),
+        },),
+    );
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            Address::generate(&e),
+            Address::generate(&e),
+            Address::generate(&e),
+            Address::generate(&e),
+            Address::generate(&e),
+            pool_factory,
+            Vec::<(Address, i128)>::new(&e),
+        ),
+    );
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #1000)")]
 fn test_backstop_constructor_over_max() {
     let e = Env::default();
 
     let backstop_token = Address::generate(&e);
+    let blnd_xlm_token = Address::generate(&e);
     let emitter = Address::generate(&e);
     let blnd_token = Address::generate(&e);
     let usdc_token = Address::generate(&e);
-    let pool_factory = Address::generate(&e);
+    let contract_id = Address::generate(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: blnd_token.clone(),
+        },),
+    );
     let drop_list: Vec<(Address, i128)> = vec![
         &e,
         (Address::generate(&e), 10_000_000_0000000),
@@ -581,10 +658,12 @@ fn test_backstop_constructor_over_max() {
         (Address::generate(&e), 10_000_000_0000000),
         (Address::generate(&e), 10_000_000_0000001),
     ];
-    e.register(
+    e.register_at(
+        &contract_id,
         BackstopContract {},
         (
             backstop_token.clone(),
+            blnd_xlm_token,
             emitter.clone(),
             blnd_token.clone(),
             usdc_token.clone(),

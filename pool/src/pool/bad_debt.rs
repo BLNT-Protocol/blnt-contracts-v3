@@ -172,7 +172,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data) = testutils::default_reserve_meta();
@@ -240,7 +240,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -343,7 +343,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -428,7 +428,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -495,7 +495,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -586,7 +586,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -666,7 +666,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data) = testutils::default_reserve_meta();
@@ -746,7 +746,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -853,7 +853,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -943,7 +943,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -1033,7 +1033,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &frodo,
         );
-        backstop_client.deposit(&frodo, &pool, &backstop_tokens);
+        backstop_client.deposit_blnd_usdc(&frodo, &pool, &backstop_tokens);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();

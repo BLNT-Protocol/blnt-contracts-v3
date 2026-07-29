@@ -15,6 +15,7 @@ pub struct Positions {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    Backstop,
     Positions(Address),
 }
 
@@ -23,6 +24,10 @@ pub struct MockPool;
 
 #[contractimpl]
 impl MockPool {
+    pub fn set_backstop(e: Env, backstop: Address) {
+        e.storage().instance().set(&DataKey::Backstop, &backstop);
+    }
+
     /// Set positions for a given address
     ///
     /// # Arguments
@@ -55,5 +60,11 @@ impl MockPool {
                 supply: map![&e],
             },
         }
+    }
+
+    pub fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool {
+        let configured_backstop: Option<Address> = e.storage().instance().get(&DataKey::Backstop);
+        configured_backstop == Some(backstop.clone())
+            && Self::get_positions(e, backstop).liabilities.is_empty()
     }
 }

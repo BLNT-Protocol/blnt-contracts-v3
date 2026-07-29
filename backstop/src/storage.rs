@@ -2,7 +2,7 @@ use soroban_sdk::{
     contracttype, unwrap::UnwrapOptimized, vec, Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
 };
 
-use crate::backstop::{PoolBalance, UserBalance};
+use crate::backstop::{BackstopTier, PoolBalance, TierTotals, UserBalance};
 
 /********** Ledger Thresholds **********/
 
@@ -54,9 +54,10 @@ pub struct UserEmissionData {
 /********** Storage Key Types **********/
 
 const EMITTER_KEY: &str = "Emitter";
-const BACKSTOP_TOKEN_KEY: &str = "BToken";
+const BLND_USDC_TOKEN_KEY: &str = "BToken";
 const POOL_FACTORY_KEY: &str = "PoolFact";
 const BLND_TOKEN_KEY: &str = "BLNDTkn";
+const BLND_XLM_TOKEN_KEY: &str = "BXLMTkn";
 const USDC_TOKEN_KEY: &str = "USDCTkn";
 const LAST_DISTRO_KEY: &str = "LastDist";
 const REWARD_ZONE_KEY: &str = "RZ";
@@ -73,9 +74,27 @@ pub struct PoolUserKey {
 
 #[derive(Clone)]
 #[contracttype]
+pub struct PoolTierKey {
+    pool: Address,
+    tier: BackstopTier,
+}
+
+#[derive(Clone)]
+#[contracttype]
+pub struct PoolUserTierKey {
+    pool: Address,
+    tier: BackstopTier,
+    user: Address,
+}
+
+#[derive(Clone)]
+#[contracttype]
 pub enum BackstopDataKey {
     UserBalance(PoolUserKey),
     PoolBalance(Address),
+    TierUserBalance(PoolUserTierKey),
+    TierPoolBalance(PoolTierKey),
+    TierTotals(BackstopTier),
     PoolUSDC(Address),
     RzEmis(Address),
     BEmisData(Address),
@@ -167,6 +186,21 @@ pub fn set_blnd_token(e: &Env, blnd_token_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY), blnd_token_id);
 }
 
+/// Fetch the BLND:XLM backstop token id
+pub fn get_blnd_xlm_token(e: &Env) -> Address {
+    e.storage()
+        .instance()
+        .get::<Symbol, Address>(&Symbol::new(e, BLND_XLM_TOKEN_KEY))
+        .unwrap_optimized()
+}
+
+/// Set the BLND:XLM backstop token id
+pub fn set_blnd_xlm_token(e: &Env, token_id: &Address) {
+    e.storage()
+        .instance()
+        .set::<Symbol, Address>(&Symbol::new(e, BLND_XLM_TOKEN_KEY), token_id);
+}
+
 /// Fetch the USDC token id
 pub fn get_usdc_token(e: &Env) -> Address {
     e.storage()
@@ -185,22 +219,22 @@ pub fn set_usdc_token(e: &Env, usdc_token_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, USDC_TOKEN_KEY), usdc_token_id);
 }
 
-/// Fetch the backstop token id
-pub fn get_backstop_token(e: &Env) -> Address {
+/// Fetch the BLND:USDC backstop token id.
+pub fn get_blnd_usdc_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BACKSTOP_TOKEN_KEY))
+        .get::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set the backstop token id
+/// Set the BLND:USDC backstop token id.
 ///
 /// ### Arguments
-/// * `backstop_token_id` - The ID of the new backstop token
-pub fn set_backstop_token(e: &Env, backstop_token_id: &Address) {
+/// * `blnd_usdc_token_id` - The ID of the BLND:USDC backstop token
+pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BACKSTOP_TOKEN_KEY), backstop_token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
 }
 
 /********** User Shares **********/
@@ -246,6 +280,55 @@ pub fn set_user_balance(e: &Env, pool: &Address, user: &Address, balance: &UserB
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 }
 
+/// Fetch a user's balance for one fixed backstop tier.
+pub fn get_user_balance_for_tier(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    user: &Address,
+) -> UserBalance {
+    if tier == BackstopTier::BlndUsdc {
+        return get_user_balance(e, pool, user);
+    }
+    let key = BackstopDataKey::TierUserBalance(PoolUserTierKey {
+        pool: pool.clone(),
+        tier,
+        user: user.clone(),
+    });
+    get_persistent_default(
+        e,
+        &key,
+        || UserBalance::env_default(e),
+        LEDGER_THRESHOLD_USER,
+        LEDGER_BUMP_USER,
+    )
+}
+
+/// Set a user's balance for one fixed backstop tier.
+pub fn set_user_balance_for_tier(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    user: &Address,
+    balance: &UserBalance,
+) {
+    if tier == BackstopTier::BlndUsdc {
+        set_user_balance(e, pool, user, balance);
+        return;
+    }
+    let key = BackstopDataKey::TierUserBalance(PoolUserTierKey {
+        pool: pool.clone(),
+        tier,
+        user: user.clone(),
+    });
+    e.storage()
+        .persistent()
+        .set::<BackstopDataKey, UserBalance>(&key, balance);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
 /********** Pool Balance **********/
 
 /// Fetch the balances for a given pool
@@ -277,6 +360,74 @@ pub fn set_pool_balance(e: &Env, pool: &Address, balance: &PoolBalance) {
     e.storage()
         .persistent()
         .set::<BackstopDataKey, PoolBalance>(&key, balance);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Fetch a pool's balance for one fixed backstop tier.
+pub fn get_pool_balance_for_tier(e: &Env, tier: BackstopTier, pool: &Address) -> PoolBalance {
+    if tier == BackstopTier::BlndUsdc {
+        return get_pool_balance(e, pool);
+    }
+    let key = BackstopDataKey::TierPoolBalance(PoolTierKey {
+        pool: pool.clone(),
+        tier,
+    });
+    get_persistent_default(
+        e,
+        &key,
+        || PoolBalance {
+            shares: 0,
+            tokens: 0,
+            q4w: 0,
+        },
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Set a pool's balance for one fixed backstop tier.
+pub fn set_pool_balance_for_tier(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    balance: &PoolBalance,
+) {
+    if tier == BackstopTier::BlndUsdc {
+        set_pool_balance(e, pool, balance);
+        return;
+    }
+    let key = BackstopDataKey::TierPoolBalance(PoolTierKey {
+        pool: pool.clone(),
+        tier,
+    });
+    e.storage()
+        .persistent()
+        .set::<BackstopDataKey, PoolBalance>(&key, balance);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Fetch aggregate accounting totals for one fixed backstop tier.
+pub fn get_tier_totals(e: &Env, tier: BackstopTier) -> TierTotals {
+    let key = BackstopDataKey::TierTotals(tier);
+    get_persistent_default(
+        e,
+        &key,
+        TierTotals::default,
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Set aggregate accounting totals for one fixed backstop tier.
+pub fn set_tier_totals(e: &Env, tier: BackstopTier, totals: &TierTotals) {
+    let key = BackstopDataKey::TierTotals(tier);
+    e.storage()
+        .persistent()
+        .set::<BackstopDataKey, TierTotals>(&key, totals);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);

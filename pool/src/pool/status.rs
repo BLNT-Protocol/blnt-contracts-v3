@@ -183,7 +183,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -230,7 +230,7 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &20_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -274,8 +274,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &30_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -317,7 +317,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -364,8 +364,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &40_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -408,8 +408,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &40_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -451,7 +451,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -497,7 +497,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -540,7 +540,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -587,7 +587,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -634,7 +634,7 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &20_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -681,8 +681,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &15_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &15_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -729,8 +729,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &15_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &15_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -777,8 +777,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &25_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &25_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -825,8 +825,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &30_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -872,8 +872,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &30_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -920,8 +920,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &40_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -969,7 +969,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -1013,7 +1013,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -1057,8 +1057,8 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &12_500_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.queue_blnd_usdc_withdrawal(&samwise, &pool_id, &12_500_0000000);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,

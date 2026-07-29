@@ -1,4 +1,10 @@
-use crate::{dependencies::CometClient, errors::BackstopError, events::BackstopEvents, storage};
+use crate::{
+    backstop::{update_tier_totals, BackstopTier},
+    dependencies::CometClient,
+    errors::BackstopError,
+    events::BackstopEvents,
+    storage,
+};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
@@ -37,7 +43,7 @@ pub fn execute_claim(
 
     if claimed > 0 {
         let blnd_id = storage::get_blnd_token(e);
-        let lp_id = storage::get_backstop_token(e);
+        let lp_id = storage::get_blnd_usdc_token(e);
         let approval_ledger = (e.ledger().sequence() / 100000 + 1) * 100000;
         let args: Vec<Val> = vec![
             e,
@@ -79,8 +85,16 @@ pub fn execute_claim(
 
                 storage::set_pool_balance(e, &pool_id, &pool_balance);
                 storage::set_user_balance(e, &pool_id, from, &user_balance);
+                update_tier_totals(e, BackstopTier::BlndUsdc, deposit_amount, to_mint, 0);
 
-                BackstopEvents::deposit(e, pool_id, from.clone(), deposit_amount, to_mint);
+                BackstopEvents::tier_deposit(
+                    e,
+                    BackstopTier::BlndUsdc,
+                    pool_id,
+                    from.clone(),
+                    deposit_amount,
+                    to_mint,
+                );
             }
         }
         lp_tokens_out
@@ -162,7 +176,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,
@@ -307,7 +321,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,
@@ -410,7 +424,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,
@@ -709,7 +723,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,
@@ -811,7 +825,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,
@@ -908,7 +922,7 @@ mod tests {
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
-            storage::set_backstop_token(&e, &lp_address);
+            storage::set_blnd_usdc_token(&e, &lp_address);
             storage::set_blnd_token(&e, &blnd_address);
             storage::set_pool_balance(
                 &e,

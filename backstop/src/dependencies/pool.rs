@@ -19,4 +19,7 @@ pub trait Pool {
     /// ### Arguments
     /// * `address` - The address to fetch positions for
     fn get_positions(e: Env, address: Address) -> Positions;
+
+    /// Return true when this backstop has no outstanding pool loss.
+    fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool;
 }

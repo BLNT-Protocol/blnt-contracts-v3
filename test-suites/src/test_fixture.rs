@@ -89,6 +89,7 @@ impl TestFixture<'_> {
 
         // deploy external contracts
         let (lp, lp_client) = create_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
+        let (blnd_xlm_lp, _) = create_lp_pool(&e, &bombadil, &blnd_id, &xlm_id);
 
         // generate Blend Protocol contract IDs
         let backstop_id = Address::generate(&e);
@@ -98,11 +99,19 @@ impl TestFixture<'_> {
         blnd_client.set_admin(&emitter_id);
         emitter_client.initialize(&blnd_id, &backstop_id, &lp);
 
+        let pool_hash = e.deployer().upload_contract_wasm(POOL_WASM);
+        let pool_init_meta = PoolInitMeta {
+            backstop: backstop_id.clone(),
+            pool_hash: pool_hash.clone(),
+            blnd_id: blnd_id.clone(),
+        };
+        let pool_factory_client = create_pool_factory(&e, &pool_factory_id, wasm, pool_init_meta);
         let backstop_client = create_backstop(
             &e,
             &backstop_id,
             wasm,
             &lp,
+            &blnd_xlm_lp,
             &emitter_id,
             &blnd_id,
             &usdc_id,
@@ -113,13 +122,6 @@ impl TestFixture<'_> {
                 (frodo.clone(), 30_000_000 * SCALAR_7)
             ],
         );
-        let pool_hash = e.deployer().upload_contract_wasm(POOL_WASM);
-        let pool_init_meta = PoolInitMeta {
-            backstop: backstop_id.clone(),
-            pool_hash: pool_hash.clone(),
-            blnd_id: blnd_id.clone(),
-        };
-        let pool_factory_client = create_pool_factory(&e, &pool_factory_id, wasm, pool_init_meta);
 
         // drop tokens to bombadil
         backstop_client.drop();

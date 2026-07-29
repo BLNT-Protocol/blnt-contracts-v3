@@ -173,7 +173,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
@@ -237,7 +237,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
@@ -283,7 +283,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
@@ -358,7 +358,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -453,7 +453,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -561,7 +561,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -656,7 +656,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -845,7 +845,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -977,7 +977,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1110,7 +1110,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1249,7 +1249,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1382,7 +1382,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &32_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &32_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1516,7 +1516,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1650,7 +1650,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1783,7 +1783,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
@@ -1920,7 +1920,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &1_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &1_000_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
@@ -2079,7 +2079,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &1_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &1_000_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
@@ -2240,7 +2240,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &2_500_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &2_500_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
@@ -2410,7 +2410,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
@@ -2549,7 +2549,7 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();

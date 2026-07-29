@@ -80,9 +80,12 @@ pub(crate) fn create_mock_oracle(e: &Env) -> (Address, MockPriceOracleClient<'_>
 
 //***** Pool Factory ******
 
-pub(crate) fn create_mock_pool_factory(e: &Env) -> (Address, MockPoolFactoryClient<'_>) {
+pub(crate) fn create_mock_pool_factory<'a>(
+    e: &'a Env,
+    backstop: &Address,
+) -> (Address, MockPoolFactoryClient<'a>) {
     let pool_init_meta = PoolInitMeta {
-        backstop: Address::generate(e),
+        backstop: backstop.clone(),
         pool_hash: BytesN::<32>::from_array(&e, &[0u8; 32]),
         blnd_id: Address::generate(e),
     };
@@ -121,7 +124,7 @@ pub(crate) fn create_backstop<'a>(
     blnd_token: &Address,
 ) -> (Address, BackstopClient<'a>) {
     let backstop_id = Address::generate(e);
-    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e);
+    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
     mock_pool_factory_client.set_pool(pool_address);
     let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnd_token);
     e.register_at(
@@ -129,6 +132,7 @@ pub(crate) fn create_backstop<'a>(
         BackstopContract {},
         (
             backstop_token,
+            Address::generate(e),
             emitter,
             blnd_token,
             usdc_token,

@@ -121,9 +121,11 @@ fn test_liquidations() {
 
     // have Frodo Q4W some backstop deposits
     let frodo_pre_q4w_amount = 10_000 * SCALAR_7;
-    fixture
-        .backstop
-        .queue_withdrawal(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    fixture.backstop.queue_blnd_usdc_withdrawal(
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+    );
 
     // Create a user
     let samwise = Address::generate(&fixture.env); //sam will be supplying XLM and borrowing STABLE
@@ -581,10 +583,12 @@ fn test_liquidations() {
     assert_eq!(xlm_bad_debt, backstop_positions.liabilities.get(1).unwrap());
 
     // validate that frodo cannot withdraw backstop deposits if bad debt exists
-    let withdraw_result =
-        fixture
-            .backstop
-            .try_withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    let withdraw_result = fixture.backstop.try_withdraw_blnd_usdc(
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
     assert_eq!(
         withdraw_result.err(),
         Some(Ok(Error::from_contract_error(1011)))
@@ -720,10 +724,12 @@ fn test_liquidations() {
     assert_eq!(new_auction.block, bad_debt_auction_data.block);
 
     // validate that frodo cannot withdraw backstop during bad debt auction
-    let withdraw_result =
-        fixture
-            .backstop
-            .try_withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    let withdraw_result = fixture.backstop.try_withdraw_blnd_usdc(
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
     assert_eq!(
         withdraw_result.err(),
         Some(Ok(Error::from_contract_error(1011)))
@@ -780,20 +786,24 @@ fn test_liquidations() {
     let original_deposit_remaining = original_deposit - frodo_pre_q4w_amount;
     let pre_withdraw_frodo_bstp = fixture.lp.balance(&frodo);
     // withdraw pre_q4w_amount
-    fixture
-        .backstop
-        .withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
-    fixture.backstop.queue_withdrawal(
+    fixture.backstop.withdraw_blnd_usdc(
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
+    fixture.backstop.queue_blnd_usdc_withdrawal(
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
     );
     //jump a month
     fixture.jump(45 * 24 * 60 * 60);
-    fixture.backstop.withdraw(
+    fixture.backstop.withdraw_blnd_usdc(
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
+        &frodo,
     );
     assert_approx_eq_abs(
         fixture.lp.balance(&frodo) - pre_withdraw_frodo_bstp,
@@ -805,7 +815,7 @@ fn test_liquidations() {
     // Deposit barely over the minimum backstop threshold in tokens
     fixture
         .backstop
-        .deposit(&frodo, &pool_fixture.pool.address, &1100_0000000);
+        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &1100_0000000);
 
     // Sam re-borrows
     let sam_requests: Vec<Request> = vec![

@@ -972,6 +972,7 @@ dependencies = [
 name = "mock-pool-factory"
 version = "0.0.0"
 dependencies = [
+ "mock-pool",
  "pool",
  "rand 0.7.3",
  "soroban-sdk",

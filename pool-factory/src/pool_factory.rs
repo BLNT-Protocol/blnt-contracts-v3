@@ -15,6 +15,12 @@ pub struct PoolFactoryContract;
 
 #[contractclient(name = "PoolFactoryClient")]
 pub trait PoolFactory {
+    /// Fetch the immutable backstop used by pools from this factory.
+    fn backstop(e: Env) -> Address;
+
+    /// Fetch the immutable pool WASM hash used by this factory.
+    fn pool_wasm_hash(e: Env) -> BytesN<32>;
+
     /// Deploys and initializes a lending pool
     ///
     /// ### Arguments
@@ -58,6 +64,16 @@ impl PoolFactoryContract {
 
 #[contractimpl]
 impl PoolFactory for PoolFactoryContract {
+    fn backstop(e: Env) -> Address {
+        storage::extend_instance(&e);
+        storage::get_pool_init_meta(&e).backstop
+    }
+
+    fn pool_wasm_hash(e: Env) -> BytesN<32> {
+        storage::extend_instance(&e);
+        storage::get_pool_init_meta(&e).pool_hash
+    }
+
     fn deploy(
         e: Env,
         admin: Address,

@@ -29,4 +29,6 @@ pub enum BackstopError {
     RewardZoneFull = 1009,
     MaxBackfillEmissions = 1010,
     BadDebtExists = 1011,
+    InvalidPoolFactoryBinding = 1012,
+    AssetConfigurationCollision = 1013,
 }

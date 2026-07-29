@@ -601,9 +601,10 @@ fn test_wasm_happy_path() {
     let mut frodo_bstop_token_balance = fixture.lp.balance(&frodo);
     let mut backstop_bstop_token_balance = fixture.lp.balance(&fixture.backstop.address);
     let amount = 500 * SCALAR_7;
-    let result = fixture
-        .backstop
-        .queue_withdrawal(&frodo, &pool_fixture.pool.address, &amount);
+    let result =
+        fixture
+            .backstop
+            .queue_blnd_usdc_withdrawal(&frodo, &pool_fixture.pool.address, &amount);
     assert_eq!(result.amount, amount);
     assert_eq!(
         result.exp,
@@ -619,9 +620,10 @@ fn test_wasm_happy_path() {
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 17 + 1);
-    let result = fixture
-        .backstop
-        .withdraw(&frodo, &pool_fixture.pool.address, &amount);
+    let result =
+        fixture
+            .backstop
+            .withdraw_blnd_usdc(&frodo, &pool_fixture.pool.address, &amount, &frodo);
     frodo_bstop_token_balance += result;
     backstop_bstop_token_balance -= result;
     assert_eq!(result, amount);

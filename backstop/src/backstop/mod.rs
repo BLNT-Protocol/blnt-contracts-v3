@@ -1,17 +1,27 @@
 mod deposit;
-pub use deposit::execute_deposit;
+pub use deposit::execute_deposit_for_tier;
 
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
 mod withdrawal;
-pub use withdrawal::{execute_dequeue_withdrawal, execute_queue_withdrawal, execute_withdraw};
+pub use withdrawal::{
+    execute_dequeue_withdrawal_for_tier, execute_queue_withdrawal_for_tier,
+    execute_withdraw_for_tier,
+};
 
 mod pool;
 pub use pool::{
-    is_pool_above_threshold, load_pool_backstop_data, require_is_from_pool_factory,
-    PoolBackstopData, PoolBalance,
+    is_pool_above_threshold, load_pool_backstop_data, require_compatible_pool,
+    require_is_from_pool_factory, PoolBackstopData, PoolBalance,
 };
 
 mod user;
 pub use user::{UserBalance, Q4W};
+
+mod tier;
+pub(crate) use tier::{
+    pool_state as load_pool_tier_state, preview_deposit, preview_withdrawal, token as tier_token,
+    update_totals as update_tier_totals, user_queued_shares, user_total_shares,
+};
+pub use tier::{BackstopTier, PoolTierState, TierTotals};

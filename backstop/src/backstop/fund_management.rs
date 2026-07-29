@@ -2,7 +2,7 @@ use crate::{contract::require_nonnegative, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::require_is_from_pool_factory;
+use super::{require_is_from_pool_factory, update_tier_totals, BackstopTier};
 
 /// Perform a draw from a pool's backstop
 ///
@@ -14,9 +14,10 @@ pub fn execute_draw(e: &Env, pool_address: &Address, amount: i128, to: &Address)
 
     pool_balance.withdraw(e, amount, 0);
     storage::set_pool_balance(e, pool_address, &pool_balance);
+    update_tier_totals(e, BackstopTier::BlndUsdc, -amount, 0, 0);
 
-    let backstop_token = TokenClient::new(e, &storage::get_backstop_token(e));
-    backstop_token.transfer(&e.current_contract_address(), to, &amount);
+    let blnd_usdc_token = TokenClient::new(e, &storage::get_blnd_usdc_token(e));
+    blnd_usdc_token.transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Perform a donation to a pool's backstop
@@ -29,8 +30,8 @@ pub fn execute_donate(e: &Env, from: &Address, pool_address: &Address, amount: i
     let mut pool_balance = storage::get_pool_balance(e, pool_address);
     require_is_from_pool_factory(e, pool_address, pool_balance.shares);
 
-    let backstop_token = TokenClient::new(e, &storage::get_backstop_token(e));
-    backstop_token.transfer_from(
+    let blnd_usdc_token = TokenClient::new(e, &storage::get_blnd_usdc_token(e));
+    blnd_usdc_token.transfer_from(
         &e.current_contract_address(),
         from,
         &e.current_contract_address(),
@@ -39,6 +40,7 @@ pub fn execute_donate(e: &Env, from: &Address, pool_address: &Address, amount: i
 
     pool_balance.deposit(amount, 0);
     storage::set_pool_balance(e, pool_address, &pool_balance);
+    update_tier_totals(e, BackstopTier::BlndUsdc, amount, 0, 0);
 }
 
 #[cfg(test)]
@@ -46,7 +48,7 @@ mod tests {
     use soroban_sdk::{testutils::Address as _, Address};
 
     use crate::{
-        backstop::execute_deposit,
+        backstop::{execute_deposit_for_tier, BackstopTier},
         testutils::{create_backstop, create_backstop_token, create_mock_pool_factory},
     };
 
@@ -69,11 +71,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
         });
 
         backstop_token_client.approve(&samwise, &backstop_id, &30_0000000, &e.ledger().sequence());
@@ -104,11 +106,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
@@ -134,11 +136,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
@@ -164,11 +166,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
@@ -216,11 +218,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
         });
 
         e.as_contract(&backstop_address, || {
@@ -252,13 +254,13 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
-        mock_pool_factory_client.set_pool(&pool_1_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_1_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 50_0000000);
-            execute_deposit(&e, &frodo, &pool_1_id, 50_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_1_id, 50_0000000);
         });
 
         e.as_contract(&backstop_id, || {
@@ -283,11 +285,11 @@ mod tests {
         backstop_token_client.mint(&frodo, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_id);
-        mock_pool_factory_client.set_pool(&pool_0_id);
+        mock_pool_factory_client.set_mock_pool(&pool_0_id);
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
         });
 
         e.as_contract(&backstop_id, || {
