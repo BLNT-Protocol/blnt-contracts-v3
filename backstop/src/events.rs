@@ -20,6 +20,24 @@ impl BackstopEvents {
         e.events().publish(topics, auction_id);
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn bad_debt_lot_settled(
+        e: &Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+        tier: BackstopTier,
+        complete: bool,
+    ) {
+        let topics = (Symbol::new(e, "bad_debt_lot_settled"), pool);
+        e.events().publish(
+            topics,
+            (auction_id, base_lot_amount, lot_amount, to, tier, complete),
+        );
+    }
+
     /// Emit a v2-shaped deposit event scoped to a v3 tier.
     pub fn tier_deposit(
         e: &Env,

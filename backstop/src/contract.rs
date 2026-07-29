@@ -171,6 +171,16 @@ pub trait Backstop {
     /// Release a pool-authorized bad-debt commitment.
     fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>);
 
+    /// Settle one partial or complete fill of a committed bad-debt lot.
+    fn settle_bad_debt_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+    ) -> Option<BadDebtLotQuote>;
+
     /// Return token units reserved by a pool in one tier.
     fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128;
 
@@ -547,6 +557,34 @@ impl Backstop for BackstopContract {
         pool.require_auth();
         backstop::release_bad_debt_lot(&e, &pool, &auction_id);
         BackstopEvents::bad_debt_lot_released(&e, pool, auction_id);
+    }
+
+    fn settle_bad_debt_lot(
+        e: Env,
+        pool: Address,
+        auction_id: BytesN<32>,
+        base_lot_amount: i128,
+        lot_amount: i128,
+        to: Address,
+    ) -> Option<BadDebtLotQuote> {
+        storage::extend_instance(&e);
+        pool.require_auth();
+        let tier = backstop::bad_debt_commitment(&e, &pool, &auction_id)
+            .unwrap_or_else(|| panic_with_error!(&e, BackstopError::BadDebtCommitmentNotFound))
+            .tier;
+        let remaining =
+            backstop::settle_bad_debt_lot(&e, &pool, &auction_id, base_lot_amount, lot_amount, &to);
+        BackstopEvents::bad_debt_lot_settled(
+            &e,
+            pool,
+            auction_id,
+            base_lot_amount,
+            lot_amount,
+            to,
+            tier,
+            remaining.is_none(),
+        );
+        remaining
     }
 
     fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128 {

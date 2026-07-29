@@ -9,7 +9,7 @@ pub use bad_debt::BadDebtLotQuote;
 pub(crate) use bad_debt::{
     available_pool_tier_assets, bad_debt_commitment, commit_bad_debt_lot,
     pool_bad_debt_commitment_count, pool_tier_committed_assets, quote_bad_debt_lot,
-    release_bad_debt_lot,
+    release_bad_debt_lot, settle_bad_debt_lot,
 };
 
 mod withdrawal;

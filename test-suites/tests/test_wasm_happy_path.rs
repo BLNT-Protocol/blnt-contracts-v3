@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use backstop::BackstopTier as BackstopContractTier;
 use pool::{BackstopLossState, BackstopTier, PoolDataKey, Positions, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
@@ -54,7 +55,7 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let auction_id = BytesN::from_array(&fixture.env, &[9; 32]);
     let auction = pool_fixture
         .pool
-        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable]);
+        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable.clone()]);
     assert_eq!(auction.auction_id, auction_id);
     assert_eq!(auction.lot_quote.tier, BackstopTier::BlndUsdc);
     assert!(auction.lot_quote.lot_amount > 0);
@@ -90,6 +91,140 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         BackstopLossState {
             committed_loss_entries: 0,
             liability_entries: 1,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+}
+
+#[test]
+fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let filler = fixture.users[0].clone();
+    let unhealthy_filler = Address::generate(&fixture.env);
+    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let debt = 50 * 10i128.pow(6);
+    let positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    let records = CanonicalBackstopLossRecords {
+        committed_losses: map![&fixture.env],
+        liabilities: map![&fixture.env, (stable.clone(), debt)],
+        unresolved_bad_debt: map![&fixture.env],
+    };
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+        fixture
+            .env
+            .storage()
+            .instance()
+            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
+    });
+
+    let auction_id = BytesN::from_array(&fixture.env, &[10; 32]);
+    let auction = pool_fixture
+        .pool
+        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable.clone()]);
+    let filler_positions_before = pool_fixture.pool.get_positions(&filler);
+    let filler_lp_before = fixture.lp.balance(&filler);
+    let tier_assets_before = fixture
+        .backstop
+        .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address)
+        .assets;
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 100);
+    assert!(pool_fixture
+        .pool
+        .try_fill_bad_debt_auction(&unhealthy_filler, &50)
+        .is_err());
+    assert_eq!(pool_fixture.pool.get_bad_debt_auction(), auction);
+    assert_eq!(fixture.lp.balance(&unhealthy_filler), 0);
+
+    let first = pool_fixture.pool.fill_bad_debt_auction(&filler, &50);
+    let first_bid = first.bid.get(stable).unwrap();
+    assert!(!first.complete);
+    assert_eq!(first_bid, (debt + 1) / 2);
+    assert_eq!(first.base_lot_amount, auction.lot_quote.lot_amount / 2);
+    assert_eq!(first.lot_amount, first.base_lot_amount / 2);
+    assert_eq!(
+        fixture.lp.balance(&filler),
+        filler_lp_before + first.lot_amount
+    );
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address,)
+            .assets,
+        tier_assets_before - first.lot_amount
+    );
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_positions(&fixture.backstop.address)
+            .liabilities
+            .get(stable_index),
+        Some(debt - first_bid)
+    );
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_positions(&filler)
+            .liabilities
+            .get(stable_index),
+        Some(
+            filler_positions_before
+                .liabilities
+                .get(stable_index)
+                .unwrap_or(0)
+                + first_bid
+        )
+    );
+    assert_eq!(
+        fixture
+            .backstop
+            .bad_debt_commitment(&pool_fixture.pool.address, &auction_id)
+            .unwrap()
+            .lot_amount,
+        auction.lot_quote.lot_amount - first.base_lot_amount
+    );
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 200);
+    let second = pool_fixture.pool.fill_bad_debt_auction(&filler, &100);
+    assert!(second.complete);
+    assert_eq!(
+        fixture.lp.balance(&filler),
+        filler_lp_before + first.lot_amount + second.lot_amount
+    );
+    assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
+        0
+    );
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+    assert_eq!(
+        pool_fixture.pool.backstop_loss_state(),
+        BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 0,
             unresolved_bad_debt_entries: 0,
         }
     );

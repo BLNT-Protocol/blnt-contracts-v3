@@ -1,6 +1,6 @@
 use soroban_sdk::{Address, BytesN, Env, Symbol, Vec};
 
-use crate::{AuctionData, BadDebtAuctionData, ReserveConfig};
+use crate::{AuctionData, BadDebtAuctionData, BadDebtAuctionFill, ReserveConfig};
 
 pub struct PoolEvents {}
 
@@ -13,6 +13,11 @@ impl PoolEvents {
     pub fn delete_bad_debt_auction(e: &Env, auction_id: BytesN<32>) {
         let topics = (Symbol::new(e, "delete_bad_debt_auction"),);
         e.events().publish(topics, auction_id);
+    }
+
+    pub fn fill_bad_debt_auction(e: &Env, filler: Address, percent: u32, fill: BadDebtAuctionFill) {
+        let topics = (Symbol::new(e, "fill_bad_debt_auction"),);
+        e.events().publish(topics, (filler, percent, fill));
     }
 
     /// Emitted when a new admin is set for a pool

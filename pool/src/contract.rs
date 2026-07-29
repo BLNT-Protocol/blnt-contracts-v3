@@ -1,5 +1,5 @@
 use crate::{
-    auctions::{self, AuctionData, BadDebtAuctionData},
+    auctions::{self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
@@ -294,6 +294,9 @@ pub trait Pool {
 
     /// Return the prepared single-tier bad-debt auction.
     fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData;
+
+    /// Fill part or all of the prepared single-tier bad-debt auction.
+    fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill;
 
     /// Release a prepared bad-debt auction after the inherited stale boundary.
     fn delete_stale_bad_debt_auction(e: Env);
@@ -615,6 +618,13 @@ impl Pool for PoolContract {
 
     fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData {
         auctions::get_prepared_bad_debt_auction(&e)
+    }
+
+    fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill {
+        storage::extend_instance(&e);
+        let fill = auctions::fill_prepared_bad_debt_auction(&e, &filler, percent);
+        PoolEvents::fill_bad_debt_auction(&e, filler, percent, fill.clone());
+        fill
     }
 
     fn delete_stale_bad_debt_auction(e: Env) {

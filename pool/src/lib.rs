@@ -18,7 +18,9 @@ mod storage;
 mod testutils;
 mod validator;
 
-pub use auctions::{AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtLotQuote};
+pub use auctions::{
+    AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtAuctionFill, BadDebtLotQuote,
+};
 pub use contract::*;
 pub use emissions::ReserveEmissionMetadata;
 pub use errors::PoolError;
