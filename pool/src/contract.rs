@@ -2,7 +2,7 @@ use crate::{
     auctions::{self, AuctionData},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
-    pool::{self, FlashLoan, Positions, Request, Reserve},
+    pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
     storage::{self, ReserveConfig},
     PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
@@ -100,8 +100,11 @@ pub trait Pool {
     /// * `address` - The address to fetch positions for
     fn get_positions(e: Env, address: Address) -> Positions;
 
-    /// Return true only for this pool's configured backstop and only while the
-    /// backstop has no outstanding liabilities in this pool.
+    /// Return counts derived from the canonical nonzero backstop loss records.
+    fn backstop_loss_state(e: Env) -> BackstopLossState;
+
+    /// Return true only for this pool's configured backstop and only while no
+    /// liability, committed loss, or unresolved bad debt exists.
     fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool;
 
     /// Submit a set of requests to the pool where `from` takes on the position, `spender` sends any
@@ -448,12 +451,14 @@ impl Pool for PoolContract {
         storage::get_user_positions(&e, &address)
     }
 
+    fn backstop_loss_state(e: Env) -> BackstopLossState {
+        storage::extend_instance(&e);
+        pool::backstop_loss_state(&e)
+    }
+
     fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool {
         storage::extend_instance(&e);
-        backstop == storage::get_backstop(&e)
-            && storage::get_user_positions(&e, &backstop)
-                .liabilities
-                .is_empty()
+        backstop == storage::get_backstop(&e) && pool::backstop_loss_state(&e).is_clear()
     }
 
     fn submit(
@@ -622,9 +627,11 @@ mod tests {
         assert!(client.backstop_withdrawal_allowed(&backstop));
         assert!(!client.backstop_withdrawal_allowed(&Address::generate(&e)));
 
+        let reserve = Address::generate(&e);
         let mut positions = Positions::env_default(&e);
         positions.liabilities.set(0, 1);
         e.as_contract(&pool, || {
+            storage::push_res_list(&e, &reserve);
             storage::set_user_positions(&e, &backstop, &positions);
         });
         assert!(!client.backstop_withdrawal_allowed(&backstop));

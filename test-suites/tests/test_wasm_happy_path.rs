@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use pool::{Request, RequestType};
+use pool::{BackstopLossState, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{testutils::Address as _, vec, Address};
 use test_suites::{
@@ -17,6 +17,18 @@ fn test_wasm_happy_path() {
     let pool_fixture = &fixture.pools[0];
     let stable_pool_index = pool_fixture.reserves[&TokenIndex::STABLE];
     let xlm_pool_index = pool_fixture.reserves[&TokenIndex::XLM];
+
+    assert_eq!(
+        pool_fixture.pool.backstop_loss_state(),
+        BackstopLossState {
+            committed_loss_entries: 0,
+            liability_entries: 0,
+            unresolved_bad_debt_entries: 0,
+        }
+    );
+    assert!(pool_fixture
+        .pool
+        .backstop_withdrawal_allowed(&fixture.backstop.address));
 
     // Create two new users
     let sam = Address::generate(&fixture.env); // sam will be supplying XLM and borrowing STABLE

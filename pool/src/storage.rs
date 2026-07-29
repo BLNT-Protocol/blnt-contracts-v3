@@ -190,6 +190,13 @@ pub fn get_user_positions(e: &Env, user: &Address) -> Positions {
 /// * `user` - The address of the user
 /// * `positions` - The new positions for the user
 pub fn set_user_positions(e: &Env, user: &Address, positions: &Positions) {
+    if e.storage()
+        .instance()
+        .get::<Symbol, Address>(&Symbol::new(e, BACKSTOP_KEY))
+        .is_some_and(|backstop| backstop == *user)
+    {
+        crate::pool::sync_backstop_liabilities(e, positions);
+    }
     let key = PoolDataKey::Positions(user.clone());
     e.storage()
         .persistent()

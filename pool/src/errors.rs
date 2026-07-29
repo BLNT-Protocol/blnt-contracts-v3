@@ -52,4 +52,8 @@ pub enum PoolError {
     InvalidLot = 1222,
     ReserveDisabled = 1223,
     MinCollateralNotMet = 1224,
+
+    // Backstop Loss Record Errors
+    InvalidLossAmount = 1225,
+    TooManyLossRecords = 1226,
 }
