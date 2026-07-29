@@ -3,8 +3,8 @@ use crate::{
         self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
         preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
         user_queued_shares, user_total_shares, ActivationQuote, ActivationValues, BackstopTier,
-        BadDebtLotQuote, InterestLotQuote, PoolBackstopData, PoolStatusQuote, PoolTierState,
-        PoolValuation, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
+        BadDebtLotQuote, BlndEmissionValues, InterestLotQuote, PoolBackstopData, PoolStatusQuote,
+        PoolTierState, PoolValuation, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
     },
     constants::{
         ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
@@ -13,7 +13,7 @@ use crate::{
     dependencies::{
         BackstopValuationBinding, BackstopValuationClient, EmitterClient, PoolFactoryClient,
     },
-    emissions,
+    emissions::{self, BlndEmissionQuote, OngoingBlndSplit},
     errors::BackstopError,
     events::BackstopEvents,
     storage,
@@ -234,6 +234,39 @@ pub trait Backstop {
     ) -> Option<InterestLotQuote>;
 
     /********** Emissions **********/
+
+    /// Quote a reward-zone pool's share of the backstop-depositor BLND tranche.
+    ///
+    /// Production accrual derives the values from canonical active tier shares
+    /// and current Comet composition.
+    fn quote_pool_blnd_emissions(
+        e: Env,
+        distribution: i128,
+        values: BlndEmissionValues,
+        total_reward_zone_blnd: i128,
+        reward_zone_member: bool,
+    ) -> BlndEmissionQuote;
+
+    /// Quote one user's share of a reward-zone pool's BLND allocation.
+    ///
+    /// Production accrual derives the values from canonical active tier shares
+    /// and current Comet composition.
+    fn quote_user_blnd_emissions(
+        e: Env,
+        pool_distribution: i128,
+        values: BlndEmissionValues,
+        pool_eligible_blnd: i128,
+    ) -> BlndEmissionQuote;
+
+    /// Convert LP amounts to underlying BLND using current Comet composition.
+    fn spot_blnd_emission_values(
+        e: Env,
+        blnd_usdc_lp: i128,
+        blnd_xlm_lp: i128,
+    ) -> BlndEmissionValues;
+
+    /// Quote the immutable 70% backstop / 30% pool split with carry.
+    fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
     /// Update the backstop with new emissions for all reward zone pools
     ///
@@ -724,6 +757,47 @@ impl Backstop for BackstopContract {
     }
 
     /********** Emissions **********/
+
+    fn quote_pool_blnd_emissions(
+        e: Env,
+        distribution: i128,
+        values: BlndEmissionValues,
+        total_reward_zone_blnd: i128,
+        reward_zone_member: bool,
+    ) -> BlndEmissionQuote {
+        storage::extend_instance(&e);
+        emissions::quote_pool_blnd_emissions(
+            &e,
+            distribution,
+            &values,
+            total_reward_zone_blnd,
+            reward_zone_member,
+        )
+    }
+
+    fn quote_user_blnd_emissions(
+        e: Env,
+        pool_distribution: i128,
+        values: BlndEmissionValues,
+        pool_eligible_blnd: i128,
+    ) -> BlndEmissionQuote {
+        storage::extend_instance(&e);
+        emissions::quote_user_blnd_emissions(&e, pool_distribution, &values, pool_eligible_blnd)
+    }
+
+    fn spot_blnd_emission_values(
+        e: Env,
+        blnd_usdc_lp: i128,
+        blnd_xlm_lp: i128,
+    ) -> BlndEmissionValues {
+        storage::extend_instance(&e);
+        emissions::spot_blnd_emission_values(&e, blnd_usdc_lp, blnd_xlm_lp)
+    }
+
+    fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit {
+        storage::extend_instance(&e);
+        emissions::quote_ongoing_blnd_split(&e, distribution, prior_carry)
+    }
 
     fn distribute(e: Env) -> i128 {
         storage::extend_instance(&e);

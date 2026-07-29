@@ -22,5 +22,6 @@ pub use contract::*;
 pub use dependencies::{
     AssetValuation, BackstopValuationBinding, BackstopValuationClient, EmitterClient,
 };
+pub use emissions::{BlndEmissionQuote, OngoingBlndSplit};
 pub use errors::BackstopError;
 pub use storage::{BackstopDataKey, BackstopEmissionData, PoolUserKey, UserEmissionData};
