@@ -9,6 +9,7 @@ use soroban_sdk::{
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, event_from_end},
+    backstop::{create_mock_backstop_valuation, set_mock_backstop_valuation_version},
     create_fixture_with_data,
     test_fixture::{TokenIndex, SCALAR_7},
 };
@@ -542,6 +543,13 @@ fn test_backstop_constructor() {
         (Address::generate(&e), 10_000_000_0000000),
         (Address::generate(&e), 10_000_000_0000000),
     ];
+    let backstop_valuation = create_mock_backstop_valuation(
+        &e,
+        &blnd_token,
+        &backstop_token,
+        &blnd_xlm_token,
+        &usdc_token,
+    );
     e.register_at(
         &contract_id,
         BackstopContract {},
@@ -552,6 +560,7 @@ fn test_backstop_constructor() {
             blnd_token.clone(),
             usdc_token.clone(),
             pool_factory.clone(),
+            backstop_valuation.clone(),
             drop_list.clone(),
         ),
     );
@@ -598,6 +607,13 @@ fn test_backstop_constructor() {
             .get::<Symbol, Address>(&Symbol::new(&e, "PoolFact"))
             .unwrap();
         assert_eq!(contract_pool_factory, pool_factory);
+
+        let contract_backstop_valuation = e
+            .storage()
+            .instance()
+            .get::<Symbol, Address>(&Symbol::new(&e, "BstopVal"))
+            .unwrap();
+        assert_eq!(contract_backstop_valuation, backstop_valuation);
     });
 
     let backstop_client = BackstopClient::new(&e, &contract_id);
@@ -627,6 +643,90 @@ fn test_backstop_constructor_rejects_wrong_factory_binding() {
             Address::generate(&e),
             Address::generate(&e),
             pool_factory,
+            Address::generate(&e),
+            Vec::<(Address, i128)>::new(&e),
+        ),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1014)")]
+fn test_backstop_constructor_rejects_wrong_valuation_binding() {
+    let e = Env::default();
+    let contract_id = Address::generate(&e);
+    let blnd_usdc_token = Address::generate(&e);
+    let blnd_xlm_token = Address::generate(&e);
+    let blnd_token = Address::generate(&e);
+    let usdc_token = Address::generate(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: blnd_token.clone(),
+        },),
+    );
+    let wrong_valuation = create_mock_backstop_valuation(
+        &e,
+        &blnd_token,
+        &Address::generate(&e),
+        &blnd_xlm_token,
+        &usdc_token,
+    );
+
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            blnd_usdc_token,
+            blnd_xlm_token,
+            Address::generate(&e),
+            blnd_token,
+            usdc_token,
+            pool_factory,
+            wrong_valuation,
+            Vec::<(Address, i128)>::new(&e),
+        ),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1014)")]
+fn test_backstop_constructor_rejects_wrong_valuation_version() {
+    let e = Env::default();
+    let contract_id = Address::generate(&e);
+    let blnd_usdc_token = Address::generate(&e);
+    let blnd_xlm_token = Address::generate(&e);
+    let blnd_token = Address::generate(&e);
+    let usdc_token = Address::generate(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: blnd_token.clone(),
+        },),
+    );
+    let valuation = create_mock_backstop_valuation(
+        &e,
+        &blnd_token,
+        &blnd_usdc_token,
+        &blnd_xlm_token,
+        &usdc_token,
+    );
+    set_mock_backstop_valuation_version(&e, &valuation, 2);
+
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            blnd_usdc_token,
+            blnd_xlm_token,
+            Address::generate(&e),
+            blnd_token,
+            usdc_token,
+            pool_factory,
+            valuation,
             Vec::<(Address, i128)>::new(&e),
         ),
     );
@@ -658,6 +758,13 @@ fn test_backstop_constructor_over_max() {
         (Address::generate(&e), 10_000_000_0000000),
         (Address::generate(&e), 10_000_000_0000001),
     ];
+    let backstop_valuation = create_mock_backstop_valuation(
+        &e,
+        &blnd_token,
+        &backstop_token,
+        &blnd_xlm_token,
+        &usdc_token,
+    );
     e.register_at(
         &contract_id,
         BackstopContract {},
@@ -668,6 +775,7 @@ fn test_backstop_constructor_over_max() {
             blnd_token.clone(),
             usdc_token.clone(),
             pool_factory.clone(),
+            backstop_valuation,
             drop_list.clone(),
         ),
     );

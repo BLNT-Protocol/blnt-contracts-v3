@@ -1,11 +1,17 @@
 use crate::{
     backstop::{
-        self, load_pool_backstop_data, load_pool_tier_state, preview_deposit, preview_withdrawal,
-        tier_token, user_queued_shares, user_total_shares, BackstopTier, PoolBackstopData,
-        PoolTierState, TierTotals, Q4W,
+        self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
+        preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
+        user_queued_shares, user_total_shares, ActivationQuote, ActivationValues, BackstopTier,
+        PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation, TierTotals, Q4W,
     },
-    constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
-    dependencies::{EmitterClient, PoolFactoryClient},
+    constants::{
+        ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
+        BACKSTOP_VALUATION_VERSION, MAX_BACKFILLED_EMISSIONS, SCALAR_7,
+    },
+    dependencies::{
+        BackstopValuationBinding, BackstopValuationClient, EmitterClient, PoolFactoryClient,
+    },
     emissions,
     errors::BackstopError,
     events::BackstopEvents,
@@ -115,6 +121,39 @@ pub trait Backstop {
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
 
+    /// Return the immutable contract used to value the backstop tiers.
+    fn backstop_valuation(e: Env) -> Address;
+
+    /// Return the verified USDC entry threshold for inactive pools.
+    fn activation_entry_threshold(e: Env) -> i128;
+
+    /// Return the verified USDC maintenance threshold for active pools.
+    fn activation_maintenance_threshold(e: Env) -> i128;
+
+    /// Quote activation policy arithmetic for verified tier values.
+    fn quote_activation(
+        e: Env,
+        values: ActivationValues,
+        currently_active: bool,
+    ) -> ActivationQuote;
+
+    /// Return one registered pool's canonical active and queued valuation.
+    fn pool_valuation(e: Env, pool: Address) -> PoolValuation;
+
+    /// Quote activation from canonical pool accounting and valuation.
+    fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote;
+
+    /// Quote a permissionless pool-status refresh.
+    fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote;
+
+    /// Quote a pool-admin status request.
+    fn quote_pool_status_set(
+        e: Env,
+        pool: Address,
+        current_status: u32,
+        requested_status: u32,
+    ) -> PoolStatusQuote;
+
     /********** Emissions **********/
 
     /// Update the backstop with new emissions for all reward zone pools
@@ -209,7 +248,9 @@ impl BackstopContract {
     /// * `blnd_token` - The BLND token ID
     /// * `usdc_token` - The USDC token ID
     /// * `pool_factory` - The pool factory ID
+    /// * `backstop_valuation` - The immutable valuation contract for the two LP tiers
     /// * `drop_list` - The list of addresses to distribute initial BLND to and the percent of the distribution they should receive
+    #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
         blnd_usdc_token: Address,
@@ -218,6 +259,7 @@ impl BackstopContract {
         blnd_token: Address,
         usdc_token: Address,
         pool_factory: Address,
+        backstop_valuation: Address,
         drop_list: Vec<(Address, i128)>,
     ) {
         if blnd_usdc_token == blnd_xlm_token
@@ -231,12 +273,25 @@ impl BackstopContract {
             panic_with_error!(&e, BackstopError::InvalidPoolFactoryBinding);
         }
         let _ = factory.is_pool(&e.current_contract_address());
+        let valuation = BackstopValuationClient::new(&e, &backstop_valuation);
+        let expected_binding = BackstopValuationBinding {
+            blnd: blnd_token.clone(),
+            blnd_usdc: blnd_usdc_token.clone(),
+            blnd_xlm: blnd_xlm_token.clone(),
+            usdc: usdc_token.clone(),
+        };
+        if valuation.version() != BACKSTOP_VALUATION_VERSION
+            || valuation.binding() != expected_binding
+        {
+            panic_with_error!(&e, BackstopError::InvalidBackstopValuation);
+        }
 
         storage::set_blnd_usdc_token(&e, &blnd_usdc_token);
         storage::set_blnd_xlm_token(&e, &blnd_xlm_token);
         storage::set_blnd_token(&e, &blnd_token);
         storage::set_usdc_token(&e, &usdc_token);
         storage::set_pool_factory(&e, &pool_factory);
+        storage::set_backstop_valuation(&e, &backstop_valuation);
         let mut drop_total: i128 = 0;
         for (_, amount) in drop_list.iter() {
             drop_total += amount;
@@ -382,6 +437,61 @@ impl Backstop for BackstopContract {
 
     fn reward_zone(e: Env) -> Vec<Address> {
         storage::get_reward_zone(&e)
+    }
+
+    fn backstop_valuation(e: Env) -> Address {
+        storage::get_backstop_valuation(&e)
+    }
+
+    fn activation_entry_threshold(_e: Env) -> i128 {
+        ACTIVATION_ENTRY_THRESHOLD_USDC
+    }
+
+    fn activation_maintenance_threshold(_e: Env) -> i128 {
+        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
+    }
+
+    fn quote_activation(
+        e: Env,
+        values: ActivationValues,
+        currently_active: bool,
+    ) -> ActivationQuote {
+        quote_activation(&e, &values, currently_active)
+    }
+
+    fn pool_valuation(e: Env, pool: Address) -> PoolValuation {
+        build_pool_valuation(&e, &pool)
+    }
+
+    fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote {
+        let valuation = build_pool_valuation(&e, &pool);
+        quote_activation(&e, &valuation.active_values, currently_active)
+    }
+
+    fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote {
+        let valuation = build_pool_valuation(&e, &pool);
+        quote_status_update(
+            &e,
+            current_status,
+            &valuation.active_values,
+            &valuation.queued_values,
+        )
+    }
+
+    fn quote_pool_status_set(
+        e: Env,
+        pool: Address,
+        current_status: u32,
+        requested_status: u32,
+    ) -> PoolStatusQuote {
+        let valuation = build_pool_valuation(&e, &pool);
+        quote_status_set(
+            &e,
+            current_status,
+            requested_status,
+            &valuation.active_values,
+            &valuation.queued_values,
+        )
     }
 
     /********** Emissions **********/

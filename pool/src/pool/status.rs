@@ -10,57 +10,14 @@ use soroban_sdk::{panic_with_error, Env};
 #[allow(clippy::inconsistent_digit_grouping)]
 pub fn execute_update_pool_status(e: &Env) -> u32 {
     let mut pool_config = storage::get_pool_config(e);
-
-    // check the pool has met minimum backstop deposits
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
-
-    let pool_backstop_data = backstop_client.pool_data(&e.current_contract_address());
-    let threshold = calc_pool_backstop_threshold(&pool_backstop_data);
-    let mut met_threshold = true;
-    if threshold < SCALAR_7 {
-        met_threshold = false;
+    let quote = backstop_client
+        .quote_pool_status_update(&e.current_contract_address(), &pool_config.status);
+    if !quote.transition_allowed {
+        panic_with_error!(e, PoolError::StatusNotAllowed);
     }
-
-    match pool_config.status {
-        // Setup
-        6 => {
-            // Setup supersedes all other statuses
-            panic_with_error!(e, PoolError::StatusNotAllowed);
-        }
-        // Admin frozen
-        4 => {
-            // Admin frozen supersedes all other statuses
-            panic_with_error!(e, PoolError::StatusNotAllowed);
-        }
-        // Admin on-ice
-        2 => {
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                // Q4W over 75% freezes the pool
-                pool_config.status = 5;
-            }
-        }
-        // Admin active
-        0 => {
-            if !met_threshold || pool_backstop_data.q4w_pct >= 0_5000000 {
-                // Q4w over 50% or being under threshold puts the pool on-ice
-                pool_config.status = 3;
-            }
-        }
-        // Admin status isn't set
-        _ => {
-            if pool_backstop_data.q4w_pct >= 0_6000000 {
-                // Q4w over 60% sets pool to Frozen
-                pool_config.status = 5;
-            } else if pool_backstop_data.q4w_pct >= 0_3000000 || !met_threshold {
-                // Q4w over 30% sets pool to On-Ice
-                pool_config.status = 3;
-            } else {
-                // Backstop is healthy and the pool is set to Active
-                pool_config.status = 1;
-            }
-        }
-    }
+    pool_config.status = quote.status;
     storage::set_pool_config(e, &pool_config);
     pool_config.status
 }
@@ -69,50 +26,21 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
 #[allow(clippy::zero_prefixed_literal)]
 #[allow(clippy::inconsistent_digit_grouping)]
 pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
+    if !matches!(pool_status, 0 | 2 | 3 | 4) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
     let mut pool_config = storage::get_pool_config(e);
-
-    // check the pool has met minimum backstop deposits
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
-
-    let pool_backstop_data = backstop_client.pool_data(&e.current_contract_address());
-
-    match pool_status {
-        0 => {
-            // Threshold must be met and q4w must be under 50% for the admin to set Active
-            if calc_pool_backstop_threshold(&pool_backstop_data) < SCALAR_7
-                || pool_backstop_data.q4w_pct >= 0_5000000
-            {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // Admin Active
-            pool_config.status = 0;
-        }
-        2 => {
-            // Q4w must be under 75% for admin to set On-Ice
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // Admin On-Ice
-            pool_config.status = 2;
-        }
-        3 => {
-            // Q4w must be under 75% for admin to set permissionless On-Ice
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // On-Ice
-            pool_config.status = 3;
-        }
-        4 => {
-            // Admin can always freeze the pool
-            // Admin Frozen
-            pool_config.status = 4;
-        }
-        _ => {
-            panic_with_error!(e, PoolError::BadRequest);
-        }
+    let quote = backstop_client.quote_pool_status_set(
+        &e.current_contract_address(),
+        &pool_config.status,
+        &pool_status,
+    );
+    if !quote.transition_allowed {
+        panic_with_error!(e, PoolError::StatusNotAllowed);
     }
+    pool_config.status = quote.status;
     storage::set_pool_config(e, &pool_config);
 }
 
@@ -230,7 +158,7 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &9_999_9999999);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -634,7 +562,7 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit_blnd_usdc(&samwise, &pool_id, &9_999_9999999);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,

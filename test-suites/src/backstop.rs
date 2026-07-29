@@ -4,6 +4,31 @@ mod backstop_contract_wasm {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/backstop.wasm");
 }
 use backstop::{BackstopClient, BackstopContract};
+use mock_backstop_valuation::{
+    BackstopValuationBinding, MockBackstopValuation, MockBackstopValuationClient,
+};
+
+pub fn create_mock_backstop_valuation(
+    e: &Env,
+    blnd: &Address,
+    blnd_usdc: &Address,
+    blnd_xlm: &Address,
+    usdc: &Address,
+) -> Address {
+    e.register(
+        MockBackstopValuation,
+        (BackstopValuationBinding {
+            blnd: blnd.clone(),
+            blnd_usdc: blnd_usdc.clone(),
+            blnd_xlm: blnd_xlm.clone(),
+            usdc: usdc.clone(),
+        },),
+    )
+}
+
+pub fn set_mock_backstop_valuation_version(e: &Env, valuation: &Address, version: u32) {
+    MockBackstopValuationClient::new(e, valuation).set_version(&version);
+}
 
 pub fn create_backstop<'a>(
     e: &Env,
@@ -17,6 +42,8 @@ pub fn create_backstop<'a>(
     pool_factory: &Address,
     drop_list: &Vec<(Address, i128)>,
 ) -> BackstopClient<'a> {
+    let backstop_valuation =
+        create_mock_backstop_valuation(e, blnd_token, blnd_usdc_token, blnd_xlm_token, usdc_token);
     if wasm {
         e.register_at(
             contract_id,
@@ -28,6 +55,7 @@ pub fn create_backstop<'a>(
                 blnd_token,
                 usdc_token,
                 pool_factory,
+                backstop_valuation.clone(),
                 drop_list.clone(),
             ),
         );
@@ -42,6 +70,7 @@ pub fn create_backstop<'a>(
                 blnd_token,
                 usdc_token,
                 pool_factory,
+                backstop_valuation,
                 drop_list.clone(),
             ),
         );

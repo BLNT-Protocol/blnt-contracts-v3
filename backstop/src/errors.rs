@@ -31,4 +31,9 @@ pub enum BackstopError {
     BadDebtExists = 1011,
     InvalidPoolFactoryBinding = 1012,
     AssetConfigurationCollision = 1013,
+    InvalidBackstopValuation = 1014,
+    InvalidValuation = 1015,
+    StaleValuation = 1016,
+    InvalidActivationValue = 1017,
+    InvalidPoolStatus = 1018,
 }

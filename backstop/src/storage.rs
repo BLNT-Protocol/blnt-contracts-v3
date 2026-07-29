@@ -59,6 +59,7 @@ const POOL_FACTORY_KEY: &str = "PoolFact";
 const BLND_TOKEN_KEY: &str = "BLNDTkn";
 const BLND_XLM_TOKEN_KEY: &str = "BXLMTkn";
 const USDC_TOKEN_KEY: &str = "USDCTkn";
+const BACKSTOP_VALUATION_KEY: &str = "BstopVal";
 const LAST_DISTRO_KEY: &str = "LastDist";
 const REWARD_ZONE_KEY: &str = "RZ";
 const DROP_LIST_KEY: &str = "DropList";
@@ -166,6 +167,21 @@ pub fn set_pool_factory(e: &Env, pool_factory_id: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, POOL_FACTORY_KEY), pool_factory_id);
+}
+
+/// Fetch the immutable backstop valuation contract.
+pub fn get_backstop_valuation(e: &Env) -> Address {
+    e.storage()
+        .instance()
+        .get::<Symbol, Address>(&Symbol::new(e, BACKSTOP_VALUATION_KEY))
+        .unwrap_optimized()
+}
+
+/// Set the immutable backstop valuation contract.
+pub fn set_backstop_valuation(e: &Env, backstop_valuation: &Address) {
+    e.storage()
+        .instance()
+        .set::<Symbol, Address>(&Symbol::new(e, BACKSTOP_VALUATION_KEY), backstop_valuation);
 }
 
 /// Fetch the BLND token id

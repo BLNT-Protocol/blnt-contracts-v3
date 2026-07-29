@@ -102,11 +102,16 @@ pub fn require_is_from_pool_factory(e: &Env, address: &Address, balance: i128) {
 /// Verify a pool is registered and exposes the permanent fail-closed
 /// withdrawal callback before accepting attributed custody.
 pub fn require_compatible_pool(e: &Env, address: &Address) {
+    require_registered_pool(e, address);
+    let _ = PoolClient::new(e, address).backstop_withdrawal_allowed(&e.current_contract_address());
+}
+
+/// Verify a pool is registered by the configured pool factory.
+pub fn require_registered_pool(e: &Env, address: &Address) {
     let pool_factory_client = PoolFactoryClient::new(e, &storage::get_pool_factory(e));
     if !pool_factory_client.is_pool(address) {
         panic_with_error!(e, BackstopError::NotPool);
     }
-    let _ = PoolClient::new(e, address).backstop_withdrawal_allowed(&e.current_contract_address());
 }
 
 /// Calculate the threshold for the pool's backstop balance

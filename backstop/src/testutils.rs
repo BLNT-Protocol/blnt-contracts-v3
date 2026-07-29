@@ -7,6 +7,7 @@ use crate::{
     BackstopContract,
 };
 
+use mock_backstop_valuation::{BackstopValuationBinding, MockBackstopValuation};
 use mock_emitter::MockEmitter;
 use mock_pool::MockPoolClient;
 use soroban_sdk::{
@@ -18,28 +19,52 @@ use soroban_sdk::{
 use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
 use sep_41_token::testutils::{MockToken, MockTokenClient};
 
+pub fn create_mock_backstop_valuation(
+    e: &Env,
+    blnd: &Address,
+    blnd_usdc: &Address,
+    blnd_xlm: &Address,
+    usdc: &Address,
+) -> Address {
+    e.register(
+        MockBackstopValuation,
+        (BackstopValuationBinding {
+            blnd: blnd.clone(),
+            blnd_usdc: blnd_usdc.clone(),
+            blnd_xlm: blnd_xlm.clone(),
+            usdc: usdc.clone(),
+        },),
+    )
+}
+
 /// Create a backstop contract.
 ///
 /// This sets random data in the constructor, so unit tests that
 /// rely on any constructor data need to reset it.
 pub(crate) fn create_backstop(e: &Env) -> Address {
     let backstop = Address::generate(e);
+    let blnd_usdc = Address::generate(e);
+    let blnd_xlm = Address::generate(e);
+    let blnd = Address::generate(e);
+    let usdc = Address::generate(e);
     let pool_init_meta = PoolInitMeta {
         backstop: backstop.clone(),
         pool_hash: BytesN::<32>::from_array(e, &[0u8; 32]),
-        blnd_id: Address::generate(e),
+        blnd_id: blnd.clone(),
     };
     let pool_factory = e.register(MockPoolFactory {}, (pool_init_meta,));
+    let valuation = create_mock_backstop_valuation(e, &blnd, &blnd_usdc, &blnd_xlm, &usdc);
     e.register_at(
         &backstop,
         BackstopContract {},
         (
+            blnd_usdc,
+            blnd_xlm,
             Address::generate(e),
-            Address::generate(e),
-            Address::generate(e),
-            Address::generate(e),
-            Address::generate(e),
+            blnd,
+            usdc,
             pool_factory,
+            valuation,
             Vec::<(Address, i128)>::new(e),
         ),
     );

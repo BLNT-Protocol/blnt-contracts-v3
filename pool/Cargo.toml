@@ -31,4 +31,4 @@ sep-41-token = { workspace = true, features = ["testutils"] }
 mock-pool-factory = { path = "../mocks/mock-pool-factory", features = ["testutils"] }
 moderc3156-example = { path = "../mocks/moderc3156", features = ["testutils"] }
 mock-emitter = { path = "../mocks/mock-emitter" }
-
+mock-backstop-valuation = { path = "../mocks/mock-backstop-valuation" }

@@ -167,17 +167,13 @@ pub trait Pool {
         requests: Vec<Request>,
     ) -> Positions;
 
-    /// Update the pool status based on the backstop state - backstop triggered status' are odd numbers
-    /// * 1 = backstop active - if the minimum backstop deposit has been reached
-    ///                and 30% of backstop deposits are not queued for withdrawal
-    ///                then all pool operations are permitted
-    /// * 3 = backstop on-ice - if the minimum backstop deposit has not been reached
-    ///                or 30% of backstop deposits are queued for withdrawal and admin active isn't set
-    ///                or 50% of backstop deposits are queued for withdrawal
-    ///                then borrowing and cancelling liquidations are not permitted
-    /// * 5 = backstop frozen - if 60% of backstop deposits are queued for withdrawal and admin on-ice isn't set
-    ///                or 75% of backstop deposits are queued for withdrawal
-    ///                then all borrowing, cancelling liquidations, and supplying are not permitted
+    /// Update the pool status from canonical three-tier USDC valuation and Q4W value.
+    ///
+    /// Backstop-triggered statuses are odd:
+    /// * 1 = active
+    /// * 3 = on-ice when the applicable activation threshold is not met, or
+    ///   Q4W reaches the inherited 30% or 50% boundary
+    /// * 5 = frozen when Q4W reaches the inherited 60% or 75% boundary
     ///
     /// ### Panics
     /// If the pool is currently on status 4, "admin-freeze", where only the admin
@@ -185,9 +181,8 @@ pub trait Pool {
     fn update_status(e: Env) -> u32;
 
     /// (Admin only) Pool status is changed to `pool_status`
-    /// * 0 = admin active - requires that the backstop threshold is met
-    ///                 and less than 50% of backstop deposits are queued for withdrawal
-    /// * 2 = admin on-ice - requires that less than 75% of backstop deposits are queued for withdrawal
+    /// * 0 = admin active - requires the applicable activation threshold and Q4W below 50%
+    /// * 2 = admin on-ice - requires Q4W below 75%
     /// * 4 = admin frozen - can always be set
     ///
     /// ### Arguments

@@ -16,3 +16,12 @@ pub const Q4W_LOCK_TIME: u64 = 17 * 24 * 60 * 60;
 /// The maximum amount of backfilled emissions that can be emitted.
 /// Represents between 3-4 months worth of token emissions.
 pub const MAX_BACKFILLED_EMISSIONS: i128 = 10_000_000 * SCALAR_7;
+
+/// The verified USDC value required for an inactive pool to activate.
+pub const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
+
+/// The verified USDC value an active pool must maintain.
+pub const ACTIVATION_MAINTENANCE_THRESHOLD_USDC: i128 = 10_000 * SCALAR_7;
+
+/// The immutable backstop valuation interface version.
+pub const BACKSTOP_VALUATION_VERSION: u32 = 1;

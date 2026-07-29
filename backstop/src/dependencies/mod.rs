@@ -10,5 +10,8 @@ pub use emitter::EmitterClient;
 mod pool;
 pub use pool::PoolClient;
 
+mod backstop_valuation;
+pub use backstop_valuation::{AssetValuation, BackstopValuationBinding, BackstopValuationClient};
+
 #[cfg(test)]
 pub use comet::WASM as COMET_WASM;

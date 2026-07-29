@@ -13,7 +13,7 @@ pub use withdrawal::{
 mod pool;
 pub use pool::{
     is_pool_above_threshold, load_pool_backstop_data, require_compatible_pool,
-    require_is_from_pool_factory, PoolBackstopData, PoolBalance,
+    require_is_from_pool_factory, require_registered_pool, PoolBackstopData, PoolBalance,
 };
 
 mod user;
@@ -25,3 +25,11 @@ pub(crate) use tier::{
     update_totals as update_tier_totals, user_queued_shares, user_total_shares,
 };
 pub use tier::{BackstopTier, PoolTierState, TierTotals};
+
+mod valuation;
+pub(crate) use valuation::{
+    build_pool_valuation, quote_activation, quote_status_set, quote_status_update,
+};
+pub use valuation::{
+    ActivationQuote, ActivationValues, BlndEmissionValues, PoolStatusQuote, PoolValuation,
+};
