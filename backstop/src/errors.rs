@@ -45,4 +45,5 @@ pub enum BackstopError {
     InterestTierLocked = 1025,
     InvalidTakeRateValue = 1026,
     InvalidEmissionValue = 1027,
+    DistributionCheckpointRequired = 1028,
 }

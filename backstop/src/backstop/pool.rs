@@ -117,6 +117,7 @@ pub fn require_registered_pool(e: &Env, address: &Address) {
 /// Calculate the threshold for the pool's backstop balance
 ///
 /// Returns true if the pool's backstop balance is above the threshold
+#[cfg(test)]
 pub fn is_pool_above_threshold(pool_backstop_data: &PoolBackstopData) -> bool {
     // @dev: Calculation for pools product constant of underlying will often overflow i128
     //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the

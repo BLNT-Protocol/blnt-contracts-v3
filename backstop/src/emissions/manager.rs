@@ -4,8 +4,7 @@ use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, vec, Address, Env, Vec};
 
 use crate::{
-    backstop::{is_pool_above_threshold, load_pool_backstop_data},
-    constants::{MAX_BACKFILLED_EMISSIONS, MAX_RZ_SIZE, SCALAR_7},
+    constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
     dependencies::EmitterClient,
     errors::BackstopError,
     storage::{self, BackstopEmissionData, RzEmissions},
@@ -14,7 +13,14 @@ use crate::{
 
 use super::distributor::update_emission_data;
 
+#[cfg(test)]
+use crate::{
+    backstop::{is_pool_above_threshold, load_pool_backstop_data},
+    constants::MAX_RZ_SIZE,
+};
+
 /// Add a pool to the reward zone. If the reward zone is full, attempt to swap it with the pool to remove.
+#[cfg(test)]
 pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) {
     let mut reward_zone = storage::get_reward_zone(e);
 
@@ -55,6 +61,7 @@ pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) 
 }
 
 /// Remove a pool to the reward zone if below the minimum backstop deposit threshold
+#[cfg(test)]
 pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
     let mut reward_zone = storage::get_reward_zone(e);
 
@@ -70,6 +77,7 @@ pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
 }
 
 /// Remove a pool from the reward zone
+#[cfg(test)]
 fn remove_pool(e: &Env, reward_zone: &mut Vec<Address>, to_remove: &Address) {
     let to_remove_index = reward_zone.first_index_of(to_remove.clone());
     match to_remove_index {
@@ -84,6 +92,7 @@ fn remove_pool(e: &Env, reward_zone: &mut Vec<Address>, to_remove: &Address) {
 ///
 /// Note - this will always fail after the emitter stops emitting tokens to the backstop. This is
 /// ok as the reward zone is only used to determine the distribution of said emissions.
+#[cfg(test)]
 fn require_distribute_run_recently(e: &Env) {
     let last_distribution = storage::get_last_distribution_time(e);
     if last_distribution < e.ledger().timestamp() - 60 * 60 {

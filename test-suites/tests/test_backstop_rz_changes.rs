@@ -54,7 +54,20 @@ fn test_backstop_rz_changes_handle_emissions() {
         frodo,
     );
 
+    // Move active value below the v3 maintenance threshold for the reward-zone
+    // removal, then restore Sam's ordinary position at the same timestamp.
+    let membership_reduction = 8_000 * SCALAR_7;
+    fixture.backstop.queue_blnd_usdc_withdrawal(
+        &sam,
+        &pool_fixture.pool.address,
+        &membership_reduction,
+    );
     fixture.backstop.remove_reward(&pool_fixture.pool.address);
+    fixture.backstop.dequeue_blnd_usdc_withdrawal(
+        &sam,
+        &pool_fixture.pool.address,
+        &membership_reduction,
+    );
 
     let result = pool_fixture.pool.try_gulp_emissions();
     assert!(result.is_err());

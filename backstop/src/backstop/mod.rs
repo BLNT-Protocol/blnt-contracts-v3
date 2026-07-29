@@ -26,9 +26,11 @@ pub use withdrawal::{
 };
 
 mod pool;
+#[cfg(test)]
+pub use pool::is_pool_above_threshold;
 pub use pool::{
-    is_pool_above_threshold, load_pool_backstop_data, require_compatible_pool,
-    require_is_from_pool_factory, require_registered_pool, PoolBackstopData, PoolBalance,
+    load_pool_backstop_data, require_compatible_pool, require_is_from_pool_factory,
+    require_registered_pool, PoolBackstopData, PoolBalance,
 };
 
 mod user;

@@ -13,7 +13,7 @@ use crate::{
     dependencies::{
         BackstopValuationBinding, BackstopValuationClient, EmitterClient, PoolFactoryClient,
     },
-    emissions::{self, BlndEmissionQuote, OngoingBlndSplit},
+    emissions::{self, BlndEmissionQuote, OngoingBlndSplit, RewardZoneCheckpoint},
     errors::BackstopError,
     events::BackstopEvents,
     storage,
@@ -123,6 +123,9 @@ pub trait Backstop {
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
+
+    /// Return the most recent completed distribution checkpoint, if any.
+    fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint>;
 
     /// Return the immutable contract used to value the backstop tiers.
     fn backstop_valuation(e: Env) -> Address;
@@ -265,6 +268,9 @@ pub trait Backstop {
         blnd_xlm_lp: i128,
     ) -> BlndEmissionValues;
 
+    /// Return one registered pool's current active BLND-emission weight.
+    fn pool_spot_blnd_emission_values(e: Env, pool: Address) -> BlndEmissionValues;
+
     /// Quote the immutable 70% backstop / 30% pool split with carry.
     fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
@@ -284,17 +290,23 @@ pub trait Backstop {
     /// If the pool is not in the reward zone or the pool does not authorize the call
     fn gulp_emissions(e: Env, pool: Address) -> i128;
 
-    /// Add a pool to the reward zone, and if the reward zone is full, a pool to remove
+    /// Add a threshold-qualified pool with positive active BLND to the reward zone.
+    ///
+    /// If all 30 slots are occupied, the replacement must have strictly more
+    /// active underlying BLND than the named member.
     ///
     /// ### Arguments
     /// * `to_add` - The address of the pool to add
     /// * `to_remove` - The address of the pool to remove (Optional - Used if the reward zone is full)
     ///
     /// ### Errors
-    /// If the pool to remove has more tokens, or if distribute has not occured in the last hour
+    /// If the pool is ineligible or the required distribution checkpoint is stale
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>);
 
-    /// Remove a pool from the reward zone
+    /// Remove a pool below the maintenance threshold from the reward zone.
+    ///
+    /// A member with zero active underlying BLND can be removed regardless of
+    /// activation value and without a recent distribution checkpoint.
     ///
     /// ### Arguments
     /// * `to_remove` - The address of the pool to remove
@@ -548,7 +560,13 @@ impl Backstop for BackstopContract {
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
-        storage::get_reward_zone(&e)
+        storage::extend_instance(&e);
+        emissions::get_reward_zone(&e)
+    }
+
+    fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint> {
+        storage::extend_instance(&e);
+        emissions::get_reward_zone_checkpoint(&e)
     }
 
     fn backstop_valuation(e: Env) -> Address {
@@ -794,6 +812,12 @@ impl Backstop for BackstopContract {
         emissions::spot_blnd_emission_values(&e, blnd_usdc_lp, blnd_xlm_lp)
     }
 
+    fn pool_spot_blnd_emission_values(e: Env, pool: Address) -> BlndEmissionValues {
+        storage::extend_instance(&e);
+        backstop::require_registered_pool(&e, &pool);
+        emissions::pool_spot_blnd_emission_values(&e, &pool)
+    }
+
     fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit {
         storage::extend_instance(&e);
         emissions::quote_ongoing_blnd_split(&e, distribution, prior_carry)
@@ -818,14 +842,14 @@ impl Backstop for BackstopContract {
 
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>) {
         storage::extend_instance(&e);
-        emissions::add_to_reward_zone(&e, to_add.clone(), to_remove.clone());
+        let removed = emissions::add_to_reward_zone(&e, &to_add, to_remove.as_ref());
 
-        BackstopEvents::rw_zone_add(&e, to_add, to_remove);
+        BackstopEvents::rw_zone_add(&e, to_add, removed);
     }
 
     fn remove_reward(e: Env, to_remove: Address) {
         storage::extend_instance(&e);
-        emissions::remove_from_reward_zone(&e, to_remove.clone());
+        emissions::remove_from_reward_zone(&e, &to_remove);
 
         BackstopEvents::rw_zone_remove(&e, to_remove);
     }

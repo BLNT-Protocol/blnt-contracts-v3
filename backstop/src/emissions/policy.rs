@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, panic_with_error, Env, I256};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env, I256};
 
 use crate::{
     backstop::{tier_token, BackstopTier, BlndEmissionValues},
@@ -97,6 +97,21 @@ pub(crate) fn spot_blnd_emission_values(
     }
 }
 
+pub(crate) fn pool_spot_blnd_emission_values(e: &Env, pool: &Address) -> BlndEmissionValues {
+    BlndEmissionValues {
+        blnd_usdc: spot_underlying_blnd(
+            e,
+            BackstopTier::BlndUsdc,
+            pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool),
+        ),
+        blnd_xlm: spot_underlying_blnd(
+            e,
+            BackstopTier::BlndXlm,
+            pool_active_emission_assets(e, BackstopTier::BlndXlm, pool),
+        ),
+    }
+}
+
 pub(crate) fn quote_ongoing_blnd_split(
     e: &Env,
     distribution: i128,
@@ -127,11 +142,20 @@ pub(crate) fn quote_ongoing_blnd_split(
     }
 }
 
-fn eligible_blnd(e: &Env, values: &BlndEmissionValues) -> i128 {
+pub(crate) fn eligible_blnd(e: &Env, values: &BlndEmissionValues) -> i128 {
     if values.blnd_usdc < 0 || values.blnd_xlm < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
     checked_add(e, values.blnd_usdc, values.blnd_xlm)
+}
+
+fn pool_active_emission_assets(e: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+    let balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    if balance.tokens < 0 || balance.shares < 0 || balance.q4w < 0 || balance.q4w > balance.shares {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    let active_shares = checked_sub(e, balance.shares, balance.q4w);
+    balance.convert_to_tokens(active_shares)
 }
 
 fn spot_underlying_blnd(e: &Env, tier: BackstopTier, lp_amount: i128) -> i128 {
