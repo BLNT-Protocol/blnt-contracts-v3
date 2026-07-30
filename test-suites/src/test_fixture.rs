@@ -94,10 +94,11 @@ impl TestFixture<'_> {
         // generate Blend Protocol contract IDs
         let backstop_id = Address::generate(&e);
         let pool_factory_id = Address::generate(&e);
+        let incumbent_backstop = Address::generate(&e);
 
         let (emitter_id, emitter_client) = create_emitter(&e);
         blnd_client.set_admin(&emitter_id);
-        emitter_client.initialize(&blnd_id, &backstop_id, &lp);
+        emitter_client.initialize(&blnd_id, &incumbent_backstop, &lp);
 
         let pool_hash = e.deployer().upload_contract_wasm(POOL_WASM);
         let pool_init_meta = PoolInitMeta {
@@ -116,18 +117,25 @@ impl TestFixture<'_> {
             &blnd_id,
             &usdc_id,
             &pool_factory_id,
-            &svec![
-                &e,
-                (bombadil.clone(), 10_000_000 * SCALAR_7),
-                (frodo.clone(), 30_000_000 * SCALAR_7)
-            ],
         );
 
-        // drop tokens to bombadil
-        backstop_client.drop();
+        // Exercise the production legacy-emitter queue before using this
+        // fixture as an active v3 deployment. One unattributed LP base unit is
+        // sufficient because the synthetic incumbent holds none.
+        lp_client.transfer(&bombadil, &backstop_id, &1);
+        let migration_start = e.ledger().timestamp();
+        backstop_client.begin_migration();
+        e.ledger()
+            .set_timestamp(migration_start + 24 * 60 * 60 * 24);
+        backstop_client.prepare_migration();
+        e.ledger()
+            .set_timestamp(migration_start + 31 * 60 * 60 * 24);
+        backstop_client.finalize_migration();
 
-        // start distribution period
-        backstop_client.distribute();
+        // Test users are funded explicitly; a successful v3 migration has no
+        // discretionary BLND recipient list.
+        blnd_client.mint(&bombadil, &(10_000_000 * SCALAR_7));
+        blnd_client.mint(&frodo, &(30_000_000 * SCALAR_7));
 
         // initialize oracle
         let (_, mock_oracle_client) = create_mock_oracle(&e);

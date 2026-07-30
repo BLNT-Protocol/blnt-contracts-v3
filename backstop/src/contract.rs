@@ -8,17 +8,16 @@ use crate::{
     },
     constants::{
         ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-        BACKSTOP_VALUATION_VERSION, MAX_BACKFILLED_EMISSIONS, SCALAR_7,
+        BACKSTOP_VALUATION_VERSION,
     },
-    dependencies::{
-        BackstopValuationBinding, BackstopValuationClient, EmitterClient, PoolFactoryClient,
-    },
+    dependencies::{BackstopValuationBinding, BackstopValuationClient, PoolFactoryClient},
     emissions::{
         self, BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
         PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
     },
     errors::BackstopError,
     events::BackstopEvents,
+    migration::{self, MigrationPosition, MigrationStatus},
     storage,
 };
 use soroban_sdk::{
@@ -123,6 +122,66 @@ pub trait Backstop {
 
     /// Return the BLND:USDC token through the v2-compatible getter.
     fn backstop_token(e: Env) -> Address;
+
+    /// Return the candidate's legacy-emitter migration state.
+    fn migration_status(e: Env) -> MigrationStatus;
+
+    fn prefunding_start(e: Env) -> u64;
+
+    fn absolute_migration_deadline(e: Env) -> u64;
+
+    fn migration_epoch_start(e: Env) -> Option<u64>;
+
+    fn original_unlock(e: Env) -> Option<u64>;
+
+    fn verified_queue_unlock(e: Env) -> Option<u64>;
+
+    fn retry_count(e: Env) -> u32;
+
+    fn activated_at(e: Env) -> Option<u64>;
+
+    fn backfill_cap(e: Env) -> Option<u64>;
+
+    fn backfill_end(e: Env) -> Option<u64>;
+
+    fn sync_deadline(e: Env) -> Option<u64>;
+
+    fn migration_position(e: Env, user: Address, pool: Address) -> MigrationPosition;
+
+    fn migration_weight(e: Env, user: Address, pool: Address) -> i128;
+
+    fn total_migration_weight(e: Env) -> i128;
+
+    fn scheduled_backfill(e: Env) -> i128;
+
+    fn funded_backfill(e: Env) -> Option<i128>;
+
+    fn total_backfill_claimed(e: Env) -> i128;
+
+    fn remaining_backfill(e: Env) -> i128;
+
+    fn quote_backfill(e: Env, user: Address, pool: Address) -> i128;
+
+    /// Atomically queue the candidate in the legacy emitter and open its epoch.
+    fn begin_migration(e: Env) -> u64;
+
+    /// Record a correct queue created directly through the legacy emitter.
+    fn open_migration_epoch(e: Env) -> u64;
+
+    /// Verify the current queue during its final seven-day preparation window.
+    fn prepare_migration(e: Env) -> u64;
+
+    /// Atomically execute the legacy-emitter swap and activate v3 accounting.
+    fn finalize_migration(e: Env) -> u64;
+
+    /// Synchronize after another caller directly executes the prepared swap.
+    fn sync_migration(e: Env) -> u64;
+
+    /// Fund exactly the scheduled migration backfill through the emitter drop.
+    fn fund_backfill(e: Env) -> i128;
+
+    /// Claim one surviving position's migration backfill.
+    fn claim_backfill(e: Env, user: Address, pool: Address, recipient: Address) -> i128;
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
@@ -334,9 +393,6 @@ pub trait Backstop {
     /// If the pool is not below the threshold or if the pool is not in the reward zone
     fn remove_reward(e: Env, to_remove: Address);
 
-    /// Drop initial BLND to a list of addresses through the emitter
-    fn drop(e: Env);
-
     /********** Fund Management *********/
 
     /// (Only Pool) Take backstop token from a pools backstop
@@ -379,7 +435,6 @@ impl BackstopContract {
     /// * `usdc_token` - The USDC token ID
     /// * `pool_factory` - The pool factory ID
     /// * `backstop_valuation` - The immutable valuation contract for the two LP tiers
-    /// * `drop_list` - The list of addresses to distribute initial BLND to and the percent of the distribution they should receive
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
@@ -390,7 +445,6 @@ impl BackstopContract {
         usdc_token: Address,
         pool_factory: Address,
         backstop_valuation: Address,
-        drop_list: Vec<(Address, i128)>,
     ) {
         if blnd_usdc_token == blnd_xlm_token
             || blnd_usdc_token == usdc_token
@@ -422,15 +476,9 @@ impl BackstopContract {
         storage::set_usdc_token(&e, &usdc_token);
         storage::set_pool_factory(&e, &pool_factory);
         storage::set_backstop_valuation(&e, &backstop_valuation);
-        let mut drop_total: i128 = 0;
-        for (_, amount) in drop_list.iter() {
-            drop_total += amount;
-        }
-        if drop_total + MAX_BACKFILLED_EMISSIONS > 50_000_000 * SCALAR_7 {
-            panic_with_error!(&e, BackstopError::BadRequest);
-        }
-        storage::set_drop_list(&e, &drop_list);
         storage::set_emitter(&e, &emitter);
+        migration::initialize(&e);
+        storage::extend_instance(&e);
     }
 }
 
@@ -563,6 +611,136 @@ impl Backstop for BackstopContract {
 
     fn backstop_token(e: Env) -> Address {
         storage::get_blnd_usdc_token(&e)
+    }
+
+    fn migration_status(e: Env) -> MigrationStatus {
+        storage::extend_instance(&e);
+        migration::status(&e)
+    }
+
+    fn prefunding_start(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::prefunding_start(&e)
+    }
+
+    fn absolute_migration_deadline(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::absolute_migration_deadline(&e)
+    }
+
+    fn migration_epoch_start(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::migration_epoch_start(&e)
+    }
+
+    fn original_unlock(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::original_unlock(&e)
+    }
+
+    fn verified_queue_unlock(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::verified_queue_unlock(&e)
+    }
+
+    fn retry_count(e: Env) -> u32 {
+        storage::extend_instance(&e);
+        migration::retry_count(&e)
+    }
+
+    fn activated_at(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::activated_at(&e)
+    }
+
+    fn backfill_cap(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::backfill_cap(&e)
+    }
+
+    fn backfill_end(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::backfill_end(&e)
+    }
+
+    fn sync_deadline(e: Env) -> Option<u64> {
+        storage::extend_instance(&e);
+        migration::sync_deadline(&e)
+    }
+
+    fn migration_position(e: Env, user: Address, pool: Address) -> MigrationPosition {
+        storage::extend_instance(&e);
+        migration::position(&e, &user, &pool)
+    }
+
+    fn migration_weight(e: Env, user: Address, pool: Address) -> i128 {
+        storage::extend_instance(&e);
+        migration::position_weight_read(&e, &user, &pool)
+    }
+
+    fn total_migration_weight(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        migration::total_migration_weight(&e)
+    }
+
+    fn scheduled_backfill(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        migration::scheduled_backfill(&e)
+    }
+
+    fn funded_backfill(e: Env) -> Option<i128> {
+        storage::extend_instance(&e);
+        migration::funded_backfill(&e)
+    }
+
+    fn total_backfill_claimed(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        migration::total_backfill_claimed(&e)
+    }
+
+    fn remaining_backfill(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        migration::remaining_backfill(&e)
+    }
+
+    fn quote_backfill(e: Env, user: Address, pool: Address) -> i128 {
+        storage::extend_instance(&e);
+        migration::quote_backfill(&e, &user, &pool)
+    }
+
+    fn begin_migration(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::begin_migration(&e)
+    }
+
+    fn open_migration_epoch(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::open_migration_epoch(&e)
+    }
+
+    fn prepare_migration(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::prepare_migration(&e)
+    }
+
+    fn finalize_migration(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::finalize_migration(&e)
+    }
+
+    fn sync_migration(e: Env) -> u64 {
+        storage::extend_instance(&e);
+        migration::sync_migration(&e)
+    }
+
+    fn fund_backfill(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        migration::fund_backfill(&e)
+    }
+
+    fn claim_backfill(e: Env, user: Address, pool: Address, recipient: Address) -> i128 {
+        storage::extend_instance(&e);
+        migration::claim_backfill(&e, &user, &pool, &recipient)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
@@ -902,15 +1080,6 @@ impl Backstop for BackstopContract {
         emissions::remove_from_reward_zone(&e, &to_remove);
 
         BackstopEvents::rw_zone_remove(&e, to_remove);
-    }
-
-    fn drop(e: Env) {
-        let mut drop_list = storage::get_drop_list(&e);
-        let backfilled_emissions = storage::get_backfill_emissions(&e);
-        drop_list.push_back((e.current_contract_address(), backfilled_emissions));
-        let emitter_client = EmitterClient::new(&e, &storage::get_emitter(&e));
-        emitter_client.drop(&drop_list);
-        storage::set_backfill_funded_amount(&e, backfilled_emissions);
     }
 
     /********** Fund Management *********/

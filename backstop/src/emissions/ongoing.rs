@@ -6,6 +6,7 @@ use crate::{
     constants::SCALAR_14,
     dependencies::EmitterClient,
     errors::BackstopError,
+    migration,
     storage::{
         self, OngoingEmissionState, PoolEmissionReservation, PoolOngoingEmissions,
         UserOngoingEmissions,
@@ -36,6 +37,7 @@ pub struct OngoingDistribution {
 }
 
 pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
+    migration::require_active(e);
     let backstop = e.current_contract_address();
     let emitter = EmitterClient::new(e, &storage::get_emitter(e));
     if emitter.get_backstop() != backstop {
@@ -44,17 +46,6 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
 
     let reward_zone = storage::get_reward_zone(e);
     let mut state = get_ongoing_emission_state(e);
-    if state.last_distribution.is_none() {
-        let checkpoint = emitter.get_last_distro(&backstop);
-        if checkpoint > e.ledger().timestamp() {
-            panic_with_error!(e, BackstopError::DistributionTooSoon);
-        }
-        state.last_distribution = Some(checkpoint);
-        set_ongoing_emission_state(e, &state);
-        if reward_zone.is_empty() {
-            return empty_distribution(checkpoint);
-        }
-    }
     if reward_zone.is_empty() {
         panic_with_error!(e, BackstopError::NoEligibleWeight);
     }
@@ -331,8 +322,11 @@ pub(crate) fn claim_reserved_pool_emissions(
 }
 
 pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
-    if tier == BackstopTier::Usdc
-        || !storage::get_reward_zone(e).contains(pool.clone())
+    if tier == BackstopTier::Usdc {
+        return;
+    }
+    migration::require_weight_mutation_allowed(e);
+    if !storage::get_reward_zone(e).contains(pool.clone())
         || get_ongoing_emission_state(e).last_distribution.is_none()
     {
         return;
@@ -579,19 +573,6 @@ fn validate_pool_emission_reservation(e: &Env, reservation: &PoolEmissionReserva
     }
 }
 
-fn empty_distribution(checkpoint: u64) -> OngoingDistribution {
-    OngoingDistribution {
-        backstop_allocated: 0,
-        backstop_carry: 0,
-        checkpoint,
-        eligible_blnd: 0,
-        pool_allocated: 0,
-        pool_carry: 0,
-        received: 0,
-        split_carry: 0,
-    }
-}
-
 fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
@@ -620,7 +601,7 @@ mod tests {
     use crate::{
         backstop::{update_tier_totals, BackstopTier, PoolBalance, UserBalance},
         constants::{MAX_RZ_SIZE, SCALAR_7},
-        storage,
+        migration, storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_emitter,
             create_mock_pool_factory, create_token, create_usdc_token,
@@ -660,17 +641,18 @@ mod tests {
             });
             let (emitter, _) = create_emitter(&e, &backstop, &blnd_usdc, &blnd, 1_000);
             blnd_client.set_admin(&emitter);
+            e.as_contract(&backstop, || {
+                migration::activate_for_test(&e, 1_000);
+            });
 
-            let fixture = Self {
+            Self {
                 admin,
                 backstop,
                 blnd,
                 blnd_usdc,
                 e,
                 factory,
-            };
-            assert_eq!(fixture.client().distribute().received, 0);
-            fixture
+            }
         }
 
         fn client(&self) -> BackstopClient<'_> {

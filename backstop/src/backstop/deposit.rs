@@ -1,4 +1,4 @@
-use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
+use crate::{contract::require_nonnegative, emissions, migration, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
@@ -41,6 +41,9 @@ pub fn execute_deposit_for_tier(
     }
     pool_balance.deposit(amount, to_mint);
     user_balance.add_shares(to_mint);
+    if tier == BackstopTier::BlndUsdc {
+        migration::record_blnd_usdc_deposit(e, from, pool_address, amount, to_mint);
+    }
 
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);

@@ -54,18 +54,19 @@ pub(crate) fn create_backstop(e: &Env) -> Address {
     };
     let pool_factory = e.register(MockPoolFactory {}, (pool_init_meta,));
     let valuation = create_mock_backstop_valuation(e, &blnd, &blnd_usdc, &blnd_xlm, &usdc);
+    let emitter = e.register(MockEmitter, ());
+    EmitterClient::new(e, &emitter).initialize(&blnd, &Address::generate(e), &blnd_usdc);
     e.register_at(
         &backstop,
         BackstopContract {},
         (
             blnd_usdc,
             blnd_xlm,
-            Address::generate(e),
+            emitter,
             blnd,
             usdc,
             pool_factory,
             valuation,
-            Vec::<(Address, i128)>::new(e),
         ),
     );
     backstop

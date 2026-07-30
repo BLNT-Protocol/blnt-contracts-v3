@@ -5,7 +5,7 @@ mod comet;
 pub use comet::Client as CometClient;
 
 mod emitter;
-pub use emitter::EmitterClient;
+pub use emitter::{EmitterClient, Swap};
 
 mod pool;
 pub use pool::PoolClient;

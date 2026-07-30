@@ -10,14 +10,14 @@ use crate::BackstopError;
 
 const ONE_DAY_LEDGERS: u32 = 17280; // assumes 5s a ledger
 
-const LEDGER_THRESHOLD_INSTANCE: u32 = ONE_DAY_LEDGERS * 30; // ~ 30 days
-const LEDGER_BUMP_INSTANCE: u32 = LEDGER_THRESHOLD_INSTANCE + ONE_DAY_LEDGERS; // ~ 31 days
+const LEDGER_THRESHOLD_INSTANCE: u32 = ONE_DAY_LEDGERS * 89; // ~ 89 days
+const LEDGER_BUMP_INSTANCE: u32 = ONE_DAY_LEDGERS * 90; // ~ 90 days
 
 const LEDGER_THRESHOLD_SHARED: u32 = ONE_DAY_LEDGERS * 45; // ~ 45 days
 const LEDGER_BUMP_SHARED: u32 = LEDGER_THRESHOLD_SHARED + ONE_DAY_LEDGERS; // ~ 46 days
 
-const LEDGER_THRESHOLD_USER: u32 = ONE_DAY_LEDGERS * 100; // ~ 100 days
-pub(crate) const LEDGER_BUMP_USER: u32 = LEDGER_THRESHOLD_USER + 20 * ONE_DAY_LEDGERS; // ~ 120 days
+const LEDGER_THRESHOLD_USER: u32 = ONE_DAY_LEDGERS * 179; // ~ 179 days
+pub(crate) const LEDGER_BUMP_USER: u32 = ONE_DAY_LEDGERS * 180 - 1; // ~ 180 days
 
 /********** Storage Types **********/
 
@@ -114,7 +114,7 @@ const BACKSTOP_VALUATION_KEY: &str = "BstopVal";
 #[cfg(test)]
 const LAST_DISTRO_KEY: &str = "LastDist";
 const REWARD_ZONE_KEY: &str = "RZ";
-const DROP_LIST_KEY: &str = "DropList";
+#[cfg(test)]
 const BACKFILL_EMISSIONS_KEY: &str = "BackfillEmis";
 #[cfg(test)]
 const BACKFILL_STATUS_KEY: &str = "Backfill";
@@ -732,6 +732,7 @@ pub fn set_pool_emission_reservation(
 }
 
 /// Get the current total backfill emissions
+#[cfg(test)]
 pub fn get_backfill_emissions(e: &Env) -> i128 {
     get_persistent_default(
         e,
@@ -761,29 +762,24 @@ pub fn set_backfill_emissions(e: &Env, emissions: &i128) {
 /// Return the funded migration-backfill reserve that remains protected from
 /// ongoing-emission accounting.
 pub fn get_remaining_backfill_reserve(e: &Env) -> i128 {
-    let funded = e
-        .storage()
-        .instance()
-        .get::<Symbol, i128>(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY))
-        .unwrap_or(0);
-    let claimed = e
-        .storage()
-        .instance()
-        .get::<Symbol, i128>(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
-        .unwrap_or(0);
+    let funded = get_backfill_funded_amount(e).unwrap_or(0);
+    let claimed = get_total_backfill_claimed(e);
     if funded < 0 || claimed < 0 || claimed > funded {
         panic_with_error!(e, BackstopError::InvalidOngoingBalance);
     }
     funded - claimed
 }
 
+/// Return the exact migration-backfill amount received from the emitter.
+pub fn get_backfill_funded_amount(e: &Env) -> Option<i128> {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY))
+}
+
 /// Record the exact migration-backfill amount received from the emitter.
 pub fn set_backfill_funded_amount(e: &Env, funded: i128) {
-    let claimed = e
-        .storage()
-        .instance()
-        .get::<Symbol, i128>(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
-        .unwrap_or(0);
+    let claimed = get_total_backfill_claimed(e);
     if funded < 0 || claimed < 0 || claimed > funded {
         panic_with_error!(e, BackstopError::InvalidOngoingBalance);
     }
@@ -792,14 +788,17 @@ pub fn set_backfill_funded_amount(e: &Env, funded: i128) {
         .set(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY), &funded);
 }
 
-/// Record aggregate migration-backfill claims.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn set_total_backfill_claimed(e: &Env, claimed: i128) {
-    let funded = e
-        .storage()
+/// Return aggregate successful migration-backfill claims.
+pub fn get_total_backfill_claimed(e: &Env) -> i128 {
+    e.storage()
         .instance()
-        .get::<Symbol, i128>(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY))
-        .unwrap_or(0);
+        .get(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
+        .unwrap_or(0)
+}
+
+/// Record aggregate migration-backfill claims.
+pub fn set_total_backfill_claimed(e: &Env, claimed: i128) {
+    let funded = get_backfill_funded_amount(e).unwrap_or(0);
     if claimed < 0 || funded < 0 || claimed > funded {
         panic_with_error!(e, BackstopError::InvalidOngoingBalance);
     }
@@ -944,29 +943,4 @@ pub fn set_user_emis_data(
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
-}
-
-/********** Drop Emissions **********/
-
-/// Get the current pool addresses that are in the drop list and the amount of the initial distribution they receive
-pub fn get_drop_list(e: &Env) -> Vec<(Address, i128)> {
-    e.storage()
-        .persistent()
-        .get::<Symbol, Vec<(Address, i128)>>(&Symbol::new(&e, DROP_LIST_KEY))
-        .unwrap_optimized()
-}
-
-/// Set the drop list
-///
-/// ### Arguments
-/// * `drop_list` - The map of pool addresses to the amount of the initial distribution they receive
-pub fn set_drop_list(e: &Env, drop_list: &Vec<(Address, i128)>) {
-    e.storage()
-        .persistent()
-        .set::<Symbol, Vec<(Address, i128)>>(&Symbol::new(&e, DROP_LIST_KEY), drop_list);
-    e.storage().persistent().extend_ttl(
-        &Symbol::new(&e, DROP_LIST_KEY),
-        LEDGER_THRESHOLD_USER,
-        LEDGER_BUMP_USER,
-    );
 }

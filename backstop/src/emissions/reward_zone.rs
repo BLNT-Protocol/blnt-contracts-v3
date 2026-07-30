@@ -4,7 +4,7 @@ use crate::{
     backstop::{build_pool_valuation, quote_activation},
     constants::MAX_RZ_SIZE,
     errors::BackstopError,
-    storage,
+    migration, storage,
 };
 
 use super::{
@@ -38,6 +38,7 @@ pub(crate) fn add_to_reward_zone(
     to_add: &Address,
     to_remove: Option<&Address>,
 ) -> Option<Address> {
+    migration::require_weight_mutation_allowed(e);
     let mut reward_zone = get_reward_zone(e);
     if reward_zone.contains(to_add.clone()) {
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
@@ -78,6 +79,7 @@ pub(crate) fn add_to_reward_zone(
 }
 
 pub(crate) fn remove_from_reward_zone(e: &Env, to_remove: &Address) {
+    migration::require_weight_mutation_allowed(e);
     let mut reward_zone = get_reward_zone(e);
     let remove_index = reward_zone
         .first_index_of(to_remove.clone())

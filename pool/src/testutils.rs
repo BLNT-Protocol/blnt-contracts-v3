@@ -149,7 +149,6 @@ pub(crate) fn create_backstop<'a>(
             usdc_token,
             pool_factory,
             backstop_valuation,
-            vec![e, (pool_address.clone(), 40_000_000 * SCALAR_7)],
         ),
     );
     e.as_contract(pool_address, || {

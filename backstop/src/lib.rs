@@ -10,6 +10,7 @@ mod dependencies;
 mod emissions;
 mod errors;
 mod events;
+mod migration;
 mod storage;
 mod testutils;
 
@@ -27,4 +28,5 @@ pub use emissions::{
     PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
 };
 pub use errors::BackstopError;
+pub use migration::{MigrationPosition, MigrationStatus};
 pub use storage::{BackstopDataKey, BackstopEmissionData, PoolUserKey, UserEmissionData};

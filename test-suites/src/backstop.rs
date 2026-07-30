@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{Address, Env};
 
 mod backstop_contract_wasm {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/backstop.wasm");
@@ -40,7 +40,6 @@ pub fn create_backstop<'a>(
     blnd_token: &Address,
     usdc_token: &Address,
     pool_factory: &Address,
-    drop_list: &Vec<(Address, i128)>,
 ) -> BackstopClient<'a> {
     let backstop_valuation =
         create_mock_backstop_valuation(e, blnd_token, blnd_usdc_token, blnd_xlm_token, usdc_token);
@@ -56,7 +55,6 @@ pub fn create_backstop<'a>(
                 usdc_token,
                 pool_factory,
                 backstop_valuation.clone(),
-                drop_list.clone(),
             ),
         );
     } else {
@@ -71,7 +69,6 @@ pub fn create_backstop<'a>(
                 usdc_token,
                 pool_factory,
                 backstop_valuation,
-                drop_list.clone(),
             ),
         );
     }

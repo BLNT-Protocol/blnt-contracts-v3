@@ -5,6 +5,40 @@ use crate::backstop::{BackstopTier, BadDebtLotQuote, InterestLotQuote};
 pub struct BackstopEvents {}
 
 impl BackstopEvents {
+    pub fn migration_prepared(
+        e: &Env,
+        original_unlock: u64,
+        retry_count: u32,
+        verified_queue_unlock: u64,
+    ) {
+        let topics = (Symbol::new(e, "migration_prepared"),);
+        e.events().publish(
+            topics,
+            (original_unlock, retry_count, verified_queue_unlock),
+        );
+    }
+
+    pub fn migration_activated(e: &Env, activated_at: u64, backfill_end: u64) {
+        let topics = (Symbol::new(e, "migration_activated"),);
+        e.events().publish(topics, (activated_at, backfill_end));
+    }
+
+    pub fn backfill_funded(e: &Env, amount: i128) {
+        let topics = (Symbol::new(e, "backfill_funded"),);
+        e.events().publish(topics, amount);
+    }
+
+    pub fn backfill_claimed(
+        e: &Env,
+        user: Address,
+        pool: Address,
+        recipient: Address,
+        amount: i128,
+    ) {
+        let topics = (Symbol::new(e, "backfill_claimed"), user, pool);
+        e.events().publish(topics, (recipient, amount));
+    }
+
     pub fn bad_debt_lot_committed(
         e: &Env,
         pool: Address,
