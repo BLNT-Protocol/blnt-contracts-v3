@@ -36,7 +36,7 @@ silently create a new v3 policy.
 - This repository contains the production v3 contract source, compatibility
   crates, test mocks, and contract specifications.
 - Migration orchestration, cross-version fixtures, deployment runners, and
-  network evidence belong in the separate `blend-v3-candidate` repository.
+  network evidence belong in the separate `blend-v3-migration` repository.
 - Test mocks and compatibility crates MUST NOT become privileged production
   dependencies or alternate protocol-control paths.
 - Do not describe this candidate as audited, production-ready, or official.
