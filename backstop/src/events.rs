@@ -190,17 +190,22 @@ impl BackstopEvents {
         e.events().publish(topics, to_remove);
     }
 
-    /// Emitted when emissions are claimed
-    ///
-    /// - topics - `["claim", from: Address]`
-    /// - data - `[amount: i128]`
-    ///
-    /// ### Arguments
-    /// * `from` - The address of the user claiming emissions
-    /// * `amount` - The amount of LP tokens minted
-    pub fn claim(e: &Env, from: Address, amount: i128) {
-        let topics = (Symbol::new(e, "claim"), from);
-        e.events().publish(topics, amount);
+    /// Emitted when a user claims ongoing BLND from the two eligible tiers.
+    pub fn claim_ongoing_blnd(
+        e: &Env,
+        user: Address,
+        pool: Address,
+        recipient: Address,
+        amount: i128,
+    ) {
+        let topics = (Symbol::new(e, "claim_ongoing"), user, pool);
+        e.events().publish(topics, (recipient, amount));
+    }
+
+    /// Emitted when a pool pays a reserve-token emission claim.
+    pub fn claim_pool_emissions(e: &Env, pool: Address, recipient: Address, amount: i128) {
+        let topics = (Symbol::new(e, "claim_pool"), pool);
+        e.events().publish(topics, (recipient, amount));
     }
 
     /// Emitted when tokens are drawn from the backstop

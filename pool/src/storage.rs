@@ -96,6 +96,36 @@ pub struct UserEmissionData {
     pub accrued: i128,
 }
 
+/// Exact carry retained alongside v2-compatible reserve emission data.
+#[derive(Clone)]
+#[contracttype]
+pub struct ReserveEmissionCarry {
+    /// Exact division numerator not yet represented by the reserve index.
+    pub index_carry: i128,
+    /// Exact unvested BLND remaining in the current seven-day stream.
+    pub remaining: i128,
+}
+
+#[derive(Clone)]
+#[contracttype]
+struct StoredReserveEmissionData {
+    carry_initialized: bool,
+    expiration: u64,
+    eps: u64,
+    index: i128,
+    index_carry: i128,
+    last_time: u64,
+    remaining: i128,
+}
+
+#[derive(Clone)]
+#[contracttype]
+struct StoredUserEmissionData {
+    accrued: i128,
+    carry: i128,
+    index: i128,
+}
+
 /********** Storage Key Types **********/
 
 const ADMIN_KEY: &str = "Admin";
@@ -106,6 +136,7 @@ const BLND_TOKEN_KEY: &str = "BLNDTkn";
 const POOL_CONFIG_KEY: &str = "Config";
 const RES_LIST_KEY: &str = "ResList";
 const POOL_EMIS_KEY: &str = "PoolEmis";
+const POOL_EMIS_CARRY_KEY: &str = "PoolEmisC";
 const RES_EMIS_CONFIGURED_KEY: &str = "ResEmisSet";
 
 #[derive(Clone)]
@@ -293,6 +324,7 @@ pub fn set_backstop(e: &Env, backstop: &Address) {
 /********** External Token Contracts **********/
 
 /// Fetch the BLND token ID
+#[cfg(test)]
 pub fn get_blnd_token(e: &Env) -> Address {
     e.storage()
         .instance()
@@ -518,6 +550,12 @@ pub fn get_res_emis_data(e: &Env, res_token_index: &u32) -> Option<ReserveEmissi
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,
     )
+    .map(|stored: StoredReserveEmissionData| ReserveEmissionData {
+        expiration: stored.expiration,
+        eps: stored.eps,
+        index: stored.index,
+        last_time: stored.last_time,
+    })
 }
 
 /// Return whether a reserve stream has ever had emission data.
@@ -564,9 +602,64 @@ pub fn set_res_emis_data(e: &Env, res_token_index: &u32, res_emis_data: &Reserve
     }
 
     let key = PoolDataKey::EmisData(*res_token_index);
+    let prior = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredReserveEmissionData>(&key);
+    let stored = StoredReserveEmissionData {
+        carry_initialized: prior
+            .as_ref()
+            .is_some_and(|stored| stored.carry_initialized),
+        expiration: res_emis_data.expiration,
+        eps: res_emis_data.eps,
+        index: res_emis_data.index,
+        index_carry: prior.as_ref().map(|stored| stored.index_carry).unwrap_or(0),
+        last_time: res_emis_data.last_time,
+        remaining: prior.map(|stored| stored.remaining).unwrap_or(0),
+    };
     e.storage()
         .persistent()
-        .set::<PoolDataKey, ReserveEmissionData>(&key, res_emis_data);
+        .set::<PoolDataKey, StoredReserveEmissionData>(&key, &stored);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Fetch exact carry paired with a reserve emission stream.
+pub fn get_res_emis_carry(e: &Env, res_token_index: &u32) -> Option<ReserveEmissionCarry> {
+    let key = PoolDataKey::EmisData(*res_token_index);
+    get_persistent_default::<_, Option<StoredReserveEmissionData>, _>(
+        e,
+        &key,
+        || None,
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+    .and_then(|stored| {
+        stored.carry_initialized.then_some(ReserveEmissionCarry {
+            index_carry: stored.index_carry,
+            remaining: stored.remaining,
+        })
+    })
+}
+
+/// Store exact carry paired with a reserve emission stream.
+pub fn set_res_emis_carry(e: &Env, res_token_index: &u32, carry: &ReserveEmissionCarry) {
+    if carry.index_carry < 0 || carry.remaining < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let key = PoolDataKey::EmisData(*res_token_index);
+    let mut stored = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredReserveEmissionData>(&key)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
+    stored.carry_initialized = true;
+    stored.index_carry = carry.index_carry;
+    stored.remaining = carry.remaining;
+    e.storage()
+        .persistent()
+        .set::<PoolDataKey, StoredReserveEmissionData>(&key, &stored);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
@@ -588,7 +681,12 @@ pub fn get_user_emissions(
         user: user.clone(),
         reserve_id: *res_token_index,
     });
-    get_persistent_default(e, &key, || None, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER)
+    get_persistent_default(e, &key, || None, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER).map(
+        |stored: StoredUserEmissionData| UserEmissionData {
+            accrued: stored.accrued,
+            index: stored.index,
+        },
+    )
 }
 
 /// Set the users emission data for a reserve's d or d token
@@ -602,9 +700,60 @@ pub fn set_user_emissions(e: &Env, user: &Address, res_token_index: &u32, data: 
         user: user.clone(),
         reserve_id: *res_token_index,
     });
+    let carry = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredUserEmissionData>(&key)
+        .map(|stored| stored.carry)
+        .unwrap_or(0);
+    let stored = StoredUserEmissionData {
+        accrued: data.accrued,
+        carry,
+        index: data.index,
+    };
     e.storage()
         .persistent()
-        .set::<PoolDataKey, UserEmissionData>(&key, data);
+        .set::<PoolDataKey, StoredUserEmissionData>(&key, &stored);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/// Fetch sub-base-unit carry for a user's reserve emission checkpoint.
+pub fn get_user_emission_carry(e: &Env, user: &Address, res_token_index: &u32) -> i128 {
+    let key = PoolDataKey::UserEmis(UserReserveKey {
+        user: user.clone(),
+        reserve_id: *res_token_index,
+    });
+    get_persistent_default::<_, Option<StoredUserEmissionData>, _>(
+        e,
+        &key,
+        || None,
+        LEDGER_THRESHOLD_USER,
+        LEDGER_BUMP_USER,
+    )
+    .map(|stored| stored.carry)
+    .unwrap_or(0)
+}
+
+/// Store sub-base-unit carry for a user's reserve emission checkpoint.
+pub fn set_user_emission_carry(e: &Env, user: &Address, res_token_index: &u32, carry: i128) {
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let key = PoolDataKey::UserEmis(UserReserveKey {
+        user: user.clone(),
+        reserve_id: *res_token_index,
+    });
+    let mut stored = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredUserEmissionData>(&key)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
+    stored.carry = carry;
+    e.storage()
+        .persistent()
+        .set::<PoolDataKey, StoredUserEmissionData>(&key, &stored);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
@@ -637,6 +786,29 @@ pub fn set_pool_emissions(e: &Env, emissions: &Map<u32, u64>) {
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,
     );
+}
+
+/// Fetch unallocated BLND base-unit carry from the prior pool-tranche gulp.
+pub fn get_pool_emission_carry(e: &Env) -> i128 {
+    let carry = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, POOL_EMIS_CARRY_KEY))
+        .unwrap_or(0);
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    carry
+}
+
+/// Store unallocated BLND base-unit carry for the next pool-tranche gulp.
+pub fn set_pool_emission_carry(e: &Env, carry: i128) {
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, POOL_EMIS_CARRY_KEY), &carry);
 }
 
 /********** Auctions ***********/

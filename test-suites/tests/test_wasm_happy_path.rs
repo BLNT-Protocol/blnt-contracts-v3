@@ -148,6 +148,7 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .env
         .ledger()
         .set_sequence_number(auction.block + 100);
+    fixture.backstop.distribute();
     assert!(pool_fixture
         .pool
         .try_fill_bad_debt_auction(&unhealthy_filler, &50)
@@ -282,12 +283,14 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
     let deposited_shares = 50_000 * SCALAR_7;
 
+    fixture.backstop.distribute();
     fixture.backstop.queue_blnd_usdc_withdrawal(
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
     );
     fixture.jump(17 * 24 * 60 * 60 + 1);
+    fixture.backstop.distribute();
     fixture.backstop.withdraw_blnd_usdc(
         &frodo,
         &pool_fixture.pool.address,
@@ -471,12 +474,14 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     let frodo = fixture.users[0].clone();
     let deposited_shares = 50_000 * SCALAR_7;
 
+    fixture.backstop.distribute();
     fixture.backstop.queue_blnd_usdc_withdrawal(
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
     );
     fixture.jump(17 * 24 * 60 * 60 + 1);
+    fixture.backstop.distribute();
     fixture.backstop.withdraw_blnd_usdc(
         &frodo,
         &pool_fixture.pool.address,
@@ -823,7 +828,8 @@ fn test_wasm_happy_path() {
 
     // claim frodo's setup emissions (1h1m passes during setup)
     // - Frodo should receive 60 * 61 * .3 = 1098 BLND from the pool claim
-    // - Frodo should receive 60 * 61 * .7 = 2562 BLND from the backstop claim
+    // - The backstop tranche is allocated immediately for the full first
+    //   emission cycle, unlike the pool tranche's seven-day stream.
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let claim_amount = pool_fixture
@@ -835,13 +841,12 @@ fn test_wasm_happy_path() {
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
     );
-    let lp_amount = fixture.backstop.claim(
-        &frodo,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(lp_amount, 204_8364995);
-    backstop_blnd_balance -= 2562_0000000;
+    let backstop_claim =
+        fixture
+            .backstop
+            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
+    assert_eq!(backstop_claim, 423_360_0000000);
+    backstop_blnd_balance -= backstop_claim;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1011,7 +1016,6 @@ fn test_wasm_happy_path() {
     fixture.jump(341940);
 
     // Distribute emissions
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 
@@ -1023,7 +1027,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
     backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 11673_1666149);
+    assert_eq!(claim_amount, 11673_1666150);
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1033,13 +1037,12 @@ fn test_wasm_happy_path() {
         frodo_balance + claim_amount
     );
 
-    let lp_amount = fixture.backstop.claim(
-        &frodo,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(lp_amount, 33_629_3445342);
-    backstop_blnd_balance -= 4207979999999;
+    let backstop_claim =
+        fixture
+            .backstop
+            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
+    assert_eq!(backstop_claim, 4233600000000);
+    backstop_blnd_balance -= backstop_claim;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1051,7 +1054,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
     backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 90908_8333849);
+    assert_eq!(claim_amount, 90908_8333850);
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1065,27 +1068,24 @@ fn test_wasm_happy_path() {
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 7 * 51);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
     // Allow another week go by to distribute missed emissions
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 7);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 
     // Frodo claims a year worth of backstop emissions
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let lp_amount = fixture.backstop.claim(
-        &frodo,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(lp_amount, 1_723_120_8830717);
-    backstop_blnd_balance -= 22_014_719_9999999;
+    let backstop_claim =
+        fixture
+            .backstop
+            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
+    assert_eq!(backstop_claim, 22_014_720_0000000);
+    backstop_blnd_balance -= backstop_claim;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1096,7 +1096,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
     backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 1073628_1826492);
+    assert_eq!(claim_amount, 1073628_1826494);
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1266,6 +1266,7 @@ fn test_wasm_happy_path() {
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 17 + 1);
+    fixture.backstop.distribute();
     let result =
         fixture
             .backstop

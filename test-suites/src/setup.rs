@@ -84,7 +84,6 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     pool_fixture.pool.update_status();
 
     // enable emissions
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 

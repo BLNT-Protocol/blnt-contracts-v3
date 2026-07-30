@@ -1,11 +1,10 @@
 use cast::{i128, u64};
 use sep_41_token::TokenClient;
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, vec, Address, Env, Vec};
+use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
 use crate::{
-    constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
-    dependencies::EmitterClient,
+    constants::SCALAR_7,
     errors::BackstopError,
     storage::{self, BackstopEmissionData, RzEmissions},
     PoolBalance,
@@ -16,8 +15,11 @@ use super::distributor::update_emission_data;
 #[cfg(test)]
 use crate::{
     backstop::{is_pool_above_threshold, load_pool_backstop_data},
-    constants::MAX_RZ_SIZE,
+    constants::{MAX_BACKFILLED_EMISSIONS, MAX_RZ_SIZE},
+    dependencies::EmitterClient,
 };
+#[cfg(test)]
+use soroban_sdk::{vec, Vec};
 
 /// Add a pool to the reward zone. If the reward zone is full, attempt to swap it with the pool to remove.
 #[cfg(test)]
@@ -102,6 +104,7 @@ fn require_distribute_run_recently(e: &Env) {
 
 /// Distribute emissions from the emitter to the reward zone and backstop depositors. This also implements
 /// backfilling emissions if the emitter has not distributed to this version of the backstop before.
+#[cfg(test)]
 pub fn distribute(e: &Env) -> i128 {
     let is_backfill: bool;
     let mut needs_reset: bool = false;
@@ -215,6 +218,7 @@ pub fn distribute(e: &Env) -> i128 {
 /// Assign backstop and pool emissions to `pool` based on the reward zone and the backstop emissions index
 /// Returns the amount of backstop and pool emissions assigned to the pool
 #[allow(clippy::zero_prefixed_literal)]
+#[cfg(test)]
 pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     let pool_balance = storage::get_pool_balance(e, pool);
     let new_emissions = storage::get_rz_emis(e, pool);
@@ -259,6 +263,7 @@ pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
 }
 
 /// Set a new EPS for the backstop
+#[cfg(test)]
 pub fn set_backstop_emission_eps(
     e: &Env,
     pool_id: &Address,

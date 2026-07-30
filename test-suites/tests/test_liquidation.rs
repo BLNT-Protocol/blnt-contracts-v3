@@ -89,6 +89,7 @@ fn test_liquidations() {
 
     // have Frodo Q4W some backstop deposits
     let frodo_pre_q4w_amount = 10_000 * SCALAR_7;
+    fixture.backstop.distribute();
     fixture.backstop.queue_blnd_usdc_withdrawal(
         &frodo,
         &pool_fixture.pool.address,
@@ -159,7 +160,6 @@ fn test_liquidations() {
         // Let one week pass
         fixture.jump(60 * 60 * 24 * 7);
         // Update emissions
-        fixture.emitter.distribute();
         fixture.backstop.distribute();
         pool_fixture.pool.gulp_emissions();
     }
@@ -481,6 +481,7 @@ fn test_liquidations() {
     // allow 100 blocks to pass
     fixture.jump_with_sequence(101 * 5);
     // fill bad debt auction
+    fixture.backstop.distribute();
     let frodo_bstop_pre_fill = fixture.lp.balance(&frodo);
     let backstop_bstop_pre_fill = fixture.lp.balance(&fixture.backstop.address);
     let first_fill = pool_fixture.pool.fill_bad_debt_auction(&frodo, &20);
@@ -551,6 +552,7 @@ fn test_liquidations() {
     // allow another 50 blocks to pass (150 total)
     fixture.jump_with_sequence(50 * 5);
     // fill bad debt auction
+    fixture.backstop.distribute();
     let frodo_bstop_pre_fill = fixture.lp.balance(&frodo);
     let backstop_bstop_pre_fill = fixture.lp.balance(&fixture.backstop.address);
     let second_fill = pool_fixture.pool.fill_bad_debt_auction(&frodo, &100);
@@ -591,6 +593,7 @@ fn test_liquidations() {
     );
     //jump a month
     fixture.jump(45 * 24 * 60 * 60);
+    fixture.backstop.distribute();
     let second_withdrawal = fixture.backstop.withdraw_blnd_usdc(
         &frodo,
         &pool_fixture.pool.address,
@@ -724,6 +727,7 @@ fn test_liquidations() {
     // pay roughly 25% of bad debt, then default the residual only after the
     // remaining tier capital is verified below the operational minimum.
     fixture.jump_with_sequence(351 * 5);
+    fixture.backstop.distribute();
 
     let stable_pre_bad_debt = pool_fixture
         .pool

@@ -354,7 +354,6 @@ fn test_pool_user() {
 
     // allow the rest of the emissions period to pass (6 days - 5d23h59m emitted for XLM supply)
     fixture.jump(6 * 24 * 60 * 60);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
     assert_eq!(fixture.env.auths().len(), 0); // no auth required to update emissions
@@ -834,6 +833,7 @@ fn test_pool_config() {
     assert_eq!(new_pool_config.status, 0);
 
     // Queue 50% of backstop for withdrawal
+    fixture.backstop.distribute();
     fixture.backstop.queue_blnd_usdc_withdrawal(
         &fixture.users[0],
         &pool_fixture.pool.address,

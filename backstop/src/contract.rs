@@ -13,7 +13,10 @@ use crate::{
     dependencies::{
         BackstopValuationBinding, BackstopValuationClient, EmitterClient, PoolFactoryClient,
     },
-    emissions::{self, BlndEmissionQuote, OngoingBlndSplit, RewardZoneCheckpoint},
+    emissions::{
+        self, BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
+        PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
+    },
     errors::BackstopError,
     events::BackstopEvents,
     storage,
@@ -274,21 +277,37 @@ pub trait Backstop {
     /// Quote the immutable 70% backstop / 30% pool split with carry.
     fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
-    /// Update the backstop with new emissions for all reward zone pools
-    ///
-    /// Returns the amount of new emissions for all reward zone pools
-    fn distribute(e: Env) -> i128;
+    /// Reconcile and allocate newly received BLND across the reward zone.
+    fn distribute(e: Env) -> OngoingDistribution;
 
-    /// Distribute emissions to a reward zone pool and its backstop
-    ///
-    /// Returns the amount of BLND emissions distributed to the pool
-    ///
-    /// ### Arguments
-    /// * `pool` - The address of the pool to distribute emissions to
-    ///
-    /// ### Errors
-    /// If the pool is not in the reward zone or the pool does not authorize the call
-    fn gulp_emissions(e: Env, pool: Address) -> i128;
+    /// Return aggregate ongoing BLND receipts, allocations, and carries.
+    fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
+
+    /// Return one pool's ongoing BLND allocation and active tier amounts.
+    fn pool_ongoing_emissions(e: Env, pool: Address) -> PoolOngoingEmissions;
+
+    /// Return whether emitter output has bound the configured BLND token.
+    fn blnd_binding_verified(e: Env) -> bool;
+
+    /// Return one user's pending ongoing BLND for an eligible backstop tier.
+    fn user_ongoing_emissions(
+        e: Env,
+        user: Address,
+        pool: Address,
+        tier: BackstopTier,
+    ) -> UserOngoingEmissions;
+
+    /// Claim both eligible backstop tiers' ongoing BLND to a chosen recipient.
+    fn claim_ongoing_blnd(e: Env, user: Address, pool: Address, recipient: Address) -> i128;
+
+    /// Return one pool's reserved, unclaimed 30% tranche.
+    fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation;
+
+    /// Move one pool's accrued 30% tranche into its claim reservation.
+    fn gulp_pool_emissions(e: Env, pool: Address) -> i128;
+
+    /// Pay an authorized reserve-token claim from one pool's reservation.
+    fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128);
 
     /// Add a threshold-qualified pool with positive active BLND to the reward zone.
     ///
@@ -314,19 +333,6 @@ pub trait Backstop {
     /// ### Errors
     /// If the pool is not below the threshold or if the pool is not in the reward zone
     fn remove_reward(e: Env, to_remove: Address);
-
-    /// Claim backstop deposit emissions from a list of pools for `from`
-    ///
-    /// Returns the amount of LP tokens minted
-    ///
-    /// ### Arguments
-    /// * `from` - The address of the user claiming emissions
-    /// * `pool_addresses` - The Vec of addresses to claim backstop deposit emissions from
-    /// * `min_lp_tokens_out` - The minimum amount of LP tokens to mint with the claimed BLND
-    ///
-    /// ### Errors
-    /// If an invalid pool address is included
-    fn claim(e: Env, from: Address, pool_addresses: Vec<Address>, min_lp_tokens_out: i128) -> i128;
 
     /// Drop initial BLND to a list of addresses through the emitter
     fn drop(e: Env);
@@ -823,21 +829,65 @@ impl Backstop for BackstopContract {
         emissions::quote_ongoing_blnd_split(&e, distribution, prior_carry)
     }
 
-    fn distribute(e: Env) -> i128 {
+    fn distribute(e: Env) -> OngoingDistribution {
         storage::extend_instance(&e);
-        let new_emissions = emissions::distribute(&e);
+        let distribution = emissions::distribute(&e);
 
-        BackstopEvents::distribute(&e, new_emissions);
-        new_emissions
+        BackstopEvents::distribute(&e, distribution.received);
+        distribution
     }
 
-    fn gulp_emissions(e: Env, pool: Address) -> i128 {
+    fn ongoing_emission_state(e: Env) -> OngoingEmissionState {
         storage::extend_instance(&e);
-        pool.require_auth();
-        let (backstop_emissions, pool_emissions) = emissions::gulp_emissions(&e, &pool);
+        emissions::get_ongoing_emission_state(&e)
+    }
 
-        BackstopEvents::gulp_emissions(&e, pool, backstop_emissions, pool_emissions);
-        pool_emissions
+    fn pool_ongoing_emissions(e: Env, pool: Address) -> PoolOngoingEmissions {
+        storage::extend_instance(&e);
+        backstop::require_registered_pool(&e, &pool);
+        emissions::get_pool_ongoing_emissions(&e, &pool)
+    }
+
+    fn blnd_binding_verified(e: Env) -> bool {
+        storage::extend_instance(&e);
+        storage::get_blnd_binding_verified(&e)
+    }
+
+    fn user_ongoing_emissions(
+        e: Env,
+        user: Address,
+        pool: Address,
+        tier: BackstopTier,
+    ) -> UserOngoingEmissions {
+        storage::extend_instance(&e);
+        backstop::require_registered_pool(&e, &pool);
+        emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool)
+    }
+
+    fn claim_ongoing_blnd(e: Env, user: Address, pool: Address, recipient: Address) -> i128 {
+        storage::extend_instance(&e);
+        let amount = emissions::claim_user_ongoing_blnd(&e, &user, &pool, &recipient);
+        BackstopEvents::claim_ongoing_blnd(&e, user, pool, recipient, amount);
+        amount
+    }
+
+    fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation {
+        storage::extend_instance(&e);
+        backstop::require_registered_pool(&e, &pool);
+        emissions::get_pool_emission_reservation(&e, &pool)
+    }
+
+    fn gulp_pool_emissions(e: Env, pool: Address) -> i128 {
+        storage::extend_instance(&e);
+        let amount = emissions::gulp_pool_ongoing_emissions(&e, &pool);
+        BackstopEvents::gulp_emissions(&e, pool, 0, amount);
+        amount
+    }
+
+    fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128) {
+        storage::extend_instance(&e);
+        emissions::claim_reserved_pool_emissions(&e, &pool, &recipient, amount);
+        BackstopEvents::claim_pool_emissions(&e, pool, recipient, amount);
     }
 
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>) {
@@ -854,22 +904,13 @@ impl Backstop for BackstopContract {
         BackstopEvents::rw_zone_remove(&e, to_remove);
     }
 
-    fn claim(e: Env, from: Address, pool_addresses: Vec<Address>, min_lp_tokens_out: i128) -> i128 {
-        storage::extend_instance(&e);
-        from.require_auth();
-
-        let amount = emissions::execute_claim(&e, &from, &pool_addresses, &min_lp_tokens_out);
-
-        BackstopEvents::claim(&e, from, amount);
-        amount
-    }
-
     fn drop(e: Env) {
         let mut drop_list = storage::get_drop_list(&e);
         let backfilled_emissions = storage::get_backfill_emissions(&e);
         drop_list.push_back((e.current_contract_address(), backfilled_emissions));
         let emitter_client = EmitterClient::new(&e, &storage::get_emitter(&e));
-        emitter_client.drop(&drop_list)
+        emitter_client.drop(&drop_list);
+        storage::set_backfill_funded_amount(&e, backfilled_emissions);
     }
 
     /********** Fund Management *********/

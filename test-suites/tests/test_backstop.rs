@@ -65,6 +65,9 @@ fn test_backstop() {
     assert_eq!(sam_bstop_token_balance, 12_500 * SCALAR_7);
 
     // Sam deposits 12.5k backstop tokens
+    // Refresh the ongoing-emission checkpoint immediately before changing an
+    // active reward-zone weight.
+    fixture.backstop.distribute();
     let amount = 12_500 * SCALAR_7;
     let result = fixture
         .backstop
@@ -135,7 +138,6 @@ fn test_backstop() {
     // Simulate the pool backstop making money and progress 6d23h (+6d23hr 20% emissions for sam)
     fixture.jump(60 * 60 * 24 * 7 - 60 * 60);
     // Start the next emission cycle
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
@@ -145,7 +147,7 @@ fn test_backstop() {
             (
                 fixture.backstop.address.clone(),
                 (Symbol::new(&fixture.env, "distribute"),).into_val(&fixture.env),
-                ((60 * 60 * 24 * 7 + 60) * SCALAR_7).into_val(&fixture.env),
+                ((60 * 60 * 24 * 7 - 60 * 60) * SCALAR_7).into_val(&fixture.env),
             )
         ]
     );
@@ -283,7 +285,6 @@ fn test_backstop() {
 
     // Start the next emission cycle and jump 7 days (No emissions earned for sam)
     fixture.jump(60 * 60 * 24 * 7);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool.gulp_emissions();
 
@@ -338,7 +339,6 @@ fn test_backstop() {
 
     // Start the next emission cycle and jump 7 days (+7d 11% emissions for sam)
     fixture.jump(60 * 60 * 24 * 7);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool.gulp_emissions();
 
@@ -385,8 +385,9 @@ fn test_backstop() {
         bstop_bstop_token_balance
     );
 
-    // Jump to the end of the withdrawal period (+7d 11% emissions for sam, emissions expire)
+    // Jump to the end of the withdrawal period (+16d1s at 11% for Sam).
     fixture.jump(60 * 60 * 24 * 16 + 1);
+    fixture.backstop.distribute();
     // Sam withdraws the queue position
     let amount = 6_250 * SCALAR_7; // shares
     let result = fixture
@@ -444,13 +445,12 @@ fn test_backstop() {
         bstop_bstop_token_balance
     );
 
-    // Sam claims emissions earned on the backstop deposit
+    // Sam claims direct BLND emissions earned on the backstop deposit.
     let bstop_blend_balance = &fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let comet_blend_balance = &fixture.tokens[TokenIndex::BLND].balance(&fixture.lp.address);
-    let lp_tokens_minted =
-        fixture
-            .backstop
-            .claim(&sam, &vec![&fixture.env, pool.address.clone()], &0);
+    let sam_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
+    let blnd_claimed = fixture
+        .backstop
+        .claim_ongoing_blnd(&sam, &pool.address, &sam);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -458,12 +458,12 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "claim"),
+                    Symbol::new(&fixture.env, "claim_ongoing_blnd"),
                     vec![
                         &fixture.env,
                         sam.to_val(),
-                        vec![&fixture.env, pool.address.clone()].to_val(),
-                        0i128.into_val(&fixture.env),
+                        pool.address.to_val(),
+                        sam.to_val(),
                     ]
                 )),
                 sub_invocations: std::vec![]
@@ -472,27 +472,15 @@ fn test_backstop() {
     );
 
     // 6d23hr at 20% of 0.7 BLND/sec
-    // 7d + 7d at 11% of 0.7 BLND/sec
+    // 7d + 16d1s at 11% of 0.7 BLND/sec
     let emission_share_1 = 0_7000000.fixed_mul_floor(0_2000000, SCALAR_7).unwrap();
     let emission_share_2 = 0_7000000.fixed_mul_floor(0_1111111, SCALAR_7).unwrap();
-    let emitted_blnd_1 = ((7 * 24 * 60 * 60 - 61 * 60) * SCALAR_7)
+    let emitted_blnd_1 = ((7 * 24 * 60 * 60 - 60 * 60) * SCALAR_7)
         .fixed_mul_floor(emission_share_1, SCALAR_7)
         .unwrap();
-    let emitted_blnd_2 = ((14 * 24 * 60 * 60 + 1) * SCALAR_7)
+    let emitted_blnd_2 = ((23 * 24 * 60 * 60 + 1) * SCALAR_7)
         .fixed_mul_floor(emission_share_2, SCALAR_7)
         .unwrap();
-    let compounded_deposit_event = event_from_end(&fixture.env, 2);
-    assert_eq!(compounded_deposit_event.0, fixture.backstop.address);
-    assert_eq!(
-        compounded_deposit_event.1,
-        (
-            Symbol::new(&fixture.env, "deposit"),
-            BackstopTier::BlndUsdc,
-            pool.address.clone(),
-            sam.clone()
-        )
-            .into_val(&fixture.env)
-    );
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
@@ -500,20 +488,25 @@ fn test_backstop() {
             &fixture.env,
             (
                 fixture.backstop.address.clone(),
-                (Symbol::new(&fixture.env, "claim"), sam.clone()).into_val(&fixture.env),
-                lp_tokens_minted.into_val(&fixture.env),
+                (
+                    Symbol::new(&fixture.env, "claim_ongoing"),
+                    sam.clone(),
+                    pool.address.clone()
+                )
+                    .into_val(&fixture.env),
+                (sam.clone(), blnd_claimed).into_val(&fixture.env),
             )
         ]
     );
 
-    assert_approx_eq_abs(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.lp.address) - comet_blend_balance,
-        emitted_blnd_1 + emitted_blnd_2,
-        SCALAR_7,
+    assert_approx_eq_abs(blnd_claimed, emitted_blnd_1 + emitted_blnd_2, SCALAR_7);
+    assert_eq!(
+        fixture.tokens[TokenIndex::BLND].balance(&sam),
+        sam_blend_balance + blnd_claimed
     );
     assert_approx_eq_abs(
         bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        emitted_blnd_1 + emitted_blnd_2,
+        blnd_claimed,
         SCALAR_7,
     );
 }

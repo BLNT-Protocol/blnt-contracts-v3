@@ -239,6 +239,7 @@ fn test_backstop_and_pool_failure() {
     // to fill the full auction (take all backstop tokens)
     fixture.jump_with_sequence(200 * 5 + 5);
 
+    fixture.backstop.distribute();
     let fill = pool_fixture.pool.fill_bad_debt_auction(&elrond, &100);
     assert!(fill.complete);
     pool_fixture.pool.submit(

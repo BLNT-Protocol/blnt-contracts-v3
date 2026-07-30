@@ -1,8 +1,10 @@
 use soroban_sdk::{
-    contracttype, unwrap::UnwrapOptimized, vec, Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
+    contracttype, panic_with_error, unwrap::UnwrapOptimized, vec, Address, Env, IntoVal, Symbol,
+    TryFromVal, Val, Vec,
 };
 
 use crate::backstop::{BackstopTier, PoolBalance, TierTotals, UserBalance};
+use crate::BackstopError;
 
 /********** Ledger Thresholds **********/
 
@@ -51,6 +53,55 @@ pub struct UserEmissionData {
     pub accrued: i128,
 }
 
+/// Pool-local ongoing BLND allocation and cached active LP-token amounts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolOngoingEmissions {
+    pub accrued_backstop: i128,
+    pub accrued_pool: i128,
+    pub active_blnd_usdc: i128,
+    pub active_blnd_usdc_shares: i128,
+    pub active_blnd_xlm: i128,
+    pub active_blnd_xlm_shares: i128,
+    pub backstop_tier_carry: i128,
+    pub blnd_usdc_index: i128,
+    pub blnd_usdc_index_carry: i128,
+    pub blnd_xlm_index: i128,
+    pub blnd_xlm_index_carry: i128,
+}
+
+/// One user's ongoing BLND checkpoint in one BLND-bearing tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserOngoingEmissions {
+    pub accrued: i128,
+    pub carry: i128,
+    pub index: i128,
+}
+
+/// Pool-owned reservation of the 30% supply/borrow tranche.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolEmissionReservation {
+    pub available: i128,
+    pub last_gulp: Option<u64>,
+}
+
+/// Aggregate accounting for ongoing BLND held by the backstop.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct OngoingEmissionState {
+    pub backstop_allocated: i128,
+    pub backstop_carry: i128,
+    pub backstop_claimed: i128,
+    pub last_distribution: Option<u64>,
+    pub pool_allocated: i128,
+    pub pool_carry: i128,
+    pub split_carry: i128,
+    pub total_claimed: i128,
+    pub total_received: i128,
+}
+
 /********** Storage Key Types **********/
 
 const EMITTER_KEY: &str = "Emitter";
@@ -60,11 +111,18 @@ const BLND_TOKEN_KEY: &str = "BLNDTkn";
 const BLND_XLM_TOKEN_KEY: &str = "BXLMTkn";
 const USDC_TOKEN_KEY: &str = "USDCTkn";
 const BACKSTOP_VALUATION_KEY: &str = "BstopVal";
+#[cfg(test)]
 const LAST_DISTRO_KEY: &str = "LastDist";
 const REWARD_ZONE_KEY: &str = "RZ";
 const DROP_LIST_KEY: &str = "DropList";
 const BACKFILL_EMISSIONS_KEY: &str = "BackfillEmis";
+#[cfg(test)]
 const BACKFILL_STATUS_KEY: &str = "Backfill";
+const BACKFILL_FUNDED_AMOUNT_KEY: &str = "BFundAmt";
+const TOTAL_BACKFILL_CLAIMED_KEY: &str = "BFClaimed";
+const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
+const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
+const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 
 #[derive(Clone)]
 #[contracttype]
@@ -100,6 +158,9 @@ pub enum BackstopDataKey {
     RzEmis(Address),
     BEmisData(Address),
     UEmisData(PoolUserKey),
+    PoolOngoingEmissions(Address),
+    PoolEmissionReservation(Address),
+    UserOngoingEmissions(PoolUserTierKey),
 }
 
 /****************************
@@ -452,6 +513,7 @@ pub fn set_tier_totals(e: &Env, tier: BackstopTier, totals: &TierTotals) {
 /********** Distribution / Reward Zone **********/
 
 /// Get the timestamp of when the next emission cycle begins
+#[cfg(test)]
 pub fn get_last_distribution_time(e: &Env) -> u64 {
     get_persistent_default(
         e,
@@ -466,6 +528,7 @@ pub fn get_last_distribution_time(e: &Env) -> u64 {
 ///
 /// ### Arguments
 /// * `timestamp` - The timestamp the distribution window will open
+#[cfg(test)]
 pub fn set_last_distribution_time(e: &Env, timestamp: &u64) {
     e.storage()
         .persistent()
@@ -503,6 +566,171 @@ pub fn set_reward_zone(e: &Env, reward_zone: &Vec<Address>) {
     );
 }
 
+/// Get the most recent fully completed reward-zone distribution checkpoint.
+pub fn get_reward_zone_checkpoint(e: &Env) -> Option<u64> {
+    get_persistent_default(
+        e,
+        &Symbol::new(e, REWARD_ZONE_CHECKPOINT_KEY),
+        || None,
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Set the most recent fully completed reward-zone distribution checkpoint.
+pub fn set_reward_zone_checkpoint(e: &Env, timestamp: u64) {
+    let key = Symbol::new(e, REWARD_ZONE_CHECKPOINT_KEY);
+    e.storage().persistent().set(&key, &timestamp);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Return whether the configured BLND token has been bound to emitter output.
+pub fn get_blnd_binding_verified(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, BLND_BINDING_VERIFIED_KEY))
+        .unwrap_or(false)
+}
+
+/// Record that the configured BLND token has been bound to emitter output.
+pub fn set_blnd_binding_verified(e: &Env) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, BLND_BINDING_VERIFIED_KEY), &true);
+}
+
+/// Get aggregate ongoing BLND accounting.
+pub fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, ONGOING_EMISSION_STATE_KEY))
+        .unwrap_or(OngoingEmissionState {
+            backstop_allocated: 0,
+            backstop_carry: 0,
+            backstop_claimed: 0,
+            last_distribution: None,
+            pool_allocated: 0,
+            pool_carry: 0,
+            split_carry: 0,
+            total_claimed: 0,
+            total_received: 0,
+        })
+}
+
+/// Set aggregate ongoing BLND accounting.
+pub fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, ONGOING_EMISSION_STATE_KEY), state);
+}
+
+/// Get one pool's ongoing BLND allocation and cached active tier amounts.
+pub fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoingEmissions {
+    let key = BackstopDataKey::PoolOngoingEmissions(pool.clone());
+    get_persistent_default(
+        e,
+        &key,
+        || PoolOngoingEmissions {
+            accrued_backstop: 0,
+            accrued_pool: 0,
+            active_blnd_usdc: 0,
+            active_blnd_usdc_shares: 0,
+            active_blnd_xlm: 0,
+            active_blnd_xlm_shares: 0,
+            backstop_tier_carry: 0,
+            blnd_usdc_index: 0,
+            blnd_usdc_index_carry: 0,
+            blnd_xlm_index: 0,
+            blnd_xlm_index_carry: 0,
+        },
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Set one pool's ongoing BLND allocation and cached active tier amounts.
+pub fn set_pool_ongoing_emissions(e: &Env, pool: &Address, emissions: &PoolOngoingEmissions) {
+    let key = BackstopDataKey::PoolOngoingEmissions(pool.clone());
+    e.storage().persistent().set(&key, emissions);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Get one user's ongoing BLND checkpoint for one tier and pool.
+pub fn get_user_ongoing_emissions(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> UserOngoingEmissions {
+    let key = BackstopDataKey::UserOngoingEmissions(PoolUserTierKey {
+        pool: pool.clone(),
+        tier,
+        user: user.clone(),
+    });
+    get_persistent_default(
+        e,
+        &key,
+        || UserOngoingEmissions {
+            accrued: 0,
+            carry: 0,
+            index: 0,
+        },
+        LEDGER_THRESHOLD_USER,
+        LEDGER_BUMP_USER,
+    )
+}
+
+/// Set one user's ongoing BLND checkpoint for one tier and pool.
+pub fn set_user_ongoing_emissions(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+    emissions: &UserOngoingEmissions,
+) {
+    let key = BackstopDataKey::UserOngoingEmissions(PoolUserTierKey {
+        pool: pool.clone(),
+        tier,
+        user: user.clone(),
+    });
+    e.storage().persistent().set(&key, emissions);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/// Get one pool's reserved, unclaimed 30% tranche.
+pub fn get_pool_emission_reservation(e: &Env, pool: &Address) -> PoolEmissionReservation {
+    let key = BackstopDataKey::PoolEmissionReservation(pool.clone());
+    get_persistent_default(
+        e,
+        &key,
+        || PoolEmissionReservation {
+            available: 0,
+            last_gulp: None,
+        },
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Set one pool's reserved, unclaimed 30% tranche.
+pub fn set_pool_emission_reservation(
+    e: &Env,
+    pool: &Address,
+    reservation: &PoolEmissionReservation,
+) {
+    let key = BackstopDataKey::PoolEmissionReservation(pool.clone());
+    e.storage().persistent().set(&key, reservation);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
 /// Get the current total backfill emissions
 pub fn get_backfill_emissions(e: &Env) -> i128 {
     get_persistent_default(
@@ -518,6 +746,7 @@ pub fn get_backfill_emissions(e: &Env) -> i128 {
 ///
 /// ### Arguments
 /// * `emissions` - The total emissions currently needed to fulfill all backfilled emissions
+#[cfg(test)]
 pub fn set_backfill_emissions(e: &Env, emissions: &i128) {
     e.storage()
         .persistent()
@@ -529,9 +758,60 @@ pub fn set_backfill_emissions(e: &Env, emissions: &i128) {
     );
 }
 
+/// Return the funded migration-backfill reserve that remains protected from
+/// ongoing-emission accounting.
+pub fn get_remaining_backfill_reserve(e: &Env) -> i128 {
+    let funded = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY))
+        .unwrap_or(0);
+    let claimed = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
+        .unwrap_or(0);
+    if funded < 0 || claimed < 0 || claimed > funded {
+        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
+    }
+    funded - claimed
+}
+
+/// Record the exact migration-backfill amount received from the emitter.
+pub fn set_backfill_funded_amount(e: &Env, funded: i128) {
+    let claimed = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
+        .unwrap_or(0);
+    if funded < 0 || claimed < 0 || claimed > funded {
+        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
+    }
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY), &funded);
+}
+
+/// Record aggregate migration-backfill claims.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn set_total_backfill_claimed(e: &Env, claimed: i128) {
+    let funded = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY))
+        .unwrap_or(0);
+    if claimed < 0 || funded < 0 || claimed > funded {
+        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
+    }
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY), &claimed);
+}
+
 /// Get the current total backfill status
 ///
 /// None if no status has been recorded, otherwise the current status
+#[cfg(test)]
 pub fn get_backfill_status(e: &Env) -> Option<bool> {
     get_persistent_default(
         e,
@@ -546,6 +826,7 @@ pub fn get_backfill_status(e: &Env) -> Option<bool> {
 ///
 /// ### Arguments
 /// * `status` - True if the backfill emissions are currently active, false otherwise
+#[cfg(test)]
 pub fn set_backfill_status(e: &Env, status: &bool) {
     e.storage()
         .persistent()
@@ -561,6 +842,7 @@ pub fn set_backfill_status(e: &Env, status: &bool) {
 ///
 /// ### Arguments
 /// * `pool` - The pool
+#[cfg(test)]
 pub fn get_rz_emis(e: &Env, pool: &Address) -> RzEmissions {
     let key = BackstopDataKey::RzEmis(pool.clone());
     get_persistent_default(
@@ -580,6 +862,7 @@ pub fn get_rz_emis(e: &Env, pool: &Address) -> RzEmissions {
 /// ### Arguments
 /// * `pool` - The pool
 /// * `emissions` - The index of the backstop's emissions
+#[cfg(test)]
 pub fn set_rz_emis(e: &Env, pool: &Address, emissions: &RzEmissions) {
     let key = BackstopDataKey::RzEmis(pool.clone());
     e.storage()
@@ -596,6 +879,7 @@ pub fn set_rz_emis(e: &Env, pool: &Address, emissions: &RzEmissions) {
 ///
 /// ### Arguments
 /// * `pool` - The pool
+#[cfg(test)]
 pub fn get_backstop_emis_data(e: &Env, pool: &Address) -> Option<BackstopEmissionData> {
     let key = BackstopDataKey::BEmisData(pool.clone());
     get_persistent_default(
@@ -612,6 +896,7 @@ pub fn get_backstop_emis_data(e: &Env, pool: &Address) -> Option<BackstopEmissio
 /// ### Arguments
 /// * `pool` - The pool
 /// * `backstop_emis_data` - The new emission data for the backstop
+#[cfg(test)]
 pub fn set_backstop_emis_data(e: &Env, pool: &Address, backstop_emis_data: &BackstopEmissionData) {
     let key = BackstopDataKey::BEmisData(pool.clone());
     e.storage()
@@ -627,6 +912,7 @@ pub fn set_backstop_emis_data(e: &Env, pool: &Address, backstop_emis_data: &Back
 /// ### Arguments
 /// * `pool` - The pool whose backstop the user's emissions are for
 /// * `user` - The user's address
+#[cfg(test)]
 pub fn get_user_emis_data(e: &Env, pool: &Address, user: &Address) -> Option<UserEmissionData> {
     let key = BackstopDataKey::UEmisData(PoolUserKey {
         pool: pool.clone(),
@@ -641,6 +927,7 @@ pub fn get_user_emis_data(e: &Env, pool: &Address, user: &Address) -> Option<Use
 /// * `pool` - The pool whose backstop the user's emissions are for
 /// * `user` - The user's address
 /// * `user_emis_data` - The new emission data for the user
+#[cfg(test)]
 pub fn set_user_emis_data(
     e: &Env,
     pool: &Address,

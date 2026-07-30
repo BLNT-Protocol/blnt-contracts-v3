@@ -46,7 +46,6 @@ fn exercise_reward_zone(wasm: bool) {
     assert_eq!(fixture.backstop.reward_zone(), vec![&e, first.clone()]);
     assert!(fixture.backstop.try_add_reward(&second, &None).is_err());
 
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     assert_eq!(
         fixture.backstop.reward_zone_checkpoint().unwrap().timestamp,

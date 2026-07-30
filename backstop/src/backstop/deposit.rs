@@ -22,9 +22,12 @@ pub fn execute_deposit_for_tier(
     if interest_tier_locked(e, tier, pool_address) {
         panic_with_error!(e, BackstopError::InterestTierLocked);
     }
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
 
+    #[cfg(test)]
     if tier == BackstopTier::BlndUsdc {
         emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
     }
@@ -42,6 +45,7 @@ pub fn execute_deposit_for_tier(
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     update_tier_totals(e, tier, amount, to_mint, 0);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 
     to_mint
 }

@@ -1,11 +1,25 @@
+#[cfg(test)]
 mod claim;
-pub use claim::execute_claim;
 
+#[cfg(test)]
 mod distributor;
+#[cfg(test)]
 pub use distributor::update_emissions;
 
+#[cfg(test)]
 mod manager;
-pub use manager::{distribute, gulp_emissions};
+
+mod ongoing;
+pub use crate::storage::{
+    OngoingEmissionState, PoolEmissionReservation, PoolOngoingEmissions, UserOngoingEmissions,
+};
+pub use ongoing::OngoingDistribution;
+pub(crate) use ongoing::{
+    checkpoint_user_ongoing_for_weight_change, claim_reserved_pool_emissions,
+    claim_user_ongoing_blnd, distribute, finish_pool_weight_change, get_ongoing_emission_state,
+    get_pool_emission_reservation, get_pool_ongoing_emissions, gulp_pool_ongoing_emissions,
+    prepare_pool_weight_change, preview_user_ongoing_emissions, refresh_pool_ongoing_assets,
+};
 
 mod policy;
 pub(crate) use policy::{

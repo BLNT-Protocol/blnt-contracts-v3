@@ -4,7 +4,7 @@ use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, I256};
 use crate::{
     constants::{BACKSTOP_VALUATION_VERSION, SCALAR_7},
     dependencies::{AssetValuation, BackstopValuationClient},
-    storage, BackstopError,
+    emissions, storage, BackstopError,
 };
 
 use super::{require_registered_pool, tier_token, update_tier_totals, BackstopTier};
@@ -311,10 +311,12 @@ fn apply_pool_tier_loss(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     if assets == 0 {
         return;
     }
+    emissions::prepare_pool_weight_change(e, tier, pool);
     let mut balance = storage::get_pool_balance_for_tier(e, tier, pool);
     balance.withdraw(e, assets, 0);
     storage::set_pool_balance_for_tier(e, tier, pool, &balance);
     update_tier_totals(e, tier, -assets, 0, 0);
+    emissions::finish_pool_weight_change(e, tier, pool);
 }
 
 fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {

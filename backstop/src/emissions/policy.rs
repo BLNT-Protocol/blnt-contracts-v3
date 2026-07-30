@@ -149,7 +149,7 @@ pub(crate) fn eligible_blnd(e: &Env, values: &BlndEmissionValues) -> i128 {
     checked_add(e, values.blnd_usdc, values.blnd_xlm)
 }
 
-fn pool_active_emission_assets(e: &Env, tier: BackstopTier, pool: &Address) -> i128 {
+pub(crate) fn pool_active_emission_assets(e: &Env, tier: BackstopTier, pool: &Address) -> i128 {
     let balance = storage::get_pool_balance_for_tier(e, tier, pool);
     if balance.tokens < 0 || balance.shares < 0 || balance.q4w < 0 || balance.q4w > balance.shares {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
@@ -162,10 +162,30 @@ fn spot_underlying_blnd(e: &Env, tier: BackstopTier, lp_amount: i128) -> i128 {
     if lp_amount < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
+    let (total_supply, blnd_reserve) = comet_composition(e, tier);
+    underlying_blnd_from_composition(e, lp_amount, total_supply, blnd_reserve)
+}
+
+pub(crate) fn comet_composition(e: &Env, tier: BackstopTier) -> (i128, i128) {
+    if tier == BackstopTier::Usdc {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
     let comet = CometClient::new(e, &tier_token(e, tier));
     let total_supply = comet.get_total_supply();
     let blnd_reserve = comet.get_balance(&storage::get_blnd_token(e));
-    if total_supply <= 0 || blnd_reserve < 0 || lp_amount > total_supply {
+    if total_supply <= 0 || blnd_reserve < 0 {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    (total_supply, blnd_reserve)
+}
+
+pub(crate) fn underlying_blnd_from_composition(
+    e: &Env,
+    lp_amount: i128,
+    total_supply: i128,
+    blnd_reserve: i128,
+) -> i128 {
+    if lp_amount < 0 || total_supply <= 0 || blnd_reserve < 0 || lp_amount > total_supply {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
     proportional_floor(e, lp_amount, blnd_reserve, total_supply)
@@ -182,7 +202,7 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
 }
 
-fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
+pub(crate) fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
     if value < 0 || numerator < 0 || denominator <= 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }

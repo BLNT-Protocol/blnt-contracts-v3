@@ -34,6 +34,7 @@ fn test_backstop_rz_changes_handle_emissions() {
         ],
         &sam,
     );
+    fixture.backstop.distribute();
     fixture
         .backstop
         .deposit_blnd_usdc(&sam, &pool_fixture.pool.address, &(12500 * SCALAR_7));
@@ -44,7 +45,6 @@ fn test_backstop_rz_changes_handle_emissions() {
     );
 
     fixture.jump(60 * 60 * 24 * 21);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
     fixture.backstop.withdraw_blnd_usdc(
@@ -72,30 +72,19 @@ fn test_backstop_rz_changes_handle_emissions() {
     let result = pool_fixture.pool.try_gulp_emissions();
     assert!(result.is_err());
 
-    // claim 3 days later
+    // Claim the allocation accrued before reward-zone removal. Removed pools
+    // do not continue accruing ongoing emissions.
     fixture.jump(60 * 60 * 24 * 3);
-    let result = fixture.backstop.claim(
-        &sam,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(result, 55_141_3083663);
+    let result = fixture
+        .backstop
+        .claim_ongoing_blnd(&sam, &pool_fixture.pool.address, &sam);
+    assert_eq!(result, 907_200 * SCALAR_7);
 
     fixture.jump(60 * 60 * 24 * 4);
-    let result = fixture.backstop.claim(
-        &sam,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(result, 54_030_2461020);
-
-    fixture.jump(1);
-    let result = fixture.backstop.claim(
-        &sam,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
-    );
-    assert_eq!(result, 0);
+    assert!(fixture
+        .backstop
+        .try_claim_ongoing_blnd(&sam, &pool_fixture.pool.address, &sam)
+        .is_err());
 
     fixture
         .backstop
@@ -105,13 +94,12 @@ fn test_backstop_rz_changes_handle_emissions() {
         .backstop
         .add_reward(&pool_fixture.pool.address, &None);
 
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
 
     let result = pool_fixture.pool.gulp_emissions();
 
     // Emissions are distributed to the pool because the reward zone was empty when the backstop was added
-    assert_eq!(result, 1814403000000); // (60 * 60 * 24 * 7 + 1) * 0.3
+    assert_eq!(result, 1814400000000); // (60 * 60 * 24 * 7) * 0.3
 }
 
 #[test]
@@ -139,7 +127,6 @@ fn test_backstop_full_rz_under_limits() {
 
     // 1 Pool already in rz. Create 29 new pools.
     // They don't need reserves as we're not going to use them.
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     let mut pools: Vec<Address> = vec![&fixture.env, pool_fixture.pool.address.clone()];
     for _ in 0..29 {
@@ -165,7 +152,6 @@ fn test_backstop_full_rz_under_limits() {
 
     // Run distribute w/ 30 pools
     fixture.jump_with_sequence(60 * 60 * 24 * 5);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     let dist_resources = fixture.env.cost_estimate().resources();
     assert!(dist_resources.instructions < 100000000);
@@ -180,10 +166,13 @@ fn test_backstop_full_rz_under_limits() {
     assert!(dist_resources.disk_read_bytes < 200000 / 2);
     assert!(dist_resources.write_bytes < 132096 / 2);
 
-    // assert all pools can be gulped
-    for pool in pools.iter() {
-        let pool_client = PoolClient::new(&fixture.env, &pool);
-        let result = pool_client.gulp_emissions();
-        assert!(result > 0);
+    // The configured fixture pool can reserve its tranche. The 29 pools that
+    // intentionally have no reserves or emission configuration must reject
+    // before creating an unreachable candidate reservation.
+    assert!(PoolClient::new(&fixture.env, &pools.get_unchecked(0)).gulp_emissions() > 0);
+    for index in 1..pools.len() {
+        assert!(PoolClient::new(&fixture.env, &pools.get_unchecked(index))
+            .try_gulp_emissions()
+            .is_err());
     }
 }

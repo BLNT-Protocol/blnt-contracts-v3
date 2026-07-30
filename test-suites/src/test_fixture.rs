@@ -271,15 +271,10 @@ impl TestFixture<'_> {
         let pool_fixture = &self.pools[pool_index];
         let reserve_index = pool_fixture.reserves.get(&asset_index).unwrap();
         let res_emis_index = reserve_index * 2 + token_type;
-        self.env.as_contract(&pool_fixture.pool.address, || {
-            let emis_data = self
-                .env
-                .storage()
-                .persistent()
-                .get(&PoolDataKey::EmisData(res_emis_index))
-                .unwrap();
-            emis_data
-        })
+        pool_fixture
+            .pool
+            .get_reserve_emissions(&res_emis_index)
+            .unwrap()
     }
 
     /********** Chain Helpers ***********/

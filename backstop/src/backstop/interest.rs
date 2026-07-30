@@ -4,6 +4,7 @@ use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, I25
 use crate::{
     constants::{BACKSTOP_VALUATION_VERSION, SCALAR_7},
     dependencies::BackstopValuationClient,
+    emissions,
     errors::BackstopError,
     storage,
 };
@@ -315,6 +316,7 @@ fn apply_pool_tier_gain(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     if assets <= 0 {
         panic_with_error!(e, BackstopError::InvalidInterestLot);
     }
+    emissions::prepare_pool_weight_change(e, tier, pool);
     let mut balance = storage::get_pool_balance_for_tier(e, tier, pool);
     if balance.shares == 0 {
         panic_with_error!(e, BackstopError::InvalidInterestLot);
@@ -322,6 +324,7 @@ fn apply_pool_tier_gain(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     balance.tokens = checked_add(e, balance.tokens, assets);
     storage::set_pool_balance_for_tier(e, tier, pool, &balance);
     update_tier_totals(e, tier, assets, 0, 0);
+    emissions::finish_pool_weight_change(e, tier, pool);
 }
 
 fn get_interest_commitment(e: &Env, pool: &Address) -> Option<InterestCommitment> {

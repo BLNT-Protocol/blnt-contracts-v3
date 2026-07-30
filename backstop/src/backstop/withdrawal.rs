@@ -19,21 +19,27 @@ pub fn execute_queue_withdrawal_for_tier(
     amount: i128,
 ) -> Q4W {
     require_nonnegative(e, amount);
-
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
-
-    if tier == BackstopTier::BlndUsdc {
-        emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
-    }
+    #[cfg(test)]
+    let emission_user_balance = user_balance.clone();
 
     require_q4w_entry_capacity(e, from, pool_address);
     user_balance.queue_shares_for_withdrawal(e, amount);
+
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
+    #[cfg(test)]
+    if tier == BackstopTier::BlndUsdc {
+        emissions::update_emissions(e, pool_address, &pool_balance, from, &emission_user_balance);
+    }
+
     pool_balance.queue_for_withdraw(amount);
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     update_tier_totals(e, tier, 0, 0, amount);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 
     user_balance.q4w.last().unwrap_optimized()
 }
@@ -47,21 +53,27 @@ pub fn execute_dequeue_withdrawal_for_tier(
     amount: i128,
 ) {
     require_nonnegative(e, amount);
-
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
-
-    if tier == BackstopTier::BlndUsdc {
-        emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
-    }
+    #[cfg(test)]
+    let emission_user_balance = user_balance.clone();
 
     user_balance.dequeue_shares(e, amount);
+
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
+    #[cfg(test)]
+    if tier == BackstopTier::BlndUsdc {
+        emissions::update_emissions(e, pool_address, &pool_balance, from, &emission_user_balance);
+    }
+
     user_balance.add_shares(amount);
     pool_balance.dequeue_q4w(e, amount);
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     update_tier_totals(e, tier, 0, 0, -amount);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 }
 
 /// Withdraw expired shares from one fixed backstop tier.
@@ -74,7 +86,6 @@ pub fn execute_withdraw_for_tier(
     to: &Address,
 ) -> i128 {
     require_nonnegative(e, amount);
-
     let pool_client = PoolClient::new(e, pool_address);
     if interest_tier_locked(e, tier, pool_address)
         || pool_bad_debt_commitment_count(e, pool_address) != 0
@@ -92,11 +103,15 @@ pub fn execute_withdraw_for_tier(
     if to_return == 0 && pool_balance.tokens != 0 {
         panic_with_error!(e, &BackstopError::InvalidTokenWithdrawAmount);
     }
+
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     pool_balance.withdraw(e, to_return, amount);
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     update_tier_totals(e, tier, -to_return, -amount, -amount);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 
     if to_return > 0 {
         let backstop_token_client = TokenClient::new(e, &tier_token(e, tier));

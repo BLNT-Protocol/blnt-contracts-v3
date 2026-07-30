@@ -7,7 +7,10 @@ use crate::{
     storage,
 };
 
-use super::policy::{eligible_blnd, pool_spot_blnd_emission_values};
+use super::{
+    policy::{eligible_blnd, pool_spot_blnd_emission_values},
+    refresh_pool_ongoing_assets,
+};
 
 const CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
@@ -27,12 +30,7 @@ pub(crate) fn get_reward_zone(e: &Env) -> Vec<Address> {
 }
 
 pub(crate) fn get_reward_zone_checkpoint(e: &Env) -> Option<RewardZoneCheckpoint> {
-    let timestamp = storage::get_last_distribution_time(e);
-    if timestamp == 0 {
-        None
-    } else {
-        Some(RewardZoneCheckpoint { timestamp })
-    }
+    storage::get_reward_zone_checkpoint(e).map(|timestamp| RewardZoneCheckpoint { timestamp })
 }
 
 pub(crate) fn add_to_reward_zone(
@@ -74,6 +72,7 @@ pub(crate) fn add_to_reward_zone(
     };
 
     reward_zone.push_front(to_add.clone());
+    refresh_pool_ongoing_assets(e, to_add);
     set_reward_zone(e, &reward_zone);
     removed
 }
@@ -225,7 +224,7 @@ mod tests {
 
         fn checkpoint(&self, timestamp: u64) {
             self.e.as_contract(&self.backstop, || {
-                storage::set_last_distribution_time(&self.e, &timestamp);
+                storage::set_reward_zone_checkpoint(&self.e, timestamp);
             });
         }
     }

@@ -1,21 +1,33 @@
-use cast::i128;
-use sep_41_token::TokenClient;
-use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{panic_with_error, Address, Env, Vec};
+use cast::{i128, u64};
+use soroban_sdk::{panic_with_error, Address, Env, Vec, I256};
 
 use crate::{
-    constants::SCALAR_7,
+    constants::{MAX_RESERVES, SCALAR_7},
+    dependencies::BackstopClient,
     errors::PoolError,
     pool::User,
-    storage::{self, ReserveEmissionData, UserEmissionData},
+    storage::{self, ReserveEmissionCarry, ReserveEmissionData, UserEmissionData},
     validator::require_nonnegative,
 };
 
+const MAX_RESERVE_TOKEN_IDS: u32 = 2 * MAX_RESERVES;
+
 /// Performs a claim against the given "reserve_token_ids" for "from"
 pub fn execute_claim(e: &Env, from: &Address, reserve_token_ids: &Vec<u32>, to: &Address) -> i128 {
+    if reserve_token_ids.is_empty() || reserve_token_ids.len() > MAX_RESERVE_TOKEN_IDS {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let mut seen = Vec::new(e);
+    for reserve_token_id in reserve_token_ids.iter() {
+        if reserve_token_id >= MAX_RESERVE_TOKEN_IDS || seen.contains(reserve_token_id) {
+            panic_with_error!(e, PoolError::BadRequest);
+        }
+        seen.push_back(reserve_token_id);
+    }
+
     let from_state = User::load(e, from);
     let reserve_list = storage::get_res_list(e);
-    let mut to_claim = 0;
+    let mut to_claim: i128 = 0;
     for reserve_token_id in reserve_token_ids.clone() {
         let reserve_index = reserve_token_id / 2;
         let reserve_addr = reserve_list.get(reserve_index);
@@ -34,14 +46,16 @@ pub fn execute_claim(e: &Env, from: &Address, reserve_token_ids: &Vec<u32>, to: 
                     ),
                     _ => panic_with_error!(e, PoolError::BadRequest),
                 };
-                to_claim += claim_emissions(
-                    e,
-                    reserve_token_id,
-                    supply,
-                    10i128.pow(reserve_config.decimals),
-                    from,
-                    user_balance,
-                );
+                to_claim = to_claim
+                    .checked_add(claim_emissions(
+                        e,
+                        reserve_token_id,
+                        supply,
+                        10i128.pow(reserve_config.decimals),
+                        from,
+                        user_balance,
+                    ))
+                    .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
             }
             None => {
                 panic_with_error!(e, PoolError::BadRequest)
@@ -51,10 +65,8 @@ pub fn execute_claim(e: &Env, from: &Address, reserve_token_ids: &Vec<u32>, to: 
 
     if to_claim > 0 {
         let backstop = storage::get_backstop(e);
-        let blnd_token = storage::get_blnd_token(e);
-        TokenClient::new(e, &blnd_token).transfer_from(
+        BackstopClient::new(e, &backstop).claim_pool_emissions(
             &e.current_contract_address(),
-            &backstop,
             to,
             &to_claim,
         );
@@ -160,30 +172,58 @@ pub(super) fn update_emission_data(
 ) -> Option<ReserveEmissionData> {
     match storage::get_res_emis_data(e, &res_token_id) {
         Some(mut res_emission_data) => {
+            let mut carry = reserve_emission_carry(e, res_token_id, &res_emission_data);
             if res_emission_data.last_time >= res_emission_data.expiration
                 || e.ledger().timestamp() == res_emission_data.last_time
-                || res_emission_data.eps == 0
+                || (carry.remaining == 0 && carry.index_carry == 0)
                 || supply == 0
             {
+                storage::set_res_emis_carry(e, &res_token_id, &carry);
                 return Some(res_emission_data);
             }
 
-            let ledger_timestamp = if e.ledger().timestamp() > res_emission_data.expiration {
-                res_emission_data.expiration
+            let ledger_timestamp =
+                core::cmp::min(e.ledger().timestamp(), res_emission_data.expiration);
+            let elapsed = ledger_timestamp - res_emission_data.last_time;
+            let seconds_left = res_emission_data.expiration - res_emission_data.last_time;
+            let vested = if ledger_timestamp == res_emission_data.expiration {
+                carry.remaining
             } else {
-                e.ledger().timestamp()
+                mul_div_floor(e, carry.remaining, i128(elapsed), i128(seconds_left))
             };
+            carry.remaining = checked_sub_nonnegative(e, carry.remaining, vested);
 
-            let additional_idx = (i128(ledger_timestamp - res_emission_data.last_time)
-                * i128(res_emission_data.eps))
-            .fixed_div_floor(&e, &supply, &supply_scalar);
+            let index_scale = supply_scalar
+                .checked_mul(SCALAR_7)
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+            let numerator = I256::from_i128(e, vested)
+                .mul(&I256::from_i128(e, index_scale))
+                .add(&I256::from_i128(e, carry.index_carry));
+            let denominator = I256::from_i128(e, supply);
+            let additional_idx = numerator
+                .div(&denominator)
+                .to_i128()
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+            carry.index_carry = numerator
+                .sub(&I256::from_i128(e, additional_idx).mul(&denominator))
+                .to_i128()
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
 
-            res_emission_data.index += additional_idx;
+            res_emission_data.index = res_emission_data
+                .index
+                .checked_add(additional_idx)
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
             res_emission_data.last_time = ledger_timestamp;
+            res_emission_data.eps = remaining_eps(
+                e,
+                carry.remaining,
+                res_emission_data.expiration - ledger_timestamp,
+            );
             storage::set_res_emis_data(e, &res_token_id, &res_emission_data);
+            storage::set_res_emis_carry(e, &res_token_id, &carry);
             Some(res_emission_data)
         }
-        None => return None, // no emission exist, no update is required
+        None => None, // no emission exists, no update is required
     }
 }
 
@@ -199,27 +239,44 @@ fn update_user_emissions(
     if let Some(user_data) = storage::get_user_emissions(e, user, &res_token_id) {
         if user_data.index != res_emis_data.index || claim {
             let mut accrual = user_data.accrued;
-            if balance != 0 {
-                let delta_index = res_emis_data.index - user_data.index;
-                require_nonnegative(e, &delta_index);
-                let to_accrue = balance.fixed_mul_floor(
-                    e,
-                    &(res_emis_data.index - user_data.index),
-                    &(supply_scalar * SCALAR_7),
-                );
-                accrual += to_accrue;
-            }
-            return set_user_emissions(e, user, res_token_id, res_emis_data.index, accrual, claim);
+            let carry = storage::get_user_emission_carry(e, user, &res_token_id);
+            let (to_accrue, carry) = user_accrual(
+                e,
+                balance,
+                res_emis_data.index,
+                user_data.index,
+                supply_scalar,
+                carry,
+            );
+            accrual = accrual
+                .checked_add(to_accrue)
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+            return set_user_emissions(
+                e,
+                user,
+                res_token_id,
+                res_emis_data.index,
+                accrual,
+                carry,
+                claim,
+            );
         }
         0
     } else if balance == 0 {
         // first time the user registered an action with the asset since emissions were added
-        return set_user_emissions(e, user, res_token_id, res_emis_data.index, 0, claim);
+        set_user_emissions(e, user, res_token_id, res_emis_data.index, 0, 0, claim)
     } else {
         // user had tokens before emissions began, they are due any historical emissions
-        let to_accrue =
-            balance.fixed_mul_floor(e, &res_emis_data.index, &(supply_scalar * SCALAR_7));
-        return set_user_emissions(e, user, res_token_id, res_emis_data.index, to_accrue, claim);
+        let (to_accrue, carry) = user_accrual(e, balance, res_emis_data.index, 0, supply_scalar, 0);
+        set_user_emissions(
+            e,
+            user,
+            res_token_id,
+            res_emis_data.index,
+            to_accrue,
+            carry,
+            claim,
+        )
     }
 }
 
@@ -229,6 +286,7 @@ fn set_user_emissions(
     res_token_id: u32,
     index: i128,
     accrued: i128,
+    carry: i128,
     claim: bool,
 ) -> i128 {
     if claim {
@@ -238,10 +296,94 @@ fn set_user_emissions(
             &res_token_id,
             &UserEmissionData { index, accrued: 0 },
         );
+        storage::set_user_emission_carry(e, user, &res_token_id, carry);
         accrued
     } else {
         storage::set_user_emissions(e, user, &res_token_id, &UserEmissionData { index, accrued });
+        storage::set_user_emission_carry(e, user, &res_token_id, carry);
         0
+    }
+}
+
+fn reserve_emission_carry(
+    e: &Env,
+    res_token_id: u32,
+    data: &ReserveEmissionData,
+) -> ReserveEmissionCarry {
+    storage::get_res_emis_carry(e, &res_token_id).unwrap_or_else(|| {
+        let remaining = if data.expiration > data.last_time && data.eps > 0 {
+            mul_div_floor(
+                e,
+                i128(data.eps),
+                i128(data.expiration - data.last_time),
+                SCALAR_7,
+            )
+        } else {
+            0
+        };
+        ReserveEmissionCarry {
+            index_carry: 0,
+            remaining,
+        }
+    })
+}
+
+fn user_accrual(
+    e: &Env,
+    balance: i128,
+    current_index: i128,
+    prior_index: i128,
+    supply_scalar: i128,
+    carry: i128,
+) -> (i128, i128) {
+    if balance < 0 || supply_scalar <= 0 || carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let index_delta = current_index
+        .checked_sub(prior_index)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    require_nonnegative(e, &index_delta);
+    let index_scale = supply_scalar
+        .checked_mul(SCALAR_7)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let numerator = I256::from_i128(e, balance)
+        .mul(&I256::from_i128(e, index_delta))
+        .add(&I256::from_i128(e, carry));
+    let scale = I256::from_i128(e, index_scale);
+    let accrued = numerator
+        .div(&scale)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let next_carry = numerator
+        .sub(&I256::from_i128(e, accrued).mul(&scale))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    (accrued, next_carry)
+}
+
+fn mul_div_floor(e: &Env, left: i128, right: i128, denominator: i128) -> i128 {
+    if left < 0 || right < 0 || denominator <= 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    I256::from_i128(e, left)
+        .mul(&I256::from_i128(e, right))
+        .div(&I256::from_i128(e, denominator))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
+fn checked_sub_nonnegative(e: &Env, left: i128, right: i128) -> i128 {
+    left.checked_sub(right)
+        .filter(|value| *value >= 0)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
+fn remaining_eps(e: &Env, remaining: i128, seconds: u64) -> u64 {
+    if remaining == 0 || seconds == 0 {
+        0
+    } else {
+        u64(mul_div_floor(e, remaining, SCALAR_7, i128(seconds)))
+            .unwrap_or_else(|_| panic_with_error!(e, PoolError::OverflowError))
     }
 }
 
@@ -250,12 +392,124 @@ mod tests {
     use crate::{pool::Positions, testutils};
 
     use super::*;
+    use sep_41_token::TokenClient;
     use soroban_sdk::{
-        map,
+        contract, contractimpl, map,
         testutils::{Address as AddressTestTrait, Ledger, LedgerInfo},
         unwrap::UnwrapOptimized,
         vec,
     };
+
+    #[contract]
+    struct MockPoolEmissionBackstop;
+
+    #[contractimpl]
+    impl MockPoolEmissionBackstop {
+        pub fn __constructor(e: Env, blnd: Address) {
+            e.storage().instance().set(&0_u32, &blnd);
+        }
+
+        pub fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128) {
+            pool.require_auth();
+            let blnd: Address = e.storage().instance().get(&0_u32).unwrap();
+            TokenClient::new(&e, &blnd).transfer(
+                &e.current_contract_address(),
+                &recipient,
+                &amount,
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_execute_claim_rejects_empty_identifier_list() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+        let user = Address::generate(&e);
+        e.as_contract(&pool, || {
+            execute_claim(&e, &user, &vec![&e], &user);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_execute_claim_rejects_duplicate_identifiers() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+        let user = Address::generate(&e);
+        e.as_contract(&pool, || {
+            execute_claim(&e, &user, &vec![&e, 0_u32, 0_u32], &user);
+        });
+    }
+
+    #[test]
+    fn test_reserve_and_user_rounding_carry_forward() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+        let user = Address::generate(&e);
+        e.ledger().set_timestamp(100);
+
+        e.as_contract(&pool, || {
+            storage::set_res_emis_data(
+                &e,
+                &0,
+                &ReserveEmissionData {
+                    expiration: 100,
+                    eps: 1,
+                    index: 0,
+                    last_time: 0,
+                },
+            );
+            storage::set_res_emis_carry(
+                &e,
+                &0,
+                &ReserveEmissionCarry {
+                    index_carry: 0,
+                    remaining: 1,
+                },
+            );
+            update_emission_data(&e, 0, 2 * SCALAR_7, 1);
+            let reserve_carry = storage::get_res_emis_carry(&e, &0).unwrap();
+            assert_eq!(reserve_carry.remaining, 0);
+            assert_eq!(reserve_carry.index_carry, SCALAR_7);
+
+            update_user_emissions(
+                &e,
+                &ReserveEmissionData {
+                    expiration: 100,
+                    eps: 0,
+                    index: 1,
+                    last_time: 100,
+                },
+                0,
+                1,
+                &user,
+                1,
+                false,
+            );
+            assert_eq!(storage::get_user_emission_carry(&e, &user, &0), 1);
+
+            update_user_emissions(
+                &e,
+                &ReserveEmissionData {
+                    expiration: 100,
+                    eps: 0,
+                    index: SCALAR_7,
+                    last_time: 100,
+                },
+                0,
+                1,
+                &user,
+                1,
+                false,
+            );
+            assert_eq!(
+                storage::get_user_emissions(&e, &user, &0).unwrap().accrued,
+                1
+            );
+            assert_eq!(storage::get_user_emission_carry(&e, &user, &0), 0);
+        });
+    }
 
     /********** update_emissions **********/
 
@@ -1332,17 +1586,7 @@ mod tests {
         let merry = Address::generate(&e);
 
         let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
-        let (backstop, _) = testutils::create_backstop(
-            &e,
-            &pool,
-            &Address::generate(&e),
-            &Address::generate(&e),
-            &blnd,
-        );
-        // mock backstop having emissions for pool
-        e.as_contract(&backstop, || {
-            blnd_token_client.approve(&backstop, &pool, &100_000_0000000_i128, &1000000);
-        });
+        let backstop = e.register(MockPoolEmissionBackstop, (blnd.clone(),));
         blnd_token_client.mint(&backstop, &100_000_0000000);
 
         e.ledger().set(LedgerInfo {
@@ -1457,17 +1701,7 @@ mod tests {
         let merry = Address::generate(&e);
 
         let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
-        let (backstop, _) = testutils::create_backstop(
-            &e,
-            &pool,
-            &Address::generate(&e),
-            &Address::generate(&e),
-            &blnd,
-        );
-        // mock backstop having emissions for pool
-        e.as_contract(&backstop, || {
-            blnd_token_client.approve(&backstop, &pool, &100_000_0000000_i128, &1000000);
-        });
+        let backstop = e.register(MockPoolEmissionBackstop, (blnd.clone(),));
         blnd_token_client.mint(&backstop, &100_000_0000000);
 
         e.ledger().set(LedgerInfo {

@@ -46,4 +46,10 @@ pub enum BackstopError {
     InvalidTakeRateValue = 1026,
     InvalidEmissionValue = 1027,
     DistributionCheckpointRequired = 1028,
+    NoEligibleWeight = 1029,
+    DistributionTooSoon = 1030,
+    InvalidOngoingBalance = 1031,
+    EmitterDidNotMigrate = 1032,
+    NoOngoingEmissions = 1033,
+    PoolEmissionGulpTooSoon = 1034,
 }
