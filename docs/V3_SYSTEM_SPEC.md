@@ -40,8 +40,8 @@ The candidate immutably binds exactly these three seven-decimal assets:
 
 | Tier | Asset | USDC valuation | Ongoing BLND weight |
 | ---: | --- | --- | --- |
-| 1 | BLND:USDC 80:20 LP | Normative valuation adapter | Yes |
-| 2 | BLND:XLM 80:20 LP | Normative valuation adapter | Yes |
+| 1 | BLND:USDC 80:20 LP | Normative backstop valuation | Yes |
+| 2 | BLND:XLM 80:20 LP | Normative backstop valuation | Yes |
 | 3 | Plain USDC | One-for-one | No |
 
 All three count equally per verified USDC for activation, participate in the
@@ -129,15 +129,15 @@ T_{\mathrm{maintenance}} = 10{,}000\ \mathrm{USDC}
 Equality qualifies. Falling below maintenance deactivates a pool; reactivation
 requires the entry threshold.
 
-The candidate immutably binds the adapter address and rejects a version or
-asset-binding mismatch at construction. [VALUATION_ADAPTER.md](VALUATION_ADAPTER.md)
-governs its quotes. Active and queued pool-attributed LP amounts are quoted
-separately, while accounted plain USDC is valued one-for-one. Zero LP needs no
-quote; any incompatible, failed, negative, or expired quote fails atomically.
-Section 3.3 determines eligibility. This valuation governs activation, status,
-reward-zone membership, take-rate allocation, auction sizing, and
-supplier-loss eligibility; spot Comet composition is used only for
-BLND-emission weight.
+The candidate immutably binds the backstop-valuation contract address and
+rejects a version or asset-binding mismatch at construction.
+[BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) governs its quotes. Active and
+queued pool-attributed LP amounts are quoted separately, while accounted plain
+USDC is valued one-for-one. Zero LP needs no quote; any incompatible, failed,
+negative, or expired quote fails atomically. Section 3.3 determines
+eligibility. This valuation governs activation, status, reward-zone
+membership, take-rate allocation, auction sizing, and supplier-loss
+eligibility; spot Comet composition is used only for BLND-emission weight.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -455,7 +455,7 @@ A\frac{R_{\mathrm{BLND},t}}{S_t}
 Here \(A\) is accounted active LP, \(R\) the Comet's BLND balance, and \(S\)
 LP supply. Nonpositive supply, negative inputs, or \(A>S\) fail closed. Direct
 transfers are excluded and plain USDC has zero weight. This intentionally uses
-spot composition rather than the valuation adapter or a TWAP; checkpoint
+spot composition rather than backstop valuation or a TWAP; checkpoint
 manipulation exposure is accepted and MUST be disclosed.
 
 Pool and user allocation uses bounded accumulators without iterating over all

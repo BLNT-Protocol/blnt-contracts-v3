@@ -1,4 +1,4 @@
-# Production LP Valuation Adapter
+# Blend V3 Backstop Valuation Specification
 
 Status: Normative v3 component specification
 
@@ -6,7 +6,7 @@ This document composes with
 [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) under the inheritance and precedence
 rules in [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
 
-The production valuation adapter is the candidate's immutable pricing boundary
+The backstop-valuation contract is the candidate's immutable pricing boundary
 for BLND:USDC and BLND:XLM Comet LP tokens. It supplies canonical USDC values
 for activation, status, take-rate allocation, bad-debt lots, interest lots,
 and verified backstop exhaustion. It also exposes current underlying BLND;
@@ -26,27 +26,29 @@ as follows:
 - a TWAP record count; and
 - a maximum accepted price age.
 
-The adapter verifies that all token addresses are distinct, all five token
-interfaces use seven decimals, both Comets contain exactly the expected pair
-at normalized weights 80% BLND and 20% paired asset, and the feed advertises
-BLND and XLM. Its USDC base, precision, and resolution are recorded and
-rechecked on every quote. It exposes the immutable BLND, plain-USDC,
-BLND:USDC, and BLND:XLM binding. The candidate constructor rejects the adapter
-unless that binding exactly matches its own immutable asset arguments.
+The valuation contract verifies that all token addresses are distinct, all
+five token interfaces use seven decimals, both Comets contain exactly the
+expected pair at normalized weights 80% BLND and 20% paired asset, and the
+feed advertises BLND and XLM. Its USDC base, precision, and resolution are
+recorded and rechecked on every quote. It exposes the immutable BLND,
+plain-USDC, BLND:USDC, and BLND:XLM binding. The candidate constructor rejects
+the valuation contract unless that binding exactly matches its own immutable
+asset arguments.
 
 There is no administrator, price setter, privileged recovery path, alternate
 oracle, or contract-upgrade method. A new pricing policy requires a separately
 deployed contract version.
 
-Construction and every public read extend the production adapter's instance
+Construction and every public read extend the valuation contract's instance
 and code TTL to 90 days whenever either falls below the 89-day threshold.
-Version-only use therefore keeps the adapter live even when a pool currently
-holds only plain USDC and no LP quote is required.
+Version-only use therefore keeps the valuation contract live even when a pool
+currently holds only plain USDC and no LP quote is required.
 
 ## Oracle policy
 
-The adapter asks the immutable SEP-40 feed for the configured number of BLND
-observations and, for BLND:XLM, the same number of XLM observations.
+The valuation contract asks the immutable SEP-40 feed for the configured
+number of BLND observations and, for BLND:XLM, the same number of XLM
+observations.
 
 - Record count is from 2 through 25.
 - `resolution * (record_count - 1)` is from 30 minutes through 24 hours.
@@ -115,25 +117,6 @@ other. A positive LP amount may round to zero USDC value or zero underlying
 BLND at seven-decimal precision. That dust contributes nothing to the
 applicable policy but does not make every other pool position unpriceable.
 
-## Deployment checklist
-
-Before a public deployment:
-
-1. Select and independently review the concrete SEP-40 contract, publisher
-   trust model, upgrade controls, outage behavior, USDC base, assets,
-   precision, and resolution.
-2. Select a record count and maximum age that satisfy the on-chain bounds and
-   document the resulting averaging window.
-3. Verify the exact classic-asset contract addresses and both production Comet
-   addresses against independent sources.
-4. Reproduce the generic optimized-WASM test, which stores every requested
-   oracle tick in its own persistent entry. Then repeat the same maximum-record
-   and four-quote resource measurement against the exact selected oracle WASM
-   and initialized storage layout. Record both contract digests, constructor
-   arguments, and measurements.
-5. Exercise fresh, stale, unavailable, malformed, and imbalanced-market cases
-   on the target network.
-
-An audited adapter cannot make an untrusted or compromised feed trustworthy.
-Feed selection remains a deployment security decision and must be disclosed to
-depositors.
+Provider qualification, deployment simulation, and network evidence belong in
+the separate
+[Blend v3 migration repository](https://github.com/levinson/blend-v3-migration/blob/main/docs/ORACLE_DEPLOYMENT.md).

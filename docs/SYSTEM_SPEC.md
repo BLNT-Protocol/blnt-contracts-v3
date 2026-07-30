@@ -9,11 +9,21 @@ experimental Blend v3 contract specification compose.
    the frozen SDK-22 Blend v2 lending, pool, and backstop contracts.
 2. [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) defines only the v3 additions,
    replacements, extensions, approved exceptions, and safety fixes.
-3. [VALUATION_ADAPTER.md](VALUATION_ADAPTER.md) is the normative component
-   specification for the immutable v3 production LP-valuation boundary.
+3. [BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) is the normative component
+   specification for the immutable v3 backstop-valuation boundary.
 
 Declarative behavioral requirements and the terms `MUST`, `MUST NOT`,
 `SHOULD`, and `MAY` in the normative specifications are acceptance criteria.
+
+## Baseline and provenance
+
+Blend v3 is derived from Blend v2 source commit
+`ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The frozen baseline uses Rust
+1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
+
+The v3 contracts use the toolchain selected by
+[`rust-toolchain.toml`](../rust-toolchain.toml) and the exact dependencies in
+[`Cargo.lock`](../Cargo.lock).
 
 ## Inheritance rule
 
@@ -43,5 +53,3 @@ Apply the following order:
 If the written v2 specification conflicts with the frozen SDK-22 contracts or
 tests, the executable baseline wins and the document MUST be corrected. A
 conflict MUST NOT be resolved by silently creating a new v3 policy.
-
-Source provenance and toolchains are recorded in [BASELINE.md](BASELINE.md).
