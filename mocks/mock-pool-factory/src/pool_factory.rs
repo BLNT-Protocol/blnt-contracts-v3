@@ -3,12 +3,17 @@ use crate::{
     PoolFactoryError,
 };
 use soroban_sdk::{
-    contract, contractimpl, panic_with_error, testutils::Address as _, Address, BytesN, Env,
-    String, Symbol,
+    contract, contractevent, contractimpl, panic_with_error, testutils::Address as _, Address,
+    BytesN, Env, String,
 };
 
 use mock_pool::{MockPool, MockPoolClient};
 use pool::PoolContract;
+
+#[contractevent(topics = ["deploy"], data_format = "single-value")]
+struct MockPoolFactoryDeployEvent {
+    pool_address: Address,
+}
 
 #[contract]
 pub struct MockPoolFactory;
@@ -116,8 +121,10 @@ impl MockPoolFactoryTrait for MockPoolFactory {
 
         storage::set_deployed(&e, &pool_address);
 
-        e.events()
-            .publish((Symbol::new(&e, "deploy"),), pool_address.clone());
+        MockPoolFactoryDeployEvent {
+            pool_address: pool_address.clone(),
+        }
+        .publish(&e);
         pool_address
     }
 

@@ -1,6 +1,203 @@
-use soroban_sdk::{Address, BytesN, Env, Symbol};
+use soroban_sdk::{contractevent, Address, BytesN, Env};
 
 use crate::backstop::{BackstopTier, BadDebtLotQuote, InterestLotQuote};
+
+macro_rules! single_value_event {
+    (
+        $name:ident,
+        $topic:literal,
+        [$($topic_field:ident: $topic_type:tt),* $(,)?],
+        $data_field:ident: $data_type:tt
+    ) => {
+        #[contractevent(topics = [$topic], data_format = "single-value")]
+        struct $name {
+            $(
+                #[topic]
+                $topic_field: $topic_type,
+            )*
+            $data_field: $data_type,
+        }
+    };
+}
+
+macro_rules! vec_event {
+    (
+        $name:ident,
+        $topic:literal,
+        [$($topic_field:ident: $topic_type:tt),* $(,)?],
+        [$($data_field:ident: $data_type:tt),+ $(,)?]
+    ) => {
+        #[contractevent(topics = [$topic], data_format = "vec")]
+        struct $name {
+            $(
+                #[topic]
+                $topic_field: $topic_type,
+            )*
+            $(
+                $data_field: $data_type,
+            )+
+        }
+    };
+}
+
+vec_event!(
+    MigrationPreparedEvent,
+    "migration_prepared",
+    [],
+    [
+        original_unlock: u64,
+        retry_count: u32,
+        verified_queue_unlock: u64
+    ]
+);
+vec_event!(
+    MigrationActivatedEvent,
+    "migration_activated",
+    [],
+    [activated_at: u64, backfill_end: u64]
+);
+single_value_event!(
+    BackfillFundedEvent,
+    "backfill_funded",
+    [],
+    amount: i128
+);
+vec_event!(
+    BackfillClaimedEvent,
+    "backfill_claimed",
+    [user: Address, pool: Address],
+    [recipient: Address, amount: i128]
+);
+#[contractevent(topics = ["bad_debt_lot_committed"], data_format = "vec")]
+struct BadDebtLotCommittedEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+    quote: BadDebtLotQuote,
+}
+
+#[contractevent(
+    topics = ["bad_debt_lot_released"],
+    data_format = "single-value"
+)]
+struct BadDebtLotReleasedEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+}
+
+#[contractevent(topics = ["bad_debt_lot_settled"], data_format = "vec")]
+struct BadDebtLotSettledEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+    base_lot_amount: i128,
+    lot_amount: i128,
+    to: Address,
+    tier: BackstopTier,
+    complete: bool,
+}
+
+#[contractevent(topics = ["interest_lot_committed"], data_format = "vec")]
+struct InterestLotCommittedEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+    quote: InterestLotQuote,
+}
+
+#[contractevent(
+    topics = ["interest_lot_released"],
+    data_format = "single-value"
+)]
+struct InterestLotReleasedEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+}
+
+#[contractevent(topics = ["interest_lot_settled"], data_format = "vec")]
+struct InterestLotSettledEvent {
+    #[topic]
+    pool: Address,
+    auction_id: BytesN<32>,
+    base_bid_amount: i128,
+    bid_amount: i128,
+    from: Address,
+    tier: BackstopTier,
+    complete: bool,
+}
+vec_event!(
+    TierDepositEvent,
+    "deposit",
+    [tier: BackstopTier, pool_address: Address, from: Address],
+    [tokens_in: i128, shares_minted: i128]
+);
+vec_event!(
+    TierQueueWithdrawalEvent,
+    "queue_withdrawal",
+    [tier: BackstopTier, pool_address: Address, from: Address],
+    [amount: i128, expiration: u64]
+);
+single_value_event!(
+    TierDequeueWithdrawalEvent,
+    "dequeue_withdrawal",
+    [tier: BackstopTier, pool_address: Address, from: Address],
+    amount: i128
+);
+vec_event!(
+    TierWithdrawEvent,
+    "withdraw",
+    [tier: BackstopTier, pool_address: Address, from: Address],
+    [amount: i128, tokens_out: i128]
+);
+single_value_event!(
+    DistributeEvent,
+    "distribute",
+    [],
+    new_tokens_emitted: i128
+);
+vec_event!(
+    GulpEmissionsEvent,
+    "gulp_emissions",
+    [pool_address: Address],
+    [new_backstop_emissions: i128, new_pool_emissions: i128]
+);
+#[contractevent(topics = ["rw_zone_add"], data_format = "vec")]
+struct RewardZoneAddEvent {
+    to_add: Address,
+    to_remove: Option<Address>,
+}
+single_value_event!(
+    RewardZoneRemoveEvent,
+    "rw_zone_remove",
+    [],
+    to_remove: Address
+);
+vec_event!(
+    ClaimOngoingBlndEvent,
+    "claim_ongoing",
+    [user: Address, pool: Address],
+    [recipient: Address, amount: i128]
+);
+vec_event!(
+    ClaimPoolEmissionsEvent,
+    "claim_pool",
+    [pool: Address],
+    [recipient: Address, amount: i128]
+);
+vec_event!(
+    DrawEvent,
+    "draw",
+    [pool_address: Address],
+    [to: Address, amount: i128]
+);
+single_value_event!(
+    DonateEvent,
+    "donate",
+    [pool_address: Address, from: Address],
+    amount: i128
+);
 
 pub struct BackstopEvents {}
 
@@ -11,21 +208,24 @@ impl BackstopEvents {
         retry_count: u32,
         verified_queue_unlock: u64,
     ) {
-        let topics = (Symbol::new(e, "migration_prepared"),);
-        e.events().publish(
-            topics,
-            (original_unlock, retry_count, verified_queue_unlock),
-        );
+        MigrationPreparedEvent {
+            original_unlock,
+            retry_count,
+            verified_queue_unlock,
+        }
+        .publish(e);
     }
 
     pub fn migration_activated(e: &Env, activated_at: u64, backfill_end: u64) {
-        let topics = (Symbol::new(e, "migration_activated"),);
-        e.events().publish(topics, (activated_at, backfill_end));
+        MigrationActivatedEvent {
+            activated_at,
+            backfill_end,
+        }
+        .publish(e);
     }
 
     pub fn backfill_funded(e: &Env, amount: i128) {
-        let topics = (Symbol::new(e, "backfill_funded"),);
-        e.events().publish(topics, amount);
+        BackfillFundedEvent { amount }.publish(e);
     }
 
     pub fn backfill_claimed(
@@ -35,8 +235,13 @@ impl BackstopEvents {
         recipient: Address,
         amount: i128,
     ) {
-        let topics = (Symbol::new(e, "backfill_claimed"), user, pool);
-        e.events().publish(topics, (recipient, amount));
+        BackfillClaimedEvent {
+            user,
+            pool,
+            recipient,
+            amount,
+        }
+        .publish(e);
     }
 
     pub fn bad_debt_lot_committed(
@@ -45,13 +250,16 @@ impl BackstopEvents {
         auction_id: BytesN<32>,
         quote: BadDebtLotQuote,
     ) {
-        let topics = (Symbol::new(e, "bad_debt_lot_committed"), pool);
-        e.events().publish(topics, (auction_id, quote));
+        BadDebtLotCommittedEvent {
+            pool,
+            auction_id,
+            quote,
+        }
+        .publish(e);
     }
 
     pub fn bad_debt_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
-        let topics = (Symbol::new(e, "bad_debt_lot_released"), pool);
-        e.events().publish(topics, auction_id);
+        BadDebtLotReleasedEvent { pool, auction_id }.publish(e);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -65,11 +273,16 @@ impl BackstopEvents {
         tier: BackstopTier,
         complete: bool,
     ) {
-        let topics = (Symbol::new(e, "bad_debt_lot_settled"), pool);
-        e.events().publish(
-            topics,
-            (auction_id, base_lot_amount, lot_amount, to, tier, complete),
-        );
+        BadDebtLotSettledEvent {
+            pool,
+            auction_id,
+            base_lot_amount,
+            lot_amount,
+            to,
+            tier,
+            complete,
+        }
+        .publish(e);
     }
 
     pub fn interest_lot_committed(
@@ -78,13 +291,16 @@ impl BackstopEvents {
         auction_id: BytesN<32>,
         quote: InterestLotQuote,
     ) {
-        let topics = (Symbol::new(e, "interest_lot_committed"), pool);
-        e.events().publish(topics, (auction_id, quote));
+        InterestLotCommittedEvent {
+            pool,
+            auction_id,
+            quote,
+        }
+        .publish(e);
     }
 
     pub fn interest_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
-        let topics = (Symbol::new(e, "interest_lot_released"), pool);
-        e.events().publish(topics, auction_id);
+        InterestLotReleasedEvent { pool, auction_id }.publish(e);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -98,18 +314,16 @@ impl BackstopEvents {
         tier: BackstopTier,
         complete: bool,
     ) {
-        let topics = (Symbol::new(e, "interest_lot_settled"), pool);
-        e.events().publish(
-            topics,
-            (
-                auction_id,
-                base_bid_amount,
-                bid_amount,
-                from,
-                tier,
-                complete,
-            ),
-        );
+        InterestLotSettledEvent {
+            pool,
+            auction_id,
+            base_bid_amount,
+            bid_amount,
+            from,
+            tier,
+            complete,
+        }
+        .publish(e);
     }
 
     /// Emit a v2-shaped deposit event scoped to a v3 tier.
@@ -121,8 +335,14 @@ impl BackstopEvents {
         tokens_in: i128,
         shares_minted: i128,
     ) {
-        let topics = (Symbol::new(e, "deposit"), tier, pool_address, from);
-        e.events().publish(topics, (tokens_in, shares_minted));
+        TierDepositEvent {
+            tier,
+            pool_address,
+            from,
+            tokens_in,
+            shares_minted,
+        }
+        .publish(e);
     }
 
     /// Emit a v2-shaped queue event scoped to a v3 tier.
@@ -134,8 +354,14 @@ impl BackstopEvents {
         amount: i128,
         expiration: u64,
     ) {
-        let topics = (Symbol::new(e, "queue_withdrawal"), tier, pool_address, from);
-        e.events().publish(topics, (amount, expiration));
+        TierQueueWithdrawalEvent {
+            tier,
+            pool_address,
+            from,
+            amount,
+            expiration,
+        }
+        .publish(e);
     }
 
     /// Emit a v2-shaped dequeue event scoped to a v3 tier.
@@ -146,13 +372,13 @@ impl BackstopEvents {
         from: Address,
         amount: i128,
     ) {
-        let topics = (
-            Symbol::new(e, "dequeue_withdrawal"),
+        TierDequeueWithdrawalEvent {
             tier,
             pool_address,
             from,
-        );
-        e.events().publish(topics, amount);
+            amount,
+        }
+        .publish(e);
     }
 
     /// Emit a v2-shaped withdrawal event scoped to a v3 tier.
@@ -164,8 +390,14 @@ impl BackstopEvents {
         amount: i128,
         tokens_out: i128,
     ) {
-        let topics = (Symbol::new(e, "withdraw"), tier, pool_address, from);
-        e.events().publish(topics, (amount, tokens_out));
+        TierWithdrawEvent {
+            tier,
+            pool_address,
+            from,
+            amount,
+            tokens_out,
+        }
+        .publish(e);
     }
 
     /// Emitted when new emissions are distributed
@@ -175,8 +407,7 @@ impl BackstopEvents {
     /// ### Arguments
     /// * `new_tokens_emitted` - The amount of new tokens emitted
     pub fn distribute(e: &Env, new_tokens_emitted: i128) {
-        let topics = (Symbol::new(e, "distribute"),);
-        e.events().publish(topics, new_tokens_emitted);
+        DistributeEvent { new_tokens_emitted }.publish(e);
     }
 
     /// Emitted when new emissions are gulped
@@ -194,9 +425,12 @@ impl BackstopEvents {
         new_backstop_emissions: i128,
         new_pool_emissions: i128,
     ) {
-        let topics = (Symbol::new(e, "gulp_emissions"), pool_address);
-        e.events()
-            .publish(topics, (new_backstop_emissions, new_pool_emissions));
+        GulpEmissionsEvent {
+            pool_address,
+            new_backstop_emissions,
+            new_pool_emissions,
+        }
+        .publish(e);
     }
 
     /// Emitted when the reward zone is updated
@@ -208,8 +442,7 @@ impl BackstopEvents {
     /// * `to_add` - The address to add to the reward zone
     /// * `to_remove` - The address to remove from the reward zone
     pub fn rw_zone_add(e: &Env, to_add: Address, to_remove: Option<Address>) {
-        let topics = (Symbol::new(e, "rw_zone_add"),);
-        e.events().publish(topics, (to_add, to_remove));
+        RewardZoneAddEvent { to_add, to_remove }.publish(e);
     }
 
     /// Emitted when a pool is removed from the reward zone
@@ -220,8 +453,7 @@ impl BackstopEvents {
     /// ### Arguments
     /// * `to_remove` - The address to remove from the reward zone
     pub fn rw_zone_remove(e: &Env, to_remove: Address) {
-        let topics = (Symbol::new(e, "rw_zone_remove"),);
-        e.events().publish(topics, to_remove);
+        RewardZoneRemoveEvent { to_remove }.publish(e);
     }
 
     /// Emitted when a user claims ongoing BLND from the two eligible tiers.
@@ -232,14 +464,23 @@ impl BackstopEvents {
         recipient: Address,
         amount: i128,
     ) {
-        let topics = (Symbol::new(e, "claim_ongoing"), user, pool);
-        e.events().publish(topics, (recipient, amount));
+        ClaimOngoingBlndEvent {
+            user,
+            pool,
+            recipient,
+            amount,
+        }
+        .publish(e);
     }
 
     /// Emitted when a pool pays a reserve-token emission claim.
     pub fn claim_pool_emissions(e: &Env, pool: Address, recipient: Address, amount: i128) {
-        let topics = (Symbol::new(e, "claim_pool"), pool);
-        e.events().publish(topics, (recipient, amount));
+        ClaimPoolEmissionsEvent {
+            pool,
+            recipient,
+            amount,
+        }
+        .publish(e);
     }
 
     /// Emitted when tokens are drawn from the backstop
@@ -252,8 +493,12 @@ impl BackstopEvents {
     /// * `to` - The address receiving the drawn tokens
     /// * `amount` - The amount of tokens drawn
     pub fn draw(e: &Env, pool_address: Address, to: Address, amount: i128) {
-        let topics = (Symbol::new(e, "draw"), pool_address);
-        e.events().publish(topics, (to, amount));
+        DrawEvent {
+            pool_address,
+            to,
+            amount,
+        }
+        .publish(e);
     }
 
     /// Emitted when tokens are donated to the backstop
@@ -266,7 +511,72 @@ impl BackstopEvents {
     /// * `from` - The address of the donor
     /// * `amount` - The amount of tokens donated
     pub fn donate(e: &Env, pool_address: Address, from: Address, amount: i128) {
-        let topics = (Symbol::new(e, "donate"), pool_address, from);
-        e.events().publish(topics, amount);
+        DonateEvent {
+            pool_address,
+            from,
+            amount,
+        }
+        .publish(e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::Address as _, xdr::ScVal, Event, FromVal, IntoVal, Symbol, Val,
+        Vec as SorobanVec,
+    };
+
+    fn assert_legacy_shape(e: &Env, event: &impl Event, topics: SorobanVec<Val>, data: Val) {
+        assert_eq!(event.topics(e), topics);
+        assert_eq!(
+            ScVal::from_val(e, &event.data(e)),
+            ScVal::from_val(e, &data)
+        );
+    }
+
+    #[test]
+    fn typed_events_preserve_legacy_backstop_shapes() {
+        let e = Env::default();
+        let pool = Address::generate(&e);
+        let user = Address::generate(&e);
+        let removed = Address::generate(&e);
+
+        assert_legacy_shape(
+            &e,
+            &TierDepositEvent {
+                tier: BackstopTier::BlndUsdc,
+                pool_address: pool.clone(),
+                from: user.clone(),
+                tokens_in: 50,
+                shares_minted: 45,
+            },
+            (
+                Symbol::new(&e, "deposit"),
+                BackstopTier::BlndUsdc,
+                pool.clone(),
+                user.clone(),
+            )
+                .into_val(&e),
+            (50_i128, 45_i128).into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &RewardZoneAddEvent {
+                to_add: pool.clone(),
+                to_remove: Some(removed.clone()),
+            },
+            (Symbol::new(&e, "rw_zone_add"),).into_val(&e),
+            (pool, Some(removed)).into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &BackfillFundedEvent { amount: 100 },
+            (Symbol::new(&e, "backfill_funded"),).into_val(&e),
+            100_i128.into_val(&e),
+        );
     }
 }

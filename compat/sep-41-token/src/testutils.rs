@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     Env, String,
 };
 
@@ -50,6 +50,41 @@ enum DataKey {
     Balance(Address),
 }
 
+#[contractevent(topics = ["mint"], data_format = "single-value")]
+struct MintEvent {
+    #[topic]
+    admin: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["approve"], data_format = "vec")]
+struct ApproveEvent {
+    #[topic]
+    from: Address,
+    #[topic]
+    spender: Address,
+    amount: i128,
+    live_until_ledger: u32,
+}
+
+#[contractevent(topics = ["transfer"], data_format = "single-value")]
+struct TransferEvent {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["burn"], data_format = "single-value")]
+struct BurnEvent {
+    #[topic]
+    from: Address,
+    amount: i128,
+}
+
 #[contract]
 pub struct MockToken;
 
@@ -79,8 +114,7 @@ impl MockToken {
         admin.require_auth();
         extend_instance(&env);
         receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("mint"), admin, to), amount);
+        MintEvent { admin, to, amount }.publish(&env);
     }
 
     pub fn set_admin(env: Env, new_admin: Address) {
@@ -108,10 +142,13 @@ impl MockToken {
         }
         extend_instance(&env);
         set_allowance(&env, &from, &spender, amount, live_until_ledger);
-        env.events().publish(
-            (symbol_short!("approve"), from, spender),
-            (amount, live_until_ledger),
-        );
+        ApproveEvent {
+            from,
+            spender,
+            amount,
+            live_until_ledger,
+        }
+        .publish(&env);
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -125,8 +162,7 @@ impl MockToken {
         extend_instance(&env);
         spend_balance(&env, &from, amount);
         receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to), amount);
+        TransferEvent { from, to, amount }.publish(&env);
     }
 
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
@@ -136,8 +172,7 @@ impl MockToken {
         spend_allowance(&env, &from, &spender, amount);
         spend_balance(&env, &from, amount);
         receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to), amount);
+        TransferEvent { from, to, amount }.publish(&env);
     }
 
     pub fn burn(env: Env, from: Address, amount: i128) {
@@ -145,7 +180,7 @@ impl MockToken {
         require_nonnegative(&env, amount);
         extend_instance(&env);
         spend_balance(&env, &from, amount);
-        env.events().publish((symbol_short!("burn"), from), amount);
+        BurnEvent { from, amount }.publish(&env);
     }
 
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -154,7 +189,7 @@ impl MockToken {
         extend_instance(&env);
         spend_allowance(&env, &from, &spender, amount);
         spend_balance(&env, &from, amount);
-        env.events().publish((symbol_short!("burn"), from), amount);
+        BurnEvent { from, amount }.publish(&env);
     }
 
     pub fn decimals(env: Env) -> u32 {
