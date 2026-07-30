@@ -1,12 +1,19 @@
-# Blend Protocol V2
+# Blend Protocol V3 Candidate
 
-This repository contains the smart contacts for an implementation of the Blend Protocol. Blend is a universal liquidity protocol primitive that enables the permissionless creation of lending pools.
+This repository contains the experimental Blend Protocol v3 candidate
+contracts. It is derived from Blend v2 and is not an official or
+production-ready Blend release.
 
 ## Documentation
 
-To learn more about the Blend Protocol, visit the docs:
+The contract specification is composed by
+[docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md). It inherits the frozen behavior in
+[docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional v3
+changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
 
-- [Blend Docs](https://docs.blend.capital/)
+Migration compatibility, deployment runners, and network evidence live in the
+separate
+[blend-v3-candidate repository](https://github.com/levinson/blend-v3-candidate).
 
 ## Audits
 
