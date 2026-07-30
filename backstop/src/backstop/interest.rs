@@ -16,9 +16,9 @@ const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
 const AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
 const INTEREST_LOT_PREMIUM_NUMERATOR: i128 = 6;
 const INTEREST_LOT_PREMIUM_DENOMINATOR: i128 = 5;
-const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 5;
-const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 5;
-const TAKE_RATE_WEIGHT_USDC: i128 = 4;
+const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 4;
+const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 3;
+const TAKE_RATE_WEIGHT_USDC: i128 = 2;
 const MAX_TAKE_RATE_BATCH: u32 = 4;
 
 /// Canonical tier-token bid for one pool interest auction.
@@ -42,7 +42,8 @@ pub struct TakeRateValues {
     pub usdc: i128,
 }
 
-/// Canonical `5:5:4` allocation of one reserve-credit amount.
+/// Canonical allocation for one reserve-credit amount:
+/// BLND:XLM = 4, BLND:USDC = 3, and plain USDC = 2.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct TakeRateQuote {
@@ -401,7 +402,7 @@ mod tests {
         let e = Env::default();
         let quote = quote_take_rate(
             &e,
-            140,
+            90,
             &TakeRateValues {
                 blnd_usdc: 1,
                 blnd_xlm: 1,
@@ -412,10 +413,10 @@ mod tests {
         assert_eq!(
             quote,
             TakeRateQuote {
-                blnd_usdc: 50,
-                blnd_xlm: 50,
+                blnd_usdc: 30,
+                blnd_xlm: 40,
                 remainder: 0,
-                usdc: 40,
+                usdc: 20,
             }
         );
     }

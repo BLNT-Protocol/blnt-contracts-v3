@@ -202,8 +202,8 @@ fn build_bad_debt_lot_quote(e: &Env, pool: &Address, debt_value: i128) -> Option
     }
 
     for tier in [
-        BackstopTier::BlndUsdc,
         BackstopTier::BlndXlm,
+        BackstopTier::BlndUsdc,
         BackstopTier::Usdc,
     ] {
         let assets = available_pool_tier_assets(e, tier, pool);
@@ -445,6 +445,38 @@ mod tests {
         assert_eq!(
             client.pool_valuation(&pool).active_values.usdc,
             500 * SCALAR_7
+        );
+    }
+
+    #[test]
+    fn blnd_xlm_is_first_loss_when_both_lp_tiers_qualify() {
+        let e = Env::default();
+        let backstop = create_backstop(&e);
+        let (pool, _) = create_mock_pool(&e, &backstop);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_mock_pool(&pool);
+
+        set_tier_balance(
+            &e,
+            &backstop,
+            &pool,
+            BackstopTier::BlndUsdc,
+            BAD_DEBT_TIER_MINIMUM_VALUE_USDC,
+        );
+        set_tier_balance(
+            &e,
+            &backstop,
+            &pool,
+            BackstopTier::BlndXlm,
+            BAD_DEBT_TIER_MINIMUM_VALUE_USDC,
+        );
+
+        assert_eq!(
+            BackstopClient::new(&e, &backstop)
+                .quote_bad_debt_lot(&pool, &SCALAR_7)
+                .unwrap()
+                .tier,
+            BackstopTier::BlndXlm
         );
     }
 

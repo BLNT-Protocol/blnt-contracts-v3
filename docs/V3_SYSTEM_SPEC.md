@@ -40,8 +40,8 @@ The candidate immutably binds exactly these three seven-decimal assets:
 
 | Tier | Asset | USDC valuation | Ongoing BLND weight |
 | ---: | --- | --- | --- |
-| 1 | BLND:USDC 80:20 LP | Normative backstop valuation | Yes |
-| 2 | BLND:XLM 80:20 LP | Normative backstop valuation | Yes |
+| 1 | BLND:XLM 80:20 LP | Normative backstop valuation | Yes |
+| 2 | BLND:USDC 80:20 LP | Normative backstop valuation | Yes |
 | 3 | Plain USDC | One-for-one | No |
 
 All three count equally per verified USDC for activation, participate in the
@@ -235,8 +235,8 @@ assets. All effects commit or roll back together.
 
 ### 5.2 Bad-debt waterfall
 
-1. BLND:USDC LP.
-2. BLND:XLM LP.
+1. BLND:XLM LP.
+2. BLND:USDC LP.
 3. Plain USDC.
 4. Pool suppliers.
 
@@ -282,7 +282,7 @@ recomputes withdrawal eligibility atomically.
 
 ### 5.3 Take-rate allocation — **Replaced**
 
-Tier weights are `5:5:4` for BLND:USDC, BLND:XLM, and plain USDC respectively.
+Tier weights are `4:3:2` in loss order: BLND:XLM, BLND:USDC, and plain USDC.
 For pool-level reserve credit \(D\), verified eligible value \(R_i\), and
 weight \(w_i\):
 
@@ -330,7 +330,7 @@ The authorized filler cannot be the pool or backstop. Exact source-balance
 deltas govern both transfers. The bid enters the selected pool-tier without
 minting shares or a user claim, appreciating active and queued shares and
 immediately assuming that tier's protocol roles. Unfilled amounts remain in
-their original accumulators after stale recovery. The `5:5:4` ratio allocates
+their original accumulators after stale recovery. The `4:3:2` ratio allocates
 credit lots; auction timing may produce a different ratio of realized donated
 value.
 

@@ -4,7 +4,7 @@ use crate::{errors::BackstopError, storage};
 
 use super::{PoolBalance, UserBalance};
 
-/// The fixed v3 backstop assets in first-loss order.
+/// The fixed v3 backstop asset identifiers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum BackstopTier {

@@ -22,7 +22,7 @@ const AUCTION_STALE_LEDGERS: u32 = 500;
 /// continuation also validates the complete bounded reserve set.
 const MAX_BAD_DEBT_BID_ASSETS: u32 = 4;
 
-/// The fixed v3 backstop tiers in first-loss order.
+/// The fixed v3 backstop tier identifiers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum BackstopTier {

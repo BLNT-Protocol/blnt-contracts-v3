@@ -34,11 +34,11 @@ pub struct BackstopContract;
 pub trait Backstop {
     /********** Core **********/
 
-    /// Deposit into the BLND:USDC first-loss tier.
-    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
-
-    /// Deposit BLND:XLM LP into the second-loss tier.
+    /// Deposit BLND:XLM LP into the first-loss tier.
     fn deposit_blnd_xlm(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
+
+    /// Deposit BLND:USDC LP into the second-loss tier.
+    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
 
     /// Deposit plain USDC into the third-loss tier.
     fn deposit_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
@@ -489,12 +489,12 @@ impl BackstopContract {
 impl Backstop for BackstopContract {
     /********** Core **********/
 
-    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
-        deposit_tier(e, BackstopTier::BlndUsdc, from, pool_address, amount)
-    }
-
     fn deposit_blnd_xlm(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
         deposit_tier(e, BackstopTier::BlndXlm, from, pool_address, amount)
+    }
+
+    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
+        deposit_tier(e, BackstopTier::BlndUsdc, from, pool_address, amount)
     }
 
     fn deposit_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
