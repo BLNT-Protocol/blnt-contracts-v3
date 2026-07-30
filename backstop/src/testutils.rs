@@ -2,11 +2,12 @@
 
 use crate::{
     backstop::Q4W,
-    dependencies::{CometClient, COMET_WASM},
+    dependencies::{CometClient, EmitterClient, COMET_WASM},
     storage::{self},
     BackstopContract,
 };
 
+use mock_emitter::MockEmitter;
 use mock_pool::{MockPool, MockPoolClient};
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
@@ -14,10 +15,8 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, Vec,
 };
 
-use sep_41_token::testutils::{MockTokenClient, MockTokenWASM};
-
-use blend_contract_sdk::emitter::{Client as EmitterClient, WASM as EmitterWASM};
 use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
+use sep_41_token::testutils::{MockToken, MockTokenClient};
 
 /// Create a backstop contract.
 ///
@@ -39,7 +38,7 @@ pub(crate) fn create_backstop(e: &Env) -> Address {
 
 pub(crate) fn create_token<'a>(e: &Env, admin: &Address) -> (Address, MockTokenClient<'a>) {
     let contract_address = Address::generate(e);
-    e.register_at(&contract_address, MockTokenWASM, ());
+    e.register_at(&contract_address, MockToken, ());
     let client = MockTokenClient::new(e, &contract_address);
     client.initialize(&admin, &7, &"unit".into_val(e), &"test".into_val(e));
     (contract_address, client)
@@ -111,12 +110,12 @@ pub(crate) fn create_emitter<'a>(
     blnd_token: &Address,
     emitter_last_distro: u64,
 ) -> (Address, EmitterClient<'a>) {
-    let contract_address = e.register(EmitterWASM, ());
+    let contract_address = e.register(MockEmitter, ());
 
     let prev_timestamp = e.ledger().timestamp();
     e.ledger().set(LedgerInfo {
         timestamp: emitter_last_distro,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: 0,
         network_id: Default::default(),
         base_reserve: 10,
@@ -131,7 +130,7 @@ pub(crate) fn create_emitter<'a>(
     client.initialize(&blnd_token, &backstop, &backstop_token);
     e.ledger().set(LedgerInfo {
         timestamp: prev_timestamp,
-        protocol_version: 22,
+        protocol_version: 27,
         sequence_number: 0,
         network_id: Default::default(),
         base_reserve: 10,

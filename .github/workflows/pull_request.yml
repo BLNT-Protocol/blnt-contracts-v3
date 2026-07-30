@@ -21,16 +21,28 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - run: rustup update
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - run: rustup toolchain install 1.91.1 --profile minimal --component rustfmt
     - run: cargo fmt --all --check
+    - run: cargo fmt --manifest-path test-suites/fuzz/Cargo.toml --check
 
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
-    - uses: stellar/actions/rust-cache@main
-    - run: rustup update
-    - run: rustup target add wasm32-unknown-unknown
-    - uses: stellar/stellar-cli@v22.6.0
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+    - uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+          test-suites/fuzz/target
+        key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-suites/fuzz/Cargo.lock') }}-${{ github.sha }}
+        restore-keys: |
+          cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-suites/fuzz/Cargo.lock') }}-
+          cargo-${{ runner.os }}-
+    - run: rustup toolchain install 1.91.1 --profile minimal --component clippy --target wasm32v1-none
+    - uses: stellar/stellar-cli@5a7c5fe76530bf4248477ac812fc757146b98cc4 # v27.0.0
     - run: make test
+    - run: cargo clippy --workspace --all-targets --locked --message-format short
+    - run: cargo clippy --manifest-path test-suites/fuzz/Cargo.toml --all-targets --locked --message-format short

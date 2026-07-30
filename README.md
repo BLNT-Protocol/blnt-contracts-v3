@@ -14,6 +14,9 @@ Conducted audits can be viewed in the `audits` folder.
 
 ## Getting Started
 
+The checked-in `rust-toolchain.toml` selects Rust 1.91.1 and the
+`wasm32v1-none` target automatically for commands run in this repository.
+
 Build the contracts with:
 
 ```
@@ -33,7 +36,7 @@ The `make` command creates an optimized and un-optimized set of WASM contracts. 
 These can be found at the path:
 
 ```
-target/wasm32-unknown-unknown/optimized
+target/wasm32v1-none/optimized
 ```
 
 For help with deployment to a network, please visit the [Blend Utils](https://github.com/blend-capital/blend-utils) repo.

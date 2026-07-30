@@ -152,9 +152,14 @@ fn test_backstop_full_rz_under_limits() {
     let dist_resources = fixture.env.cost_estimate().resources();
     assert!(dist_resources.instructions < 100000000);
     assert!(dist_resources.mem_bytes < 41943040 / 2);
-    assert!(dist_resources.read_entries + dist_resources.write_entries < 100);
+    assert!(
+        dist_resources.disk_read_entries
+            + dist_resources.memory_read_entries
+            + dist_resources.write_entries
+            < 100
+    );
     assert!(dist_resources.write_entries < 50);
-    assert!(dist_resources.read_bytes < 200000 / 2);
+    assert!(dist_resources.disk_read_bytes < 200000 / 2);
     assert!(dist_resources.write_bytes < 132096 / 2);
 
     // assert all pools can be gulped

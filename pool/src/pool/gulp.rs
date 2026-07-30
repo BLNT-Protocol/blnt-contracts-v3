@@ -53,7 +53,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 100,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1234,
             network_id: Default::default(),
             base_reserve: 10,
@@ -106,7 +106,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 100,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1234,
             network_id: Default::default(),
             base_reserve: 10,
@@ -161,7 +161,7 @@ mod tests {
         e.mock_all_auths_allowing_non_root_auth();
         e.ledger().set(LedgerInfo {
             timestamp: 100,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1234,
             network_id: Default::default(),
             base_reserve: 10,
@@ -210,7 +210,7 @@ mod tests {
         e.mock_all_auths_allowing_non_root_auth();
         e.ledger().set(LedgerInfo {
             timestamp: 100,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1234,
             network_id: Default::default(),
             base_reserve: 10,
@@ -261,7 +261,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 100,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1234,
             network_id: Default::default(),
             base_reserve: 10,

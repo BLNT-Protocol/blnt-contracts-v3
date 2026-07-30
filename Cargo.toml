@@ -3,13 +3,26 @@ resolver = "2"
 
 members = [
     "backstop",
+    # SDK 27-compatible source replacements for the v2 dependency APIs.
+    "compat/sep-40-oracle",
+    "compat/sep-41-token",
+    "compat/soroban-fixed-point-math",
+    "compat/moderc3156",
     "pool",
     "mocks/mock-pool",
     "mocks/mock-pool-factory",
+    # Source-based test mock replacing the SDK 22 precompiled emitter WASM.
+    "mocks/mock-emitter",
     "mocks/moderc3156",
     "pool-factory",
     "test-suites"
 ]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.91.1"
+license = "AGPL-3.0"
+publish = false
 
 [profile.release-with-logs]
 inherits = "release"
@@ -26,24 +39,20 @@ codegen-units = 1
 lto = true
 
 [workspace.dependencies.soroban-sdk]
-version = "22.0.7"
+version = "=27.0.3"
 
 [workspace.dependencies.soroban-fixed-point-math]
-version = "1.3.0"
+path = "compat/soroban-fixed-point-math"
 
 [workspace.dependencies.cast]
 version = "0.3.0"
 default-features = false
 
 [workspace.dependencies.sep-40-oracle]
-version = "1.2.0"
+path = "compat/sep-40-oracle"
 
 [workspace.dependencies.sep-41-token]
-version = "1.2.0"
-
-[workspace.dependencies.blend-contract-sdk]
-version = "1.22.0"
+path = "compat/sep-41-token"
 
 [workspace.dependencies.moderc3156]
-git = "https://github.com/xycloo/xycloans"
-rev = "d9a7ae1"
+path = "compat/moderc3156"

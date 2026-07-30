@@ -3,10 +3,11 @@ use pool::{FlashLoan, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     map,
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Events},
+    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
     vec, Address, IntoVal, Symbol, Val, Vec,
 };
 use test_suites::{
+    assertions::legacy_events,
     create_fixture_with_data,
     moderc3156::create_flashloan_receiver,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
@@ -107,7 +108,7 @@ fn test_flashloan() {
     );
 
     // validate events
-    let events = fixture.env.events().all();
+    let events = legacy_events(&fixture.env);
 
     let xlm_res_data = pool_fixture.pool.get_reserve(&xlm_address);
     let stable_res_data = pool_fixture.pool.get_reserve(&stable_address);

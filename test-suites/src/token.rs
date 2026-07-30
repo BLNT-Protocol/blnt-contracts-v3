@@ -1,4 +1,4 @@
-use sep_41_token::testutils::{MockTokenClient, MockTokenWASM};
+use sep_41_token::testutils::{MockToken, MockTokenClient};
 use soroban_sdk::{testutils::Address as _, Address, Env, IntoVal};
 
 pub fn create_stellar_token<'a>(e: &Env, admin: &Address) -> (Address, MockTokenClient<'a>) {
@@ -18,7 +18,7 @@ pub fn create_token<'a>(
     symbol: &str,
 ) -> (Address, MockTokenClient<'a>) {
     let contract_id = Address::generate(e);
-    e.register_at(&contract_id, MockTokenWASM, ());
+    e.register_at(&contract_id, MockToken, ());
     let client = MockTokenClient::new(e, &contract_id);
     client.initialize(
         admin,

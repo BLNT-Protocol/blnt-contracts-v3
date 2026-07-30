@@ -8,8 +8,7 @@ use crate::oracle::create_mock_oracle;
 use crate::pool::POOL_WASM;
 use crate::pool_factory::create_pool_factory;
 use crate::token::{create_stellar_token, create_token};
-use backstop::BackstopClient;
-use blend_contract_sdk::emitter::Client as EmitterClient;
+use backstop::{BackstopClient, EmitterClient};
 use pool::{PoolClient, PoolConfig, PoolDataKey, ReserveConfig, ReserveData, ReserveEmissionData};
 use pool_factory::{PoolFactoryClient, PoolInitMeta};
 use sep_40_oracle::testutils::{Asset, MockPriceOracleClient};
@@ -72,7 +71,7 @@ impl TestFixture<'_> {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1441065600, // Sept 1st, 2015 (backstop epoch)
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 150,
             network_id: Default::default(),
             base_reserve: 10,
@@ -286,7 +285,7 @@ impl TestFixture<'_> {
     pub fn jump(&self, time: u64) {
         self.env.ledger().set(LedgerInfo {
             timestamp: self.env.ledger().timestamp().saturating_add(time),
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: self.env.ledger().sequence(),
             network_id: Default::default(),
             base_reserve: 10,
@@ -300,7 +299,7 @@ impl TestFixture<'_> {
         let blocks = time / 5;
         self.env.ledger().set(LedgerInfo {
             timestamp: self.env.ledger().timestamp().saturating_add(time),
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: self.env.ledger().sequence().saturating_add(blocks as u32),
             network_id: Default::default(),
             base_reserve: 10,

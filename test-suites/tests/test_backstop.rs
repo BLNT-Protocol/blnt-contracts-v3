@@ -3,11 +3,11 @@
 use backstop::{BackstopClient, BackstopContract};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation, Events},
+    testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
     vec, Address, Env, IntoVal, Symbol, Val, Vec,
 };
 use test_suites::{
-    assertions::assert_approx_eq_abs,
+    assertions::{assert_approx_eq_abs, event_from_end},
     create_fixture_with_data,
     test_fixture::{TokenIndex, SCALAR_7},
 };
@@ -98,7 +98,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     let event_body: Vec<Val> = vec![
         &fixture.env,
         amount.into_val(&fixture.env),
@@ -132,7 +132,7 @@ fn test_backstop() {
     // Start the next emission cycle
     fixture.emitter.distribute();
     fixture.backstop.distribute();
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -193,7 +193,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -242,7 +242,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     let event_body: Vec<Val> = vec![
         &fixture.env,
         amount.into_val(&fixture.env),
@@ -306,7 +306,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -359,7 +359,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![
@@ -404,7 +404,7 @@ fn test_backstop() {
             }
         )
     );
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     let event_body: Vec<Val> = vec![
         &fixture.env,
         amount.into_val(&fixture.env),
@@ -470,7 +470,7 @@ fn test_backstop() {
     let emitted_blnd_2 = ((14 * 24 * 60 * 60 + 1) * SCALAR_7)
         .fixed_mul_floor(emission_share_2, SCALAR_7)
         .unwrap();
-    let event = vec![&fixture.env, fixture.env.events().all().last_unchecked()];
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
         vec![

@@ -249,7 +249,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -299,7 +299,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 1000,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -353,7 +353,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -402,7 +402,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -449,7 +449,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -499,7 +499,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -851,7 +851,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,
@@ -876,7 +876,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 123456 * 5,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 123456,
             network_id: Default::default(),
             base_reserve: 10,

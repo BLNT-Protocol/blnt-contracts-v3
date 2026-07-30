@@ -9,6 +9,5 @@ mod setup;
 pub use setup::create_fixture_with_data;
 pub mod assertions;
 pub mod moderc3156;
-pub mod snapshot;
 pub mod test_fixture;
 pub mod token;
