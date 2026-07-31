@@ -489,7 +489,9 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &frodo,
     );
 
-    let dusty_tier_assets = 100 * SCALAR_7;
+    // Keep every tier one base unit below the operational minimum so supplier
+    // default is the next bounded continuation step.
+    let dusty_tier_assets = 100 * SCALAR_7 - 1;
     fixture
         .backstop
         .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &dusty_tier_assets);

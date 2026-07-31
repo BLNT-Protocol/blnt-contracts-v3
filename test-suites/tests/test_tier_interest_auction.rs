@@ -73,7 +73,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .deposit_usdc(&operator, &pool_address, &tier_principal);
     pool.set_status(&0);
 
-    let credit = 900 * SCALAR_7;
+    let credit = 450 * SCALAR_7;
     fixture.tokens[TokenIndex::USDC].mint(&pool_address, &credit);
     assert_eq!(pool.gulp(&fixture.tokens[TokenIndex::USDC].address), credit);
     fixture
@@ -81,14 +81,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
 
     let expected = [
-        (PoolBackstopTier::BlndUsdc, 300 * SCALAR_7, 360 * SCALAR_7),
-        (PoolBackstopTier::BlndXlm, 400 * SCALAR_7, 480 * SCALAR_7),
-        (PoolBackstopTier::Usdc, 200 * SCALAR_7, 240 * SCALAR_7),
+        (PoolBackstopTier::BlndUsdc, 150 * SCALAR_7, 180 * SCALAR_7),
+        (PoolBackstopTier::BlndXlm, 200 * SCALAR_7, 240 * SCALAR_7),
+        (PoolBackstopTier::Usdc, 100 * SCALAR_7, 120 * SCALAR_7),
     ];
     // The BLND:XLM auction fills 100 ledgers into the declining-bid half of
     // the v2 curve, so realized donations intentionally diverge from the
     // BLND:XLM=4, BLND:USDC=3, USDC=2 credit-allocation weights.
-    let realized_donations = [360 * SCALAR_7, 240 * SCALAR_7, 240 * SCALAR_7];
+    let realized_donations = [180 * SCALAR_7, 120 * SCALAR_7, 120 * SCALAR_7];
     let starting_states = [
         fixture
             .backstop
@@ -126,22 +126,22 @@ fn exercise_tier_interest_auctions(wasm: bool) {
                 partial
                     .base_lot
                     .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-                Some(150 * SCALAR_7)
+                Some(75 * SCALAR_7)
             );
             assert_eq!(
                 partial
                     .lot
                     .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-                Some(75 * SCALAR_7)
+                Some(37_5000000)
             );
             assert_eq!(
                 partial
                     .returned_lot
                     .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-                Some(75 * SCALAR_7)
+                Some(37_5000000)
             );
-            assert_eq!(partial.base_bid_amount, 180 * SCALAR_7);
-            assert_eq!(partial.bid_amount, 180 * SCALAR_7);
+            assert_eq!(partial.base_bid_amount, 90 * SCALAR_7);
+            assert_eq!(partial.bid_amount, 90 * SCALAR_7);
         }
 
         e.ledger()
@@ -155,12 +155,12 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         assert_eq!(
             fill.lot
                 .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-            Some(if index == 0 { 150 * SCALAR_7 } else { *lot })
+            Some(if index == 0 { 75 * SCALAR_7 } else { *lot })
         );
         assert_eq!(
             fill.bid_amount,
             if index == 0 {
-                180 * SCALAR_7
+                90 * SCALAR_7
             } else {
                 realized_donations[index]
             }
@@ -169,7 +169,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     }
 
     let pending = pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
-    assert_eq!(pending.blnd_usdc, 75 * SCALAR_7);
+    assert_eq!(pending.blnd_usdc, 37_5000000);
     assert_eq!(pending.blnd_xlm, 0);
     assert_eq!(pending.usdc, 0);
     assert_eq!(pending.carry, 0);
@@ -177,7 +177,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         pool.get_reserve(&fixture.tokens[TokenIndex::USDC].address)
             .data
             .backstop_credit,
-        75 * SCALAR_7
+        37_5000000
     );
 
     for (index, tier) in [
@@ -214,7 +214,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let pending_before_stale =
         pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(stale.lot_value, pending_before_stale.blnd_usdc);
-    assert!(stale.lot_value >= 200 * SCALAR_7);
+    assert!(stale.lot_value >= 100 * SCALAR_7);
 
     // The committed tier blocks share-changing deposits, while queue/dequeue
     // remain available because they do not change total shares.
@@ -245,13 +245,13 @@ fn exercise_tier_interest_auctions(wasm: bool) {
             + pending_after_stale.blnd_xlm
             + pending_after_stale.usdc
             + pending_after_stale.carry,
-        635 * SCALAR_7
+        597_5000000
     );
     assert_eq!(
         pool.get_reserve(&fixture.tokens[TokenIndex::USDC].address)
             .data
             .backstop_credit,
-        635 * SCALAR_7
+        597_5000000
     );
 
     // Exercise the maximum four-reserve batch against both native and

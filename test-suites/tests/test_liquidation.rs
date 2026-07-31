@@ -611,7 +611,7 @@ fn test_liquidations() {
     // qualify, while its remaining tier capital falls below the minimum.
     fixture
         .backstop
-        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &(200 * SCALAR_7));
+        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &(100 * SCALAR_7));
 
     // Sam re-borrows
     let sam_requests: Vec<Request> = vec![

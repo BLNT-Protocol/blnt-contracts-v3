@@ -14,7 +14,7 @@ const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
 const AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
 const BAD_DEBT_LOT_PREMIUM_NUMERATOR: i128 = 6;
 const BAD_DEBT_LOT_PREMIUM_DENOMINATOR: i128 = 5;
-const BAD_DEBT_TIER_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
+const BAD_DEBT_TIER_MINIMUM_VALUE_USDC: i128 = 100 * SCALAR_7;
 
 /// Canonical single-tier lot selected for one pool's bad-debt auction.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -389,9 +389,16 @@ mod tests {
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         factory.set_mock_pool(&pool);
         let client = BackstopClient::new(&e, &backstop);
+        let blnd_xlm_below_minimum = BAD_DEBT_TIER_MINIMUM_VALUE_USDC - 1;
 
         set_tier_balance(&e, &backstop, &pool, BackstopTier::BlndUsdc, 50 * SCALAR_7);
-        set_tier_balance(&e, &backstop, &pool, BackstopTier::BlndXlm, 100 * SCALAR_7);
+        set_tier_balance(
+            &e,
+            &backstop,
+            &pool,
+            BackstopTier::BlndXlm,
+            blnd_xlm_below_minimum,
+        );
         set_tier_balance(&e, &backstop, &pool, BackstopTier::Usdc, 500 * SCALAR_7);
 
         let debt_value = 200 * SCALAR_7;
@@ -424,11 +431,11 @@ mod tests {
             PoolValuation {
                 active_blnd: super::super::BlndEmissionValues {
                     blnd_usdc: 50 * SCALAR_7,
-                    blnd_xlm: 100 * SCALAR_7,
+                    blnd_xlm: blnd_xlm_below_minimum,
                 },
                 active_values: super::super::ActivationValues {
                     blnd_usdc: 50 * SCALAR_7,
-                    blnd_xlm: 100 * SCALAR_7,
+                    blnd_xlm: blnd_xlm_below_minimum,
                     usdc: 260 * SCALAR_7,
                 },
                 queued_values: super::super::ActivationValues {

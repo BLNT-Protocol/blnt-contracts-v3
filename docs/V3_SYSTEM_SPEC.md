@@ -222,9 +222,10 @@ matching pool and backstop records for one identifier, selected tier, and base
 amounts with a 46-day temporary lifetime. Only the registered pool may mutate
 its commitment; reads do not renew it.
 
-Both auction types use a 200-USDC minimum for one tier. Equality qualifies; a
-successfully valued smaller tier is ineligible, while unavailable, invalid, or
-stale valuation fails closed.
+Bad-debt eligibility requires at least 100 USDC of available tier capital;
+interest-auction creation requires at least 100 USDC in the selected tier's
+pending lot. Equality qualifies. A successfully valued smaller amount is
+ineligible, while unavailable, invalid, or stale valuation fails closed.
 
 A partial fill removes selected base amounts, applies the inherited time
 modifier only to actual transfers, and synchronizes both records using a
@@ -241,10 +242,10 @@ assets. All effects commit or roll back together.
 4. Pool suppliers.
 
 Sections 3.1 and 3.3 govern eligibility. One auction sells one tier, selecting
-the first with at least 200 USDC of eligible uncommitted capital. Smaller
+the first with at least 100 USDC of eligible uncommitted capital. Smaller
 tiers are skipped without a debt-covering exception; valuation failure stops
 the search. Supplier loss begins only after all three successfully value below
-the minimum, so less than 600 USDC may be skipped. Skipped capital remains
+the minimum, so less than 300 USDC may be skipped. Skipped capital remains
 attributed and may requalify before supplier settlement.
 
 The auction targets 120% of oracle-valued debt. Only the pool may authorize a
