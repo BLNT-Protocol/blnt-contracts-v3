@@ -45,9 +45,13 @@ pub(crate) use tier::{
 pub use tier::{BackstopTier, PoolTierState, TierTotals};
 
 mod valuation;
+#[cfg(any(test, feature = "testutils"))]
+pub use valuation::set_test_valuation_override;
 pub(crate) use valuation::{
-    build_pool_valuation, quote_activation, quote_status_set, quote_status_update,
+    build_pool_valuation, quote_activation, quote_lp_amount, quote_status_set, quote_status_update,
+    validate_backstop_assets,
 };
 pub use valuation::{
-    ActivationQuote, ActivationValues, BlndEmissionValues, PoolStatusQuote, PoolValuation,
+    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolStatusQuote,
+    PoolValuation,
 };

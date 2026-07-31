@@ -1642,15 +1642,12 @@ mod tests {
 
         // creating reserves for a pool exhausts the budget
         e.cost_estimate().budget().reset_unlimited();
+        let (blnd_id, _) = testutils::create_token_contract(&e, &bombadil);
+        let (usdc_id, _) = testutils::create_token_contract(&e, &bombadil);
         let (backstop_token_id, backstop_token_client) =
-            testutils::create_token_contract(&e, &bombadil);
-        let (backstop_address, backstop_client) = testutils::create_backstop(
-            &e,
-            &pool_address,
-            &backstop_token_id,
-            &Address::generate(&e),
-            &Address::generate(&e),
-        );
+            testutils::create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
+        let (backstop_address, backstop_client) =
+            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
         reserve_data_0.last_time = 12345;
@@ -1689,7 +1686,7 @@ mod tests {
         };
         let auction_data = AuctionData {
             bid: map![&e, (underlying_0, 10_0000000), (underlying_1, 2_5000000)],
-            lot: map![&e, (backstop_token_id, 95_2000000)],
+            lot: map![&e, (backstop_token_id.clone(), 95_2000000)],
             block: 51,
         };
         let positions: Positions = Positions {
@@ -1701,7 +1698,11 @@ mod tests {
             ],
             supply: map![&e],
         };
-        backstop_token_client.mint(&samwise, &95_2000000);
+        sep_41_token::TokenClient::new(&e, &backstop_token_id).transfer(
+            &bombadil,
+            &samwise,
+            &95_2000000,
+        );
         backstop_token_client.approve(&samwise, &backstop_address, &i128::MAX, &1000000);
         backstop_client.deposit(
             &backstop::BackstopTier::BlndUsdc,

@@ -32,10 +32,10 @@ make
 ```
 
 Artifacts are written to `target/wasm32v1-none/optimized`. The build includes
-the pool factory, backstop, pool, and immutable v3 backstop-valuation contract.
-It rejects any production WASM larger than 120,000 bytes, preserving the
-Protocol 27 deployment headroom established by the candidate's deployment
-testing.
+the pool factory, backstop, and pool; Comet-based backstop valuation is
+integrated into the backstop. It rejects any production WASM larger than
+120,000 bytes, preserving the Protocol 27 deployment headroom established by
+the candidate's deployment testing.
 
 Compare the optimized artifacts with the exact deployed v2 contracts:
 

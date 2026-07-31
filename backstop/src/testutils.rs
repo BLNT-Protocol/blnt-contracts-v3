@@ -1,16 +1,16 @@
 #![cfg(test)]
 
 use crate::{
-    backstop::Q4W,
+    backstop::{set_test_valuation_override, Q4W},
     dependencies::{CometClient, EmitterClient, COMET_WASM},
     storage::{self},
     BackstopContract,
 };
 
-use mock_backstop_valuation::{BackstopValuationBinding, MockBackstopValuation};
 use mock_emitter::MockEmitter;
 use mock_pool::MockPoolClient;
 use soroban_sdk::{
+    contract, contractimpl, contracttype,
     testutils::{Address as _, Ledger, LedgerInfo},
     unwrap::UnwrapOptimized,
     vec, Address, BytesN, Env, IntoVal, Vec,
@@ -19,57 +19,101 @@ use soroban_sdk::{
 use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
 use sep_41_token::testutils::{MockToken, MockTokenClient};
 
-pub fn create_mock_backstop_valuation(
-    e: &Env,
-    blnd: &Address,
-    blnd_usdc: &Address,
-    blnd_xlm: &Address,
-    usdc: &Address,
-) -> Address {
-    e.register(
-        MockBackstopValuation,
-        (BackstopValuationBinding {
-            blnd: blnd.clone(),
-            blnd_usdc: blnd_usdc.clone(),
-            blnd_xlm: blnd_xlm.clone(),
-            usdc: usdc.clone(),
-        },),
-    )
+#[derive(Clone)]
+#[contracttype]
+enum MockCometConfigKey {
+    Tokens,
+}
+
+#[contract]
+struct MockCometConfig;
+
+#[contractimpl]
+impl MockCometConfig {
+    pub fn __constructor(e: Env, tokens: Vec<Address>) {
+        e.storage()
+            .instance()
+            .set(&MockCometConfigKey::Tokens, &tokens);
+    }
+
+    pub fn decimals(_e: Env) -> u32 {
+        7
+    }
+
+    pub fn get_tokens(e: Env) -> Vec<Address> {
+        e.storage()
+            .instance()
+            .get(&MockCometConfigKey::Tokens)
+            .unwrap()
+    }
+
+    pub fn get_normalized_weight(e: Env, token: Address) -> i128 {
+        let tokens = Self::get_tokens(e);
+        if tokens.get(0).unwrap() == token {
+            8_000_000
+        } else if tokens.get(1).unwrap() == token {
+            2_000_000
+        } else {
+            0
+        }
+    }
 }
 
 /// Create a backstop contract.
 ///
-/// This sets random data in the constructor, so unit tests that
-/// rely on any constructor data need to reset it.
+/// Unit tests use an explicit one-to-one valuation override after the
+/// constructor validates two minimal 80:20 Comet interfaces. Dedicated
+/// valuation tests exercise the real Comet WASM and reserve formulas.
 pub(crate) fn create_backstop(e: &Env) -> Address {
+    let admin = Address::generate(e);
+    let (blnd, _) = create_token(e, &admin);
+    let (usdc, _) = create_token(e, &admin);
+    let (xlm, _) = create_token(e, &admin);
+    let blnd_usdc = create_comet_config(e, &blnd, &usdc);
+    let blnd_xlm = create_comet_config(e, &blnd, &xlm);
+    register_backstop(e, blnd, usdc, xlm, blnd_usdc, blnd_xlm)
+}
+
+pub(crate) fn create_backstop_with_real_comets(e: &Env) -> Address {
+    let admin = Address::generate(e);
+    let (blnd, _) = create_token(e, &admin);
+    let (usdc, _) = create_token(e, &admin);
+    let (xlm, _) = create_token(e, &admin);
+    let (blnd_usdc, _) = create_comet_lp_pool(e, &admin, &blnd, &usdc);
+    let (blnd_xlm, _) = create_comet_lp_pool(e, &admin, &blnd, &xlm);
+    register_backstop(e, blnd, usdc, xlm, blnd_usdc, blnd_xlm)
+}
+
+fn register_backstop(
+    e: &Env,
+    blnd: Address,
+    usdc: Address,
+    xlm: Address,
+    blnd_usdc: Address,
+    blnd_xlm: Address,
+) -> Address {
     let backstop = Address::generate(e);
-    let blnd_usdc = Address::generate(e);
-    let blnd_xlm = Address::generate(e);
-    let blnd = Address::generate(e);
-    let usdc = Address::generate(e);
     let pool_init_meta = PoolInitMeta {
         backstop: backstop.clone(),
         pool_hash: BytesN::<32>::from_array(e, &[0u8; 32]),
         blnd_id: blnd.clone(),
     };
     let pool_factory = e.register(MockPoolFactory {}, (pool_init_meta,));
-    let valuation = create_mock_backstop_valuation(e, &blnd, &blnd_usdc, &blnd_xlm, &usdc);
     let emitter = e.register(MockEmitter, ());
     EmitterClient::new(e, &emitter).initialize(&blnd, &Address::generate(e), &blnd_usdc);
     e.register_at(
         &backstop,
         BackstopContract {},
-        (
-            blnd_usdc,
-            blnd_xlm,
-            emitter,
-            blnd,
-            usdc,
-            pool_factory,
-            valuation,
-        ),
+        (blnd_usdc, blnd_xlm, emitter, blnd, usdc, xlm, pool_factory),
     );
+    e.as_contract(&backstop, || {
+        set_test_valuation_override(e, Some(false));
+    });
     backstop
+}
+
+fn create_comet_config(e: &Env, blnd: &Address, pair: &Address) -> Address {
+    e.register(MockCometConfig, (vec![e, blnd.clone(), pair.clone()],))
 }
 
 pub(crate) fn create_token<'a>(e: &Env, admin: &Address) -> (Address, MockTokenClient<'a>) {

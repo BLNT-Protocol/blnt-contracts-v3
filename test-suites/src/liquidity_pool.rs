@@ -16,7 +16,7 @@ use sep_41_token::testutils::MockTokenClient;
 /// - Token 1: 1,000
 /// - Token 2: 25
 /// - Shares: 100
-pub(crate) fn create_lp_pool<'a>(
+pub fn create_lp_pool<'a>(
     e: &Env,
     admin: &Address,
     token_1: &Address,

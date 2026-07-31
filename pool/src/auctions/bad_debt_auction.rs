@@ -1854,11 +1854,9 @@ mod tests {
 
         let pool_client = crate::PoolClient::new(&e, &pool_address);
         let reserve_before = pool_client.get_reserve(&debt_asset).data;
-        let valuation = mock_backstop_valuation::MockBackstopValuationClient::new(
-            &e,
-            &backstop_client.backstop_valuation(),
-        );
-        valuation.set_quote_failure(&true);
+        e.as_contract(&backstop_address, || {
+            backstop::set_test_valuation_override(&e, Some(true));
+        });
         assert!(pool_client
             .try_continue_bad_debt_resolution(&BytesN::from_array(&e, &[12; 32]))
             .is_err());
@@ -1879,7 +1877,9 @@ mod tests {
         assert_eq!(reserve_after_failure.d_supply, reserve_before.d_supply);
         assert!(pool_client.try_get_bad_debt_auction().is_err());
 
-        valuation.set_quote_failure(&false);
+        e.as_contract(&backstop_address, || {
+            backstop::set_test_valuation_override(&e, Some(false));
+        });
         let continuation =
             pool_client.continue_bad_debt_resolution(&BytesN::from_array(&e, &[13; 32]));
         assert!(!continuation.auction_created);

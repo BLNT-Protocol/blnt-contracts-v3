@@ -61,7 +61,9 @@ fn test_backstop_rz_changes_handle_emissions() {
 
     // Move active value below the v3 maintenance threshold for the reward-zone
     // removal, then restore Sam's ordinary position at the same timestamp.
-    let membership_reduction = 8_000 * SCALAR_7;
+    // The fixture Comet is worth about $1.25 per LP share. Queue enough of
+    // Sam's position to leave 7,500 active shares (about $9,375).
+    let membership_reduction = 10_000 * SCALAR_7;
     fixture.backstop.queue_withdrawal(
         &backstop::BackstopTier::BlndUsdc,
         &sam,

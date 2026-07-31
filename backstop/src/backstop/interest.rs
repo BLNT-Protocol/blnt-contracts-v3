@@ -1,12 +1,11 @@
 use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, I256};
 
-use crate::{
-    constants::SCALAR_7, dependencies::BackstopValuationClient, emissions, errors::BackstopError,
-    storage,
-};
+use crate::{constants::SCALAR_7, emissions, errors::BackstopError, storage};
 
-use super::{require_registered_pool, tier_token, update_tier_totals, BackstopTier};
+use super::{
+    quote_lp_amount, require_registered_pool, tier_token, update_tier_totals, BackstopTier,
+};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -248,20 +247,14 @@ pub(crate) fn interest_tier_locked(e: &Env, tier: BackstopTier, pool: &Address) 
 }
 
 fn build_take_rate_values(e: &Env, pool: &Address) -> TakeRateValues {
-    let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
     TakeRateValues {
-        blnd_usdc: quote_tier_value(e, &adapter, BackstopTier::BlndUsdc, pool),
-        blnd_xlm: quote_tier_value(e, &adapter, BackstopTier::BlndXlm, pool),
+        blnd_usdc: quote_tier_value(e, BackstopTier::BlndUsdc, pool),
+        blnd_xlm: quote_tier_value(e, BackstopTier::BlndXlm, pool),
         usdc: storage::get_pool_balance_for_tier(e, BackstopTier::Usdc, pool).tokens,
     }
 }
 
-fn quote_tier_value(
-    e: &Env,
-    adapter: &BackstopValuationClient,
-    tier: BackstopTier,
-    pool: &Address,
-) -> i128 {
+fn quote_tier_value(e: &Env, tier: BackstopTier, pool: &Address) -> i128 {
     let amount = storage::get_pool_balance_for_tier(e, tier, pool).tokens;
     if amount < 0 {
         panic_with_error!(e, BackstopError::InvalidValuation);
@@ -269,14 +262,7 @@ fn quote_tier_value(
     if amount == 0 {
         return 0;
     }
-    let quote = adapter.quote(&tier_token(e, tier), &amount);
-    if quote.underlying_blnd < 0 || quote.usdc_value < 0 {
-        panic_with_error!(e, BackstopError::InvalidValuation);
-    }
-    if quote.valid_until < e.ledger().timestamp() {
-        panic_with_error!(e, BackstopError::StaleValuation);
-    }
-    quote.usdc_value
+    quote_lp_amount(e, tier, amount).usdc_value
 }
 
 fn build_interest_lot_quote(e: &Env, tier: BackstopTier, lot_value: i128) -> InterestLotQuote {
@@ -290,13 +276,9 @@ fn build_interest_lot_quote(e: &Env, tier: BackstopTier, lot_value: i128) -> Int
     let (unit_value, valid_until) = if tier == BackstopTier::Usdc {
         (SCALAR_7, u64::MAX)
     } else {
-        let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
-        let quote = adapter.quote(&bid_token, &SCALAR_7);
-        if quote.underlying_blnd < 0 || quote.usdc_value <= 0 {
+        let quote = quote_lp_amount(e, tier, SCALAR_7);
+        if quote.usdc_value <= 0 {
             panic_with_error!(e, BackstopError::InvalidValuation);
-        }
-        if quote.valid_until < e.ledger().timestamp() {
-            panic_with_error!(e, BackstopError::StaleValuation);
         }
         (quote.usdc_value, quote.valid_until)
     };

@@ -19,8 +19,7 @@ Read these before changing contract behavior:
 1. `docs/SYSTEM_SPEC.md`
 2. `docs/V2_SYSTEM_SPEC.md`
 3. `docs/V3_SYSTEM_SPEC.md`
-4. `docs/BACKSTOP_VALUATION.md`
-5. Existing contract tests and the implementation being changed
+4. Existing contract tests and the implementation being changed
 
 `docs/SYSTEM_SPEC.md` defines how the specifications compose. Unstated v3
 behavior inherits the frozen v2 baseline. Do not introduce a behavioral

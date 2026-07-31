@@ -1086,13 +1086,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
-name = "mock-backstop-valuation"
-version = "0.0.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "mock-emitter"
 version = "0.0.0"
 dependencies = [
@@ -1909,7 +1902,6 @@ version = "0.0.0"
 dependencies = [
  "backstop",
  "cast",
- "mock-backstop-valuation",
  "mock-emitter",
  "mock-pool-factory",
  "moderc3156-example",

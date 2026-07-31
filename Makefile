@@ -1,5 +1,5 @@
 override MAX_WASM_BYTES := 120000
-PRODUCTION_WASMS := backstop.wasm pool.wasm pool_factory.wasm blend_v3_backstop_valuation.wasm
+PRODUCTION_WASMS := backstop.wasm pool.wasm pool_factory.wasm
 
 .PHONY: default test build wasm-sizes wasm-size-report fmt clean generate-js
 
@@ -17,8 +17,6 @@ build:
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package pool --locked \
 		--out-dir target/wasm32v1-none/optimized
-	stellar contract build --package blend-v3-backstop-valuation --locked \
-		--out-dir target/wasm32v1-none/optimized
 	@for wasm in $(PRODUCTION_WASMS); do \
 		size="$$(wc -c < "target/wasm32v1-none/optimized/$$wasm")"; \
 		test "$$size" -le "$(MAX_WASM_BYTES)" || \
@@ -26,7 +24,7 @@ build:
 				"$$wasm" "$(MAX_WASM_BYTES)" >&2; exit 1; }; \
 	done
 	cd target/wasm32v1-none/optimized/ && \
-		for i in *.wasm ; do \
+		for i in $(PRODUCTION_WASMS) ; do \
 			ls -l "$$i"; \
 		done
 

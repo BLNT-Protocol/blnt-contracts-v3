@@ -11,13 +11,11 @@ members = [
     "pool",
     "mocks/mock-pool",
     "mocks/mock-pool-factory",
-    "mocks/mock-backstop-valuation",
     # Source-based test mock replacing the SDK 22 precompiled emitter WASM.
     "mocks/mock-emitter",
     "mocks/moderc3156",
     "pool-factory",
     "test-suites",
-    "backstop-valuation",
 ]
 
 [workspace.package]

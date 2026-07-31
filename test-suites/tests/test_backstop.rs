@@ -9,10 +9,21 @@ use soroban_sdk::{
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, event_from_end},
-    backstop::create_mock_backstop_valuation,
     create_fixture_with_data,
+    liquidity_pool::create_lp_pool,
     test_fixture::{TokenIndex, SCALAR_7},
+    token::create_stellar_token,
 };
+
+fn create_backstop_assets(e: &Env) -> (Address, Address, Address, Address, Address) {
+    let admin = Address::generate(e);
+    let (blnd, _) = create_stellar_token(e, &admin);
+    let (usdc, _) = create_stellar_token(e, &admin);
+    let (xlm, _) = create_stellar_token(e, &admin);
+    let (blnd_usdc, _) = create_lp_pool(e, &admin, &blnd, &usdc);
+    let (blnd_xlm, _) = create_lp_pool(e, &admin, &blnd, &xlm);
+    (blnd, usdc, xlm, blnd_usdc, blnd_xlm)
+}
 
 /// Test user exposed functions on the backstop for basic functionality, auth, and events.
 /// Does not test internal state management of the backstop, only external effects.
@@ -545,12 +556,11 @@ fn test_backstop() {
 #[test]
 fn test_backstop_constructor() {
     let e = Env::default();
+    e.mock_all_auths();
 
-    let backstop_token = Address::generate(&e);
-    let blnd_xlm_token = Address::generate(&e);
+    let (blnd_token, usdc_token, xlm_token, backstop_token, blnd_xlm_token) =
+        create_backstop_assets(&e);
     let emitter = Address::generate(&e);
-    let blnd_token = Address::generate(&e);
-    let usdc_token = Address::generate(&e);
     let contract_id = Address::generate(&e);
     let pool_factory = e.register(
         MockPoolFactory {},
@@ -559,13 +569,6 @@ fn test_backstop_constructor() {
             pool_hash: BytesN::from_array(&e, &[0; 32]),
             blnd_id: blnd_token.clone(),
         },),
-    );
-    let backstop_valuation = create_mock_backstop_valuation(
-        &e,
-        &blnd_token,
-        &backstop_token,
-        &blnd_xlm_token,
-        &usdc_token,
     );
     e.register_at(
         &contract_id,
@@ -576,8 +579,8 @@ fn test_backstop_constructor() {
             emitter.clone(),
             blnd_token.clone(),
             usdc_token.clone(),
+            xlm_token.clone(),
             pool_factory.clone(),
-            backstop_valuation.clone(),
         ),
     );
 
@@ -603,6 +606,13 @@ fn test_backstop_constructor() {
             .unwrap();
         assert_eq!(contract_usdc_token, usdc_token);
 
+        let contract_xlm_token = e
+            .storage()
+            .instance()
+            .get::<Symbol, Address>(&Symbol::new(&e, "XLMTkn"))
+            .unwrap();
+        assert_eq!(contract_xlm_token, xlm_token);
+
         let contract_blnd_xlm_token = e
             .storage()
             .instance()
@@ -616,13 +626,6 @@ fn test_backstop_constructor() {
             .get::<Symbol, Address>(&Symbol::new(&e, "PoolFact"))
             .unwrap();
         assert_eq!(contract_pool_factory, pool_factory);
-
-        let contract_backstop_valuation = e
-            .storage()
-            .instance()
-            .get::<Symbol, Address>(&Symbol::new(&e, "BstopVal"))
-            .unwrap();
-        assert_eq!(contract_backstop_valuation, backstop_valuation);
     });
 
     let backstop_client = BackstopClient::new(&e, &contract_id);
@@ -639,6 +642,8 @@ fn test_backstop_constructor() {
 #[should_panic(expected = "Error(Contract, #1012)")]
 fn test_backstop_constructor_rejects_wrong_factory_binding() {
     let e = Env::default();
+    e.mock_all_auths();
+    let (blnd, usdc, xlm, blnd_usdc, blnd_xlm) = create_backstop_assets(&e);
     let contract_id = Address::generate(&e);
     let pool_factory = e.register(
         MockPoolFactory {},
@@ -652,26 +657,26 @@ fn test_backstop_constructor_rejects_wrong_factory_binding() {
         &contract_id,
         BackstopContract {},
         (
+            blnd_usdc,
+            blnd_xlm,
             Address::generate(&e),
-            Address::generate(&e),
-            Address::generate(&e),
-            Address::generate(&e),
-            Address::generate(&e),
+            blnd,
+            usdc,
+            xlm,
             pool_factory,
-            Address::generate(&e),
         ),
     );
 }
 
 #[test]
 #[should_panic(expected = "Error(Contract, #1014)")]
-fn test_backstop_constructor_rejects_wrong_valuation_binding() {
+fn test_backstop_constructor_rejects_wrong_comet_pair() {
     let e = Env::default();
+    e.mock_all_auths();
     let contract_id = Address::generate(&e);
-    let blnd_usdc_token = Address::generate(&e);
-    let blnd_xlm_token = Address::generate(&e);
-    let blnd_token = Address::generate(&e);
-    let usdc_token = Address::generate(&e);
+    let (blnd_token, usdc_token, xlm_token, blnd_usdc_token, _) = create_backstop_assets(&e);
+    let admin = Address::generate(&e);
+    let (wrong_blnd_xlm, _) = create_lp_pool(&e, &admin, &blnd_token, &usdc_token);
     let pool_factory = e.register(
         MockPoolFactory {},
         (PoolInitMeta {
@@ -680,25 +685,17 @@ fn test_backstop_constructor_rejects_wrong_valuation_binding() {
             blnd_id: blnd_token.clone(),
         },),
     );
-    let wrong_valuation = create_mock_backstop_valuation(
-        &e,
-        &blnd_token,
-        &Address::generate(&e),
-        &blnd_xlm_token,
-        &usdc_token,
-    );
-
     e.register_at(
         &contract_id,
         BackstopContract {},
         (
             blnd_usdc_token,
-            blnd_xlm_token,
+            wrong_blnd_xlm,
             Address::generate(&e),
             blnd_token,
             usdc_token,
+            xlm_token,
             pool_factory,
-            wrong_valuation,
         ),
     );
 }

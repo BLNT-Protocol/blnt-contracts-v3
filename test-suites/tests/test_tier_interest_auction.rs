@@ -61,24 +61,27 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &operator,
     );
 
-    let tier_principal = 13_000 * SCALAR_7;
+    // Each fixture LP share is worth $1.25. Use $13,000 of capital in every
+    // tier so the 3:4:2 take-rate weights remain directly observable.
+    let lp_tier_principal = 10_400 * SCALAR_7;
+    let usdc_tier_principal = 13_000 * SCALAR_7;
     fixture.backstop.deposit(
         &backstop::BackstopTier::BlndUsdc,
         &operator,
         &pool_address,
-        &tier_principal,
+        &lp_tier_principal,
     );
     fixture.backstop.deposit(
         &backstop::BackstopTier::BlndXlm,
         &operator,
         &pool_address,
-        &tier_principal,
+        &lp_tier_principal,
     );
     fixture.backstop.deposit(
         &backstop::BackstopTier::Usdc,
         &operator,
         &pool_address,
-        &tier_principal,
+        &usdc_tier_principal,
     );
     pool.set_status(&0);
 
@@ -90,14 +93,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
 
     let expected = [
-        (PoolBackstopTier::BlndUsdc, 150 * SCALAR_7, 180 * SCALAR_7),
-        (PoolBackstopTier::BlndXlm, 200 * SCALAR_7, 240 * SCALAR_7),
+        (PoolBackstopTier::BlndUsdc, 150 * SCALAR_7, 144 * SCALAR_7),
+        (PoolBackstopTier::BlndXlm, 200 * SCALAR_7, 192 * SCALAR_7),
         (PoolBackstopTier::Usdc, 100 * SCALAR_7, 120 * SCALAR_7),
     ];
     // The BLND:XLM auction fills 100 ledgers into the declining-bid half of
     // the v2 curve, so realized donations intentionally diverge from the
     // BLND:XLM=4, BLND:USDC=3, USDC=2 credit-allocation weights.
-    let realized_donations = [180 * SCALAR_7, 120 * SCALAR_7, 120 * SCALAR_7];
+    let realized_donations = [144 * SCALAR_7, 96 * SCALAR_7, 120 * SCALAR_7];
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
     let first_id = BytesN::from_array(&e, &[1; 32]);
@@ -180,8 +183,8 @@ fn exercise_tier_interest_auctions(wasm: bool) {
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
         Some(37_5000000)
     );
-    assert_eq!(partial.base_bid_amount, 90 * SCALAR_7);
-    assert_eq!(partial.bid_amount, 90 * SCALAR_7);
+    assert_eq!(partial.base_bid_amount, 72 * SCALAR_7);
+    assert_eq!(partial.bid_amount, 72 * SCALAR_7);
 
     e.ledger()
         .set_sequence_number(auctions[0].auction.block.saturating_add(200));
@@ -193,7 +196,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
         Some(75 * SCALAR_7)
     );
-    assert_eq!(blnd_usdc_fill.bid_amount, 90 * SCALAR_7);
+    assert_eq!(blnd_usdc_fill.bid_amount, 72 * SCALAR_7);
     assert!(pool
         .try_get_interest_auction(&PoolBackstopTier::BlndUsdc)
         .is_err());

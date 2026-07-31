@@ -9,8 +9,6 @@ experimental Blend v3 contract specification compose.
    the frozen SDK-22 Blend v2 lending, pool, and backstop contracts.
 2. [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) defines only the v3 additions,
    replacements, extensions, approved exceptions, and safety fixes.
-3. [BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) is the normative component
-   specification for the immutable v3 backstop-valuation boundary.
 
 Declarative behavioral requirements and the terms `MUST`, `MUST NOT`,
 `SHOULD`, and `MAY` in the normative specifications are acceptance criteria.

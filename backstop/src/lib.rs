@@ -14,15 +14,15 @@ mod migration;
 mod storage;
 mod testutils;
 
+#[cfg(any(test, feature = "testutils"))]
+pub use backstop::set_test_valuation_override;
 pub use backstop::{
-    ActivationQuote, ActivationValues, BackstopTier, BadDebtLotQuote, BlndEmissionValues,
-    PoolBackstopData, PoolBalance, PoolStatusQuote, PoolTierState, PoolValuation, TierTotals,
-    UserBalance, Q4W,
+    ActivationQuote, ActivationValues, AssetValuation, BackstopTier, BadDebtLotQuote,
+    BlndEmissionValues, PoolBackstopData, PoolBalance, PoolStatusQuote, PoolTierState,
+    PoolValuation, TierTotals, UserBalance, Q4W,
 };
 pub use contract::*;
-pub use dependencies::{
-    AssetValuation, BackstopValuationBinding, BackstopValuationClient, EmitterClient,
-};
+pub use dependencies::EmitterClient;
 pub use emissions::{
     BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
     PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,

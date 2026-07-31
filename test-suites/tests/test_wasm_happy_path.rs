@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use backstop::BackstopTier as BackstopContractTier;
+use backstop::{BackstopDataKey, BackstopTier as BackstopContractTier, PoolBalance};
 use pool::{
     BackstopLossState, BackstopTier, PoolDataKey, Positions, Request, RequestType, ReserveData,
 };
@@ -13,7 +13,6 @@ use soroban_sdk::{
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
-    backstop::set_mock_backstop_valuation_failure,
     create_fixture_with_data,
     liquidity_pool::LPClient,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
@@ -349,8 +348,27 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     });
 
     let reserve_before_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
-    let valuation = fixture.backstop.backstop_valuation();
-    set_mock_backstop_valuation_failure(&fixture.env, &valuation, true);
+    let tier_state = fixture
+        .backstop
+        .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address);
+    let tier_key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
+    fixture.env.as_contract(&fixture.backstop.address, || {
+        fixture.env.storage().persistent().set(
+            &tier_key,
+            &PoolBalance {
+                q4w: tier_state.queued_shares,
+                shares: tier_state.shares,
+                tokens: i128::MAX,
+            },
+        );
+    });
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address)
+            .assets,
+        i128::MAX
+    );
     let auction_id = BytesN::from_array(&fixture.env, &[12; 32]);
     assert!(pool_fixture
         .pool
@@ -383,7 +401,16 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     );
     assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
 
-    set_mock_backstop_valuation_failure(&fixture.env, &valuation, false);
+    fixture.env.as_contract(&fixture.backstop.address, || {
+        fixture.env.storage().persistent().set(
+            &tier_key,
+            &PoolBalance {
+                q4w: tier_state.queued_shares,
+                shares: tier_state.shares,
+                tokens: tier_state.assets,
+            },
+        );
+    });
     let accrued_reserve = pool_fixture.pool.get_reserve(&stable);
     let pool_stable_before = fixture.tokens[TokenIndex::STABLE].balance(&pool_fixture.pool.address);
     let backstop_stable_before =
@@ -501,14 +528,16 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &frodo,
     );
 
-    // Keep every tier one base unit below the operational minimum so supplier
-    // default is the next bounded continuation step.
-    let dusty_tier_assets = 100 * SCALAR_7 - 1;
+    // Each fixture LP share is worth $1.25. Keep every tier one base unit
+    // below the $100 operational minimum so supplier default is the next
+    // bounded continuation step.
+    let dusty_lp_assets = 80 * SCALAR_7 - 1;
+    let dusty_usdc_assets = 100 * SCALAR_7 - 1;
     fixture.backstop.deposit(
         &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
-        &dusty_tier_assets,
+        &dusty_lp_assets,
     );
     let dust_provider = Address::generate(&fixture.env);
     let blnd_xlm_address = fixture.backstop.tier_token(&BackstopContractTier::BlndXlm);
@@ -516,7 +545,7 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     fixture.tokens[TokenIndex::BLND].mint(&dust_provider, &(1_000 * SCALAR_7));
     fixture.tokens[TokenIndex::XLM].mint(&dust_provider, &(25 * SCALAR_7));
     blnd_xlm.join_pool(
-        &dusty_tier_assets,
+        &dusty_lp_assets,
         &vec![&fixture.env, 1_000 * SCALAR_7, 25 * SCALAR_7],
         &dust_provider,
     );
@@ -524,14 +553,14 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &backstop::BackstopTier::BlndXlm,
         &dust_provider,
         &pool_fixture.pool.address,
-        &dusty_tier_assets,
+        &dusty_lp_assets,
     );
-    fixture.tokens[TokenIndex::USDC].mint(&dust_provider, &dusty_tier_assets);
+    fixture.tokens[TokenIndex::USDC].mint(&dust_provider, &dusty_usdc_assets);
     fixture.backstop.deposit(
         &backstop::BackstopTier::Usdc,
         &dust_provider,
         &pool_fixture.pool.address,
-        &dusty_tier_assets,
+        &dusty_usdc_assets,
     );
 
     let mut reserve_assets = pool_fixture.pool.get_reserve_list();

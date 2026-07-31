@@ -40,8 +40,8 @@ The candidate immutably binds exactly these three seven-decimal assets:
 
 | Tier | Asset | USDC valuation | Ongoing BLND weight |
 | ---: | --- | --- | --- |
-| 1 | BLND:XLM 80:20 LP | Normative backstop valuation | Yes |
-| 2 | BLND:USDC 80:20 LP | Normative backstop valuation | Yes |
+| 1 | BLND:XLM 80:20 LP | Comet-implied valuation | Yes |
+| 2 | BLND:USDC 80:20 LP | Comet-implied valuation | Yes |
 | 3 | Plain USDC | One-for-one | No |
 
 All three count equally per verified USDC for activation, participate in the
@@ -133,16 +133,46 @@ T_{\mathrm{maintenance}} = 10{,}000\ \mathrm{USDC}
 Equality qualifies. Falling below maintenance deactivates a pool; reactivation
 requires the entry threshold.
 
-The candidate immutably binds the backstop-valuation contract address and
-rejects an asset-binding mismatch at construction.
-[BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) governs its Comet-implied
-quotes. Active and queued pool-attributed LP amounts are quoted separately,
-while accounted plain USDC is valued one-for-one. Zero LP needs no quote; any
-incompatible, failed, or negative quote fails atomically. Section 3.3
-determines eligibility. This valuation governs activation, status, reward-zone
-membership, take-rate allocation, auction sizing, and supplier-loss
-eligibility. Emission weight uses the same-invocation underlying-BLND
-composition defined separately in Section 6.1.
+The backstop immutably binds distinct BLND, USDC, and XLM tokens and the exact
+BLND:USDC and BLND:XLM Comets. All five token interfaces MUST use seven
+decimals. Construction rejects a Comet unless it contains exactly its expected
+pair at normalized weights 80% BLND and 20% paired asset.
+
+Let the BLND:USDC Comet hold BLND reserve \(B_u\), USDC reserve \(U\), and LP
+supply \(S_u\). Its current reserve composition implies total USDC value
+\(T_u=5U\). For BLND:USDC LP amount \(A_u\):
+
+\[
+V_u(A_u)=\left\lfloor A_u\frac{5U}{S_u}\right\rfloor
+\]
+
+The same Comet implies a BLND price of \(4U/B_u\). Let the BLND:XLM Comet hold
+BLND reserve \(B_x\) and LP supply \(S_x\). Its implied total USDC value and
+the value of BLND:XLM LP amount \(A_x\) are:
+
+\[
+T_x=\left\lfloor\frac{5B_xU}{B_u}\right\rfloor,
+\qquad
+V_x(A_x)=\left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
+\]
+
+For either Comet, underlying BLND is
+\(B(A)=\lfloor AR_b/S\rfloor\). Every quote rechecks positive LP supply and
+reserves and the immutable weights. Zero LP needs no quote; invalid,
+incompatible, negative, or overflowing inputs fail atomically. Plain USDC is
+valued one-for-one. Active and queued pool-attributed LP amounts are quoted
+separately.
+
+These values deliberately reflect current Comet composition rather than an
+external fair-market price. Swaps, one-sided liquidity changes, donations, and
+issuer deauthorization effects can change them; BLND:USDC remains the USDC
+anchor. The protocol does not automatically pause activation, emissions,
+take-rate allocation, or auctions based on issuer authorization state.
+
+This valuation governs activation, status, reward-zone membership, take-rate
+allocation, auction sizing, and supplier-loss eligibility. Emission weight
+uses the same-invocation underlying-BLND composition defined separately in
+Section 6.1.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -464,8 +494,8 @@ A\frac{R_{\mathrm{BLND},t}}{S_t}
 Here \(A\) is accounted active LP, \(R\) the Comet's BLND balance, and \(S\)
 LP supply. Nonpositive supply, negative inputs, or \(A>S\) fail closed. Direct
 transfers are excluded and plain USDC has zero weight. This calculation reads
-Comet composition directly rather than substituting the valuation contract's
-USDC-value output; checkpoint manipulation exposure is accepted and MUST be
+Comet composition directly rather than substituting its USDC-value output;
+checkpoint manipulation exposure is accepted and MUST be
 disclosed.
 
 Pool and user allocation uses bounded accumulators without iterating over all

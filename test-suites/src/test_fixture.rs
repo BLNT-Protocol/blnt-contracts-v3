@@ -116,6 +116,7 @@ impl TestFixture<'_> {
             &emitter_id,
             &blnd_id,
             &usdc_id,
+            &xlm_id,
             &pool_factory_id,
         );
 

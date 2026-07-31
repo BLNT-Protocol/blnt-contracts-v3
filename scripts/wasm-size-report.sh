@@ -43,7 +43,7 @@ format_delta() {
         'BEGIN { printf "%+d B (%+.1f%%)", delta, (current - baseline) * 100 / baseline }'
 }
 
-for artifact in backstop.wasm pool.wasm pool_factory.wasm blend_v3_backstop_valuation.wasm; do
+for artifact in backstop.wasm pool.wasm pool_factory.wasm; do
     [[ -s "${WASM_DIR}/${artifact}" ]] || {
         printf 'error: missing optimized artifact %s; run make build first\n' \
             "${WASM_DIR}/${artifact}" >&2
@@ -62,13 +62,12 @@ fi
 current_backstop="$(file_bytes "${WASM_DIR}/backstop.wasm")"
 current_pool="$(file_bytes "${WASM_DIR}/pool.wasm")"
 current_factory="$(file_bytes "${WASM_DIR}/pool_factory.wasm")"
-current_valuation="$(file_bytes "${WASM_DIR}/blend_v3_backstop_valuation.wasm")"
 
 v2_backstop="$(baseline_bytes deployed_v2 backstop)"
 v2_pool="$(baseline_bytes deployed_v2 pool)"
 v2_factory="$(baseline_bytes deployed_v2 pool_factory)"
 v2_total=$((v2_backstop + v2_pool + v2_factory))
-current_total=$((current_backstop + current_pool + current_factory + current_valuation))
+current_total=$((current_backstop + current_pool + current_factory))
 
 printf '# Optimized WASM size report\n\n'
 printf -- "- Current commit: \`%s\`" "${current_commit}"
@@ -88,7 +87,6 @@ printf '| Pool | %d B | %d B | %s |\n' \
 printf '| Pool factory | %d B | %d B | %s |\n' \
     "${v2_factory}" "${current_factory}" \
     "$(format_delta "${current_factory}" "${v2_factory}")"
-printf '| Backstop valuation | — | %d B | new |\n' "${current_valuation}"
 printf '| **Total** | **%d B** | **%d B** | **%s** |\n\n' \
     "${v2_total}" "${current_total}" \
     "$(format_delta "${current_total}" "${v2_total}")"

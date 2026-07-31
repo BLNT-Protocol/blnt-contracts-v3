@@ -2,12 +2,13 @@ use crate::{
     backstop::{
         self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
         preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
-        user_queued_shares, user_total_shares, ActivationQuote, ActivationValues, BackstopTier,
-        BadDebtLotQuote, BlndEmissionValues, InterestLotQuote, PoolBackstopData, PoolStatusQuote,
-        PoolTierState, PoolValuation, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
+        user_queued_shares, user_total_shares, validate_backstop_assets, ActivationQuote,
+        ActivationValues, BackstopTier, BadDebtLotQuote, BlndEmissionValues, InterestLotQuote,
+        PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation, TakeRateQuote,
+        TakeRateValues, TierTotals, Q4W,
     },
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
-    dependencies::{BackstopValuationBinding, BackstopValuationClient, PoolFactoryClient},
+    dependencies::PoolFactoryClient,
     emissions::{
         self, BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
         PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
@@ -171,9 +172,6 @@ pub trait Backstop {
 
     /// Return the most recent completed distribution checkpoint, if any.
     fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint>;
-
-    /// Return the immutable contract used to value the backstop tiers.
-    fn backstop_valuation(e: Env) -> Address;
 
     /// Return the verified USDC entry threshold for inactive pools.
     fn activation_entry_threshold(e: Env) -> i128;
@@ -419,13 +417,13 @@ impl BackstopContract {
     /// Construct the backstop contract
     ///
     /// ### Arguments
-    /// * `blnd_usdc_token` - The first-tier LP token with the pair BLND:USDC
-    /// * `blnd_xlm_token` - The second-tier LP token with the pair BLND:XLM
+    /// * `blnd_usdc_token` - The second-loss LP token with the pair BLND:USDC
+    /// * `blnd_xlm_token` - The first-loss LP token with the pair BLND:XLM
     /// * `emitter` - The Emitter contract ID
     /// * `blnd_token` - The BLND token ID
     /// * `usdc_token` - The USDC token ID
+    /// * `xlm_token` - The XLM token ID
     /// * `pool_factory` - The pool factory ID
-    /// * `backstop_valuation` - The immutable valuation contract for the two LP tiers
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
@@ -434,37 +432,28 @@ impl BackstopContract {
         emitter: Address,
         blnd_token: Address,
         usdc_token: Address,
+        xlm_token: Address,
         pool_factory: Address,
-        backstop_valuation: Address,
     ) {
-        if blnd_usdc_token == blnd_xlm_token
-            || blnd_usdc_token == usdc_token
-            || blnd_xlm_token == usdc_token
-        {
-            panic_with_error!(&e, BackstopError::AssetConfigurationCollision);
-        }
+        validate_backstop_assets(
+            &e,
+            &blnd_token,
+            &usdc_token,
+            &xlm_token,
+            &blnd_usdc_token,
+            &blnd_xlm_token,
+        );
         let factory = PoolFactoryClient::new(&e, &pool_factory);
         if factory.backstop() != e.current_contract_address() {
             panic_with_error!(&e, BackstopError::InvalidPoolFactoryBinding);
         }
         let _ = factory.is_pool(&e.current_contract_address());
-        let valuation = BackstopValuationClient::new(&e, &backstop_valuation);
-        let expected_binding = BackstopValuationBinding {
-            blnd: blnd_token.clone(),
-            blnd_usdc: blnd_usdc_token.clone(),
-            blnd_xlm: blnd_xlm_token.clone(),
-            usdc: usdc_token.clone(),
-        };
-        if valuation.binding() != expected_binding {
-            panic_with_error!(&e, BackstopError::InvalidBackstopValuation);
-        }
-
         storage::set_blnd_usdc_token(&e, &blnd_usdc_token);
         storage::set_blnd_xlm_token(&e, &blnd_xlm_token);
         storage::set_blnd_token(&e, &blnd_token);
         storage::set_usdc_token(&e, &usdc_token);
+        storage::set_xlm_token(&e, &xlm_token);
         storage::set_pool_factory(&e, &pool_factory);
-        storage::set_backstop_valuation(&e, &backstop_valuation);
         storage::set_emitter(&e, &emitter);
         migration::initialize(&e);
         storage::extend_instance(&e);
@@ -705,10 +694,6 @@ impl Backstop for BackstopContract {
     fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint> {
         storage::extend_instance(&e);
         emissions::get_reward_zone_checkpoint(&e)
-    }
-
-    fn backstop_valuation(e: Env) -> Address {
-        storage::get_backstop_valuation(&e)
     }
 
     fn activation_entry_threshold(_e: Env) -> i128 {

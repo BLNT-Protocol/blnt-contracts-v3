@@ -1816,14 +1816,10 @@ mod tests {
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
         let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let (usdc, _) = testutils::create_token_contract(&e, &bombadil);
+        let (backstop_token, _) = testutils::create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
 
-        let (backstop, _) = testutils::create_backstop(
-            &e,
-            &pool,
-            &Address::generate(&e),
-            &Address::generate(&e),
-            &blnd,
-        );
+        let (backstop, _) = testutils::create_backstop(&e, &pool, &backstop_token, &usdc, &blnd);
         // mock backstop having emissions for pool
         e.as_contract(&backstop, || {
             blnd_token_client.approve(&backstop, &pool, &100_000_0000000_i128, &1000000);

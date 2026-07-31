@@ -1,13 +1,12 @@
 use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, I256};
 
-use crate::{
-    constants::SCALAR_7,
-    dependencies::{AssetValuation, BackstopValuationClient},
-    emissions, storage, BackstopError,
-};
+use crate::{constants::SCALAR_7, emissions, storage, BackstopError};
 
-use super::{require_registered_pool, tier_token, update_tier_totals, BackstopTier};
+use super::{
+    quote_lp_amount, require_registered_pool, tier_token, update_tier_totals, AssetValuation,
+    BackstopTier,
+};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -196,7 +195,6 @@ fn build_bad_debt_lot_quote(e: &Env, pool: &Address, debt_value: i128) -> Option
         BAD_DEBT_LOT_PREMIUM_NUMERATOR,
         BAD_DEBT_LOT_PREMIUM_DENOMINATOR,
     );
-    let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
     for tier in [
         BackstopTier::BlndXlm,
         BackstopTier::BlndUsdc,
@@ -213,7 +211,7 @@ fn build_bad_debt_lot_quote(e: &Env, pool: &Address, debt_value: i128) -> Option
                 valid_until: u64::MAX,
             }
         } else {
-            quote_lp_amount(e, &adapter, tier, assets)
+            quote_lp_amount(e, tier, assets)
         };
         if valuation.usdc_value < BAD_DEBT_TIER_MINIMUM_VALUE_USDC {
             continue;
@@ -232,22 +230,6 @@ fn build_bad_debt_lot_quote(e: &Env, pool: &Address, debt_value: i128) -> Option
         });
     }
     None
-}
-
-fn quote_lp_amount(
-    e: &Env,
-    adapter: &BackstopValuationClient,
-    tier: BackstopTier,
-    amount: i128,
-) -> AssetValuation {
-    let quote = adapter.quote(&tier_token(e, tier), &amount);
-    if quote.underlying_blnd < 0 || quote.usdc_value < 0 {
-        panic_with_error!(e, BackstopError::InvalidValuation);
-    }
-    if quote.valid_until < e.ledger().timestamp() {
-        panic_with_error!(e, BackstopError::StaleValuation);
-    }
-    quote
 }
 
 fn allocate_bad_debt_tier(
