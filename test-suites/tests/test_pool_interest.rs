@@ -70,9 +70,12 @@ fn test_pool_interest() {
         &vec![&fixture.env, 500_100 * SCALAR_7, 12_600 * SCALAR_7],
         &whale,
     );
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&whale, &pool_client.address, &(50_000 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &whale,
+        &pool_client.address,
+        &(50_000 * SCALAR_7),
+    );
     pool_client.set_status(&0);
     fixture.jump_with_sequence(60);
 

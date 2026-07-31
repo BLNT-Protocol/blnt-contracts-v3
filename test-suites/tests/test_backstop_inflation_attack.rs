@@ -40,10 +40,12 @@ fn test_backstop_inflation_attack() {
 
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
-    let sauron_shares =
-        fixture
-            .backstop
-            .deposit_blnd_usdc(&sauron, &pool_address, &sauron_deposit_amount);
+    let sauron_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &sauron,
+        &pool_address,
+        &sauron_deposit_amount,
+    );
 
     // 2. Attacker tries to send a large amount to the backstop before the victim can perform a deposit
     let inflation_amount = 10_000 * SCALAR_7;
@@ -53,9 +55,12 @@ fn test_backstop_inflation_attack() {
 
     // contract correctly mints share amounts regardless of the token balance
     let deposit_amount = 100;
-    let pippen_shares = fixture
-        .backstop
-        .deposit_blnd_usdc(&pippen, &pool_address, &deposit_amount);
+    let pippen_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &pippen,
+        &pool_address,
+        &deposit_amount,
+    );
     assert_eq!(pippen_shares, 100);
     assert_eq!(sauron_shares, pippen_shares);
 
@@ -73,10 +78,12 @@ fn test_backstop_inflation_attack() {
         .donate(&sauron, &pool_address, &inflation_amount);
 
     // contracts stop any zero share deposits
-    let bad_deposit_result =
-        fixture
-            .backstop
-            .try_deposit_blnd_usdc(&pippen, &pool_address, &deposit_amount);
+    let bad_deposit_result = fixture.backstop.try_deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &pippen,
+        &pool_address,
+        &deposit_amount,
+    );
     assert_eq!(
         bad_deposit_result.err(),
         Some(Ok(Error::from_contract_error(1005)))
@@ -118,9 +125,12 @@ fn test_backstop_interest_auction_inflation_attack() {
 
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&sauron, &pool_address, &sauron_deposit_amount);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &sauron,
+        &pool_address,
+        &sauron_deposit_amount,
+    );
 
     // 2. Attacker tries to force an interest auction to occur to inflate the backstop share value
     let inflation_amount = xlm_balance;
@@ -135,9 +145,12 @@ fn test_backstop_interest_auction_inflation_attack() {
 
     // 3. Attacker enables borrowing on the pool and fills interest auction to cause share inflation
     let remaining_to_threshold = 21_000 * SCALAR_7;
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&sauron, &pool_address, &remaining_to_threshold);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &sauron,
+        &pool_address,
+        &remaining_to_threshold,
+    );
     pool_client.update_status();
     pool_client.gulp(&fixture.tokens[TokenIndex::XLM].address);
 
@@ -161,10 +174,12 @@ fn test_backstop_interest_auction_inflation_attack() {
 
     // 4. Victim uses pool with inflated backstop share value
     let pippen_deposit_amount = SCALAR_7;
-    let pippen_shares =
-        fixture
-            .backstop
-            .deposit_blnd_usdc(&pippen, &pool_address, &pippen_deposit_amount);
+    let pippen_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &pippen,
+        &pool_address,
+        &pippen_deposit_amount,
+    );
 
     // -> verify the victim did not any meaningful amount of funds due to rounding
     let pippen_tokens = pippen_shares

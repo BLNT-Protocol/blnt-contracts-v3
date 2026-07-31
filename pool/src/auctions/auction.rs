@@ -329,7 +329,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &samwise,
+            &pool_address,
+            &50_000_0000000,
+        );
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -454,7 +459,12 @@ mod tests {
         let (backstop_token_id, _) = create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        backstop_client.deposit_blnd_usdc(&bombadil, &pool_address, &(50 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &bombadil,
+            &pool_address,
+            &(50 * SCALAR_7),
+        );
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
@@ -905,7 +915,12 @@ mod tests {
         let (backstop_token_id, _) = create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        backstop_client.deposit_blnd_usdc(&bombadil, &pool_address, &(50 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &bombadil,
+            &pool_address,
+            &(50 * SCALAR_7),
+        );
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
@@ -995,7 +1010,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &samwise,
+            &pool_address,
+            &50_000_0000000,
+        );
 
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
@@ -1119,7 +1139,12 @@ mod tests {
         let (backstop_token_id, _) = create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        backstop_client.deposit_blnd_usdc(&bombadil, &pool_address, &(50 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &bombadil,
+            &pool_address,
+            &(50 * SCALAR_7),
+        );
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
@@ -2092,7 +2117,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit_blnd_usdc(&frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2199,7 +2224,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit_blnd_usdc(&frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2307,7 +2332,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit_blnd_usdc(&frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2412,7 +2437,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit_blnd_usdc(&frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();

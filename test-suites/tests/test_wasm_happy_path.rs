@@ -284,14 +284,16 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     let deposited_shares = 50_000 * SCALAR_7;
 
     fixture.backstop.distribute();
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
     );
     fixture.jump(17 * 24 * 60 * 60 + 1);
     fixture.backstop.distribute();
-    fixture.backstop.withdraw_blnd_usdc(
+    fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -475,14 +477,16 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     let deposited_shares = 50_000 * SCALAR_7;
 
     fixture.backstop.distribute();
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
     );
     fixture.jump(17 * 24 * 60 * 60 + 1);
     fixture.backstop.distribute();
-    fixture.backstop.withdraw_blnd_usdc(
+    fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -492,9 +496,12 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     // Keep every tier one base unit below the operational minimum so supplier
     // default is the next bounded continuation step.
     let dusty_tier_assets = 100 * SCALAR_7 - 1;
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &dusty_tier_assets);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &dusty_tier_assets,
+    );
     let dust_provider = Address::generate(&fixture.env);
     let blnd_xlm_address = fixture.backstop.tier_token(&BackstopContractTier::BlndXlm);
     let blnd_xlm = LPClient::new(&fixture.env, &blnd_xlm_address);
@@ -505,13 +512,15 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &vec![&fixture.env, 1_000 * SCALAR_7, 25 * SCALAR_7],
         &dust_provider,
     );
-    fixture.backstop.deposit_blnd_xlm(
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndXlm,
         &dust_provider,
         &pool_fixture.pool.address,
         &dusty_tier_assets,
     );
     fixture.tokens[TokenIndex::USDC].mint(&dust_provider, &dusty_tier_assets);
-    fixture.backstop.deposit_usdc(
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::Usdc,
         &dust_provider,
         &pool_fixture.pool.address,
         &dusty_tier_assets,
@@ -1249,10 +1258,12 @@ fn test_wasm_happy_path() {
     let mut frodo_bstop_token_balance = fixture.lp.balance(&frodo);
     let mut backstop_bstop_token_balance = fixture.lp.balance(&fixture.backstop.address);
     let amount = 500 * SCALAR_7;
-    let result =
-        fixture
-            .backstop
-            .queue_blnd_usdc_withdrawal(&frodo, &pool_fixture.pool.address, &amount);
+    let result = fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &amount,
+    );
     assert_eq!(result.amount, amount);
     assert_eq!(
         result.exp,
@@ -1269,10 +1280,13 @@ fn test_wasm_happy_path() {
 
     fixture.jump(60 * 60 * 24 * 17 + 1);
     fixture.backstop.distribute();
-    let result =
-        fixture
-            .backstop
-            .withdraw_blnd_usdc(&frodo, &pool_fixture.pool.address, &amount, &frodo);
+    let result = fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &amount,
+        &frodo,
+    );
     frodo_bstop_token_balance += result;
     backstop_bstop_token_balance -= result;
     assert_eq!(result, amount);

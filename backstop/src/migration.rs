@@ -887,9 +887,12 @@ mod tests {
         let fixture = Fixture::create();
         let amount = 20 * SCALAR_7;
         assert_eq!(
-            fixture
-                .client()
-                .deposit_blnd_usdc(&fixture.user, &fixture.pool, &amount),
+            fixture.client().deposit(
+                &crate::BackstopTier::BlndUsdc,
+                &fixture.user,
+                &fixture.pool,
+                &amount
+            ),
             amount
         );
         assert_eq!(
@@ -964,13 +967,19 @@ mod tests {
         let fixture = Fixture::create();
         let amount = 100 * SCALAR_7;
         let withdrawn = 40 * SCALAR_7;
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &amount);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &amount,
+        );
         fixture.client().begin_migration();
-        fixture
-            .client()
-            .queue_blnd_usdc_withdrawal(&fixture.user, &fixture.pool, &withdrawn);
+        fixture.client().queue_withdrawal(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &withdrawn,
+        );
         assert_eq!(
             fixture
                 .client()
@@ -983,7 +992,8 @@ mod tests {
             .ledger()
             .set_timestamp(1_000 + 17 * DAY_IN_SECONDS);
         assert_eq!(
-            fixture.client().withdraw_blnd_usdc(
+            fixture.client().withdraw(
+                &crate::BackstopTier::BlndUsdc,
                 &fixture.user,
                 &fixture.pool,
                 &withdrawn,
@@ -1028,9 +1038,12 @@ mod tests {
     #[test]
     fn direct_swap_fails_closed_until_permissionless_synchronization() {
         let fixture = Fixture::create();
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &(20 * SCALAR_7));
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &(20 * SCALAR_7),
+        );
         fixture.client().begin_migration();
         fixture.prepare();
         let unlock = fixture.unlock();
@@ -1039,16 +1052,29 @@ mod tests {
 
         assert!(fixture
             .client()
-            .try_deposit_blnd_xlm(&fixture.user, &fixture.pool, &SCALAR_7)
+            .try_deposit(
+                &crate::BackstopTier::BlndXlm,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7
+            )
             .is_err());
         assert!(fixture
             .client()
-            .try_deposit_blnd_usdc(&fixture.user, &fixture.pool, &SCALAR_7)
+            .try_deposit(
+                &crate::BackstopTier::BlndUsdc,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7
+            )
             .is_err());
         assert_eq!(
-            fixture
-                .client()
-                .deposit_usdc(&fixture.user, &fixture.pool, &SCALAR_7),
+            fixture.client().deposit(
+                &crate::BackstopTier::Usdc,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7
+            ),
             SCALAR_7
         );
 
@@ -1056,9 +1082,12 @@ mod tests {
         assert_eq!(fixture.client().migration_status(), MigrationStatus::Active);
         assert_eq!(fixture.client().backfill_end(), Some(unlock));
         assert_eq!(
-            fixture
-                .client()
-                .deposit_blnd_xlm(&fixture.user, &fixture.pool, &SCALAR_7),
+            fixture.client().deposit(
+                &crate::BackstopTier::BlndXlm,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7
+            ),
             SCALAR_7
         );
     }
@@ -1067,20 +1096,30 @@ mod tests {
     fn preparation_rechecks_the_strict_legacy_token_majority() {
         let fixture = Fixture::create();
         let amount = 20 * SCALAR_7;
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &amount);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &amount,
+        );
         fixture.client().begin_migration();
-        fixture
-            .client()
-            .queue_blnd_usdc_withdrawal(&fixture.user, &fixture.pool, &amount);
+        fixture.client().queue_withdrawal(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &amount,
+        );
         fixture
             .e
             .ledger()
             .set_timestamp(1_000 + 17 * DAY_IN_SECONDS);
-        fixture
-            .client()
-            .withdraw_blnd_usdc(&fixture.user, &fixture.pool, &amount, &fixture.user);
+        fixture.client().withdraw(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &amount,
+            &fixture.user,
+        );
         fixture
             .e
             .ledger()
@@ -1097,16 +1136,22 @@ mod tests {
         let fixture = Fixture::create();
         let eligible = 20 * SCALAR_7;
         let ordinary = 5 * SCALAR_7;
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &eligible);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &eligible,
+        );
         fixture.client().begin_migration();
         fixture.prepare();
 
         fixture.e.ledger().set_timestamp(fixture.unlock());
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &ordinary);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &ordinary,
+        );
         fixture.client().finalize_migration();
 
         assert_eq!(
@@ -1133,9 +1178,12 @@ mod tests {
     fn two_replacement_queues_preserve_the_original_horizon() {
         let fixture = Fixture::create();
         let amount = 20 * SCALAR_7;
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.user, &fixture.pool, &amount);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.user,
+            &fixture.pool,
+            &amount,
+        );
         let epoch_start = fixture.client().begin_migration();
         fixture.prepare();
         let original_unlock = fixture.unlock();

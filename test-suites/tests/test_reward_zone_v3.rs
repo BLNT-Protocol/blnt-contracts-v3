@@ -34,12 +34,18 @@ fn exercise_reward_zone(wasm: bool) {
     let lp_deposit = SCALAR_7;
     let usdc_deposit = fixture.backstop.activation_entry_threshold() - lp_deposit;
     for pool in [&first, &second] {
-        fixture
-            .backstop
-            .deposit_blnd_usdc(&depositor, pool, &lp_deposit);
-        fixture
-            .backstop
-            .deposit_usdc(&depositor, pool, &usdc_deposit);
+        fixture.backstop.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &depositor,
+            pool,
+            &lp_deposit,
+        );
+        fixture.backstop.deposit(
+            &backstop::BackstopTier::Usdc,
+            &depositor,
+            pool,
+            &usdc_deposit,
+        );
     }
 
     fixture.backstop.add_reward(&first, &None);
@@ -67,9 +73,12 @@ fn exercise_reward_zone(wasm: bool) {
     );
     fixture.backstop.add_reward(&second, &None);
 
-    fixture
-        .backstop
-        .queue_blnd_usdc_withdrawal(&depositor, &second, &lp_deposit);
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &depositor,
+        &second,
+        &lp_deposit,
+    );
     fixture.jump(60 * 60 + 1);
     fixture.backstop.remove_reward(&second);
     assert!(!fixture.backstop.reward_zone().contains(&second));

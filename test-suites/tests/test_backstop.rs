@@ -69,9 +69,12 @@ fn test_backstop() {
     // active reward-zone weight.
     fixture.backstop.distribute();
     let amount = 12_500 * SCALAR_7;
-    let result = fixture
-        .backstop
-        .deposit_blnd_usdc(&sam, &pool.address, &amount);
+    let result = fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &pool.address,
+        &amount,
+    );
     sam_bstop_token_balance -= amount;
     bstop_bstop_token_balance += amount;
     assert_eq!(
@@ -81,9 +84,10 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "deposit_blnd_usdc"),
+                    Symbol::new(&fixture.env, "deposit"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -227,9 +231,12 @@ fn test_backstop() {
 
     // Sam queues 100% of position for withdrawal
     let amount = 12_500 * SCALAR_7; // shares
-    let result = fixture
-        .backstop
-        .queue_blnd_usdc_withdrawal(&sam, &pool.address, &amount);
+    let result = fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &pool.address,
+        &amount,
+    );
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -237,9 +244,10 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "queue_blnd_usdc_withdrawal"),
+                    Symbol::new(&fixture.env, "queue_withdrawal"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -291,9 +299,12 @@ fn test_backstop() {
     // Sam dequeues half of the withdrawal
     // -> sam now makes up 11% of the unqueued shares in the backstop
     let amount = 6_250 * SCALAR_7; // shares
-    fixture
-        .backstop
-        .dequeue_blnd_usdc_withdrawal(&sam, &pool.address, &amount);
+    fixture.backstop.dequeue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &pool.address,
+        &amount,
+    );
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -301,9 +312,10 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "dequeue_blnd_usdc_withdrawal"),
+                    Symbol::new(&fixture.env, "dequeue_withdrawal"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -390,9 +402,13 @@ fn test_backstop() {
     fixture.backstop.distribute();
     // Sam withdraws the queue position
     let amount = 6_250 * SCALAR_7; // shares
-    let result = fixture
-        .backstop
-        .withdraw_blnd_usdc(&sam, &pool.address, &amount, &sam);
+    let result = fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &pool.address,
+        &amount,
+        &sam,
+    );
     sam_bstop_token_balance += result; // sam caught 20% of 1k profit and is withdrawing half his position
     bstop_bstop_token_balance -= result;
     assert_eq!(
@@ -402,9 +418,10 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "withdraw_blnd_usdc"),
+                    Symbol::new(&fixture.env, "withdraw"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env),

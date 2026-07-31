@@ -1703,7 +1703,12 @@ mod tests {
         };
         backstop_token_client.mint(&samwise, &95_2000000);
         backstop_token_client.approve(&samwise, &backstop_address, &i128::MAX, &1000000);
-        backstop_client.deposit_blnd_usdc(&samwise, &pool_address, &95_2000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &samwise,
+            &pool_address,
+            &95_2000000,
+        );
         e.as_contract(&pool_address, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &positions);
@@ -1776,7 +1781,12 @@ mod tests {
             &vec![&e, 10_000_0000000, 250_0000000],
             &samwise,
         );
-        backstop_client.deposit_blnd_usdc(&bombadil, &pool_address, &(50 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &bombadil,
+            &pool_address,
+            &(50 * SCALAR_7),
+        );
 
         let (underlying_0, underlying_0_client) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();

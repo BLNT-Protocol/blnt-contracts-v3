@@ -1007,9 +1007,12 @@ mod tests {
             }
         );
 
-        fixture
-            .client()
-            .deposit_blnd_usdc(&fixture.admin, &pool, &SCALAR_7);
+        fixture.client().deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &fixture.admin,
+            &pool,
+            &SCALAR_7,
+        );
         assert_eq!(
             fixture
                 .client()
@@ -1058,7 +1061,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_016);
         assert!(fixture
             .client()
-            .try_queue_blnd_usdc_withdrawal(&user, &pool, &SCALAR_7)
+            .try_queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7)
             .is_err());
     }
 
@@ -1087,7 +1090,7 @@ mod tests {
         fixture.client().distribute();
         fixture
             .client()
-            .queue_blnd_usdc_withdrawal(&user, &pool, &SCALAR_7);
+            .queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7);
         assert_eq!(
             fixture
                 .client()

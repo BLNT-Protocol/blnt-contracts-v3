@@ -834,7 +834,8 @@ fn test_pool_config() {
 
     // Queue 50% of backstop for withdrawal
     fixture.backstop.distribute();
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &fixture.users[0],
         &pool_fixture.pool.address,
         &(25_000 * SCALAR_7),
@@ -859,7 +860,8 @@ fn test_pool_config() {
     assert_eq!(new_pool_config.status, 3);
 
     // Dequeue 50% of backstop for withdrawal
-    fixture.backstop.dequeue_blnd_usdc_withdrawal(
+    fixture.backstop.dequeue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &fixture.users[0],
         &pool_fixture.pool.address,
         &(25_000 * SCALAR_7),

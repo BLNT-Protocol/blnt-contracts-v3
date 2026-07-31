@@ -62,15 +62,24 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     );
 
     let tier_principal = 13_000 * SCALAR_7;
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&operator, &pool_address, &tier_principal);
-    fixture
-        .backstop
-        .deposit_blnd_xlm(&operator, &pool_address, &tier_principal);
-    fixture
-        .backstop
-        .deposit_usdc(&operator, &pool_address, &tier_principal);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &operator,
+        &pool_address,
+        &tier_principal,
+    );
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndXlm,
+        &operator,
+        &pool_address,
+        &tier_principal,
+    );
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::Usdc,
+        &operator,
+        &pool_address,
+        &tier_principal,
+    );
     pool.set_status(&0);
 
     let credit = 450 * SCALAR_7;
@@ -95,11 +104,19 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let first = pool.new_interest_auction(&first_id, &lot_assets);
     assert!(fixture
         .backstop
-        .try_deposit_blnd_usdc(&operator, &pool_address, &SCALAR_7)
+        .try_deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &operator,
+            &pool_address,
+            &SCALAR_7
+        )
         .is_err());
-    fixture
-        .backstop
-        .deposit_usdc(&operator, &pool_address, &SCALAR_7);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::Usdc,
+        &operator,
+        &pool_address,
+        &SCALAR_7,
+    );
     assert!(
         pool.try_new_interest_auction(&first_id, &lot_assets)
             .is_err(),
@@ -270,14 +287,25 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     // remain available because they do not change total shares.
     assert!(fixture
         .backstop
-        .try_deposit_blnd_usdc(&operator, &pool_address, &SCALAR_7)
+        .try_deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &operator,
+            &pool_address,
+            &SCALAR_7
+        )
         .is_err());
-    fixture
-        .backstop
-        .queue_blnd_usdc_withdrawal(&operator, &pool_address, &SCALAR_7);
-    fixture
-        .backstop
-        .dequeue_blnd_usdc_withdrawal(&operator, &pool_address, &SCALAR_7);
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &operator,
+        &pool_address,
+        &SCALAR_7,
+    );
+    fixture.backstop.dequeue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
+        &operator,
+        &pool_address,
+        &SCALAR_7,
+    );
 
     e.ledger()
         .set_sequence_number(stale.auction.block.saturating_add(500));

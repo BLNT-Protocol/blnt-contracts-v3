@@ -29,7 +29,8 @@ fn test_pool_inflation_attack() {
         &vec![&fixture.env, 500_100 * SCALAR_7, 12_600 * SCALAR_7],
         &whale,
     );
-    fixture.backstop.deposit_blnd_usdc(
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
         &whale,
         &fixture.pools[0].pool.address,
         &(50_000 * SCALAR_7),

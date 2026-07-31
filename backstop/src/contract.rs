@@ -34,51 +34,37 @@ pub struct BackstopContract;
 pub trait Backstop {
     /********** Core **********/
 
-    /// Deposit BLND:XLM LP into the first-loss tier.
-    fn deposit_blnd_xlm(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
-
-    /// Deposit BLND:USDC LP into the second-loss tier.
-    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
-
-    /// Deposit plain USDC into the third-loss tier.
-    fn deposit_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128;
-
-    fn queue_blnd_usdc_withdrawal(
+    /// Deposit the token bound to `tier`.
+    fn deposit(
         e: Env,
+        tier: BackstopTier,
+        from: Address,
+        pool_address: Address,
+        amount: i128,
+    ) -> i128;
+
+    /// Queue shares from `tier` for withdrawal.
+    fn queue_withdrawal(
+        e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
     ) -> Q4W;
 
-    fn queue_blnd_xlm_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128)
-        -> Q4W;
-
-    fn queue_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128) -> Q4W;
-
-    fn dequeue_blnd_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128);
-
-    fn dequeue_blnd_xlm_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128);
-
-    fn dequeue_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128);
-
-    fn withdraw_blnd_usdc(
+    /// Restore queued shares from `tier`.
+    fn dequeue_withdrawal(
         e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
-        to: Address,
-    ) -> i128;
+    );
 
-    fn withdraw_blnd_xlm(
+    /// Withdraw expired shares from `tier`.
+    fn withdraw(
         e: Env,
-        from: Address,
-        pool_address: Address,
-        amount: i128,
-        to: Address,
-    ) -> i128;
-
-    fn withdraw_usdc(
-        e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
@@ -491,80 +477,45 @@ impl BackstopContract {
 impl Backstop for BackstopContract {
     /********** Core **********/
 
-    fn deposit_blnd_xlm(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
-        deposit_tier(e, BackstopTier::BlndXlm, from, pool_address, amount)
-    }
-
-    fn deposit_blnd_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
-        deposit_tier(e, BackstopTier::BlndUsdc, from, pool_address, amount)
-    }
-
-    fn deposit_usdc(e: Env, from: Address, pool_address: Address, amount: i128) -> i128 {
-        deposit_tier(e, BackstopTier::Usdc, from, pool_address, amount)
-    }
-
-    fn queue_blnd_usdc_withdrawal(
+    fn deposit(
         e: Env,
+        tier: BackstopTier,
+        from: Address,
+        pool_address: Address,
+        amount: i128,
+    ) -> i128 {
+        deposit_tier(e, tier, from, pool_address, amount)
+    }
+
+    fn queue_withdrawal(
+        e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
     ) -> Q4W {
-        queue_tier_withdrawal(e, BackstopTier::BlndUsdc, from, pool_address, amount)
+        queue_tier_withdrawal(e, tier, from, pool_address, amount)
     }
 
-    fn queue_blnd_xlm_withdrawal(
+    fn dequeue_withdrawal(
         e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
-    ) -> Q4W {
-        queue_tier_withdrawal(e, BackstopTier::BlndXlm, from, pool_address, amount)
+    ) {
+        dequeue_tier_withdrawal(e, tier, from, pool_address, amount)
     }
 
-    fn queue_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128) -> Q4W {
-        queue_tier_withdrawal(e, BackstopTier::Usdc, from, pool_address, amount)
-    }
-
-    fn dequeue_blnd_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128) {
-        dequeue_tier_withdrawal(e, BackstopTier::BlndUsdc, from, pool_address, amount)
-    }
-
-    fn dequeue_blnd_xlm_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128) {
-        dequeue_tier_withdrawal(e, BackstopTier::BlndXlm, from, pool_address, amount)
-    }
-
-    fn dequeue_usdc_withdrawal(e: Env, from: Address, pool_address: Address, amount: i128) {
-        dequeue_tier_withdrawal(e, BackstopTier::Usdc, from, pool_address, amount)
-    }
-
-    fn withdraw_blnd_usdc(
+    fn withdraw(
         e: Env,
+        tier: BackstopTier,
         from: Address,
         pool_address: Address,
         amount: i128,
         to: Address,
     ) -> i128 {
-        withdraw_tier(e, BackstopTier::BlndUsdc, from, pool_address, amount, to)
-    }
-
-    fn withdraw_blnd_xlm(
-        e: Env,
-        from: Address,
-        pool_address: Address,
-        amount: i128,
-        to: Address,
-    ) -> i128 {
-        withdraw_tier(e, BackstopTier::BlndXlm, from, pool_address, amount, to)
-    }
-
-    fn withdraw_usdc(
-        e: Env,
-        from: Address,
-        pool_address: Address,
-        amount: i128,
-        to: Address,
-    ) -> i128 {
-        withdraw_tier(e, BackstopTier::Usdc, from, pool_address, amount, to)
+        withdraw_tier(e, tier, from, pool_address, amount, to)
     }
 
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData {

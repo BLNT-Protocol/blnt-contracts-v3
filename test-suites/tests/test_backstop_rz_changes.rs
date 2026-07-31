@@ -35,10 +35,14 @@ fn test_backstop_rz_changes_handle_emissions() {
         &sam,
     );
     fixture.backstop.distribute();
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&sam, &pool_fixture.pool.address, &(12500 * SCALAR_7));
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &pool_fixture.pool.address,
+        &(12500 * SCALAR_7),
+    );
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         frodo,
         &pool_fixture.pool.address,
         &(45000 * SCALAR_7),
@@ -47,7 +51,8 @@ fn test_backstop_rz_changes_handle_emissions() {
     fixture.jump(60 * 60 * 24 * 21);
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
-    fixture.backstop.withdraw_blnd_usdc(
+    fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         frodo,
         &pool_fixture.pool.address,
         &(45000 * SCALAR_7),
@@ -57,13 +62,15 @@ fn test_backstop_rz_changes_handle_emissions() {
     // Move active value below the v3 maintenance threshold for the reward-zone
     // removal, then restore Sam's ordinary position at the same timestamp.
     let membership_reduction = 8_000 * SCALAR_7;
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &sam,
         &pool_fixture.pool.address,
         &membership_reduction,
     );
     fixture.backstop.remove_reward(&pool_fixture.pool.address);
-    fixture.backstop.dequeue_blnd_usdc_withdrawal(
+    fixture.backstop.dequeue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &sam,
         &pool_fixture.pool.address,
         &membership_reduction,
@@ -86,9 +93,12 @@ fn test_backstop_rz_changes_handle_emissions() {
         .try_claim_ongoing_blnd(&sam, &pool_fixture.pool.address, &sam)
         .is_err());
 
-    fixture
-        .backstop
-        .deposit_blnd_usdc(frodo, &pool_fixture.pool.address, &(50000 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        frodo,
+        &pool_fixture.pool.address,
+        &(50000 * SCALAR_7),
+    );
 
     fixture
         .backstop
@@ -139,9 +149,12 @@ fn test_backstop_full_rz_under_limits() {
             &6,
             &0,
         );
-        fixture
-            .backstop
-            .deposit_blnd_usdc(&sam, &pool_address, &per_pool_lp_deposit);
+        fixture.backstop.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &sam,
+            &pool_address,
+            &per_pool_lp_deposit,
+        );
         fixture.backstop.add_reward(&pool_address, &None);
         pools.push_back(pool_address);
     }

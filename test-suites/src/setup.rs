@@ -74,9 +74,12 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     pool_fixture.pool.set_emissions_config(&reserve_emissions);
 
     // deposit into backstop, add to reward zone
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &(50_000 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &(50_000 * SCALAR_7),
+    );
     fixture
         .backstop
         .add_reward(&pool_fixture.pool.address, &None);

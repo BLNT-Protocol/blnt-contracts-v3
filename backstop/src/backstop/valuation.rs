@@ -406,11 +406,36 @@ mod tests {
         blnd_xlm.mint(&user, &(5_000 * SCALAR_7));
         usdc.mint(&user, &(6_500 * SCALAR_7));
         let backstop_client = BackstopClient::new(&e, &backstop);
-        backstop_client.deposit_blnd_usdc(&user, &pool, &(4_000 * SCALAR_7));
-        backstop_client.deposit_blnd_xlm(&user, &pool, &(5_000 * SCALAR_7));
-        backstop_client.deposit_usdc(&user, &pool, &(6_500 * SCALAR_7));
-        backstop_client.queue_blnd_usdc_withdrawal(&user, &pool, &(1_000 * SCALAR_7));
-        backstop_client.queue_blnd_xlm_withdrawal(&user, &pool, &(2_000 * SCALAR_7));
+        backstop_client.deposit(
+            &crate::BackstopTier::BlndUsdc,
+            &user,
+            &pool,
+            &(4_000 * SCALAR_7),
+        );
+        backstop_client.deposit(
+            &crate::BackstopTier::BlndXlm,
+            &user,
+            &pool,
+            &(5_000 * SCALAR_7),
+        );
+        backstop_client.deposit(
+            &crate::BackstopTier::Usdc,
+            &user,
+            &pool,
+            &(6_500 * SCALAR_7),
+        );
+        backstop_client.queue_withdrawal(
+            &crate::BackstopTier::BlndUsdc,
+            &user,
+            &pool,
+            &(1_000 * SCALAR_7),
+        );
+        backstop_client.queue_withdrawal(
+            &crate::BackstopTier::BlndXlm,
+            &user,
+            &pool,
+            &(2_000 * SCALAR_7),
+        );
 
         let valuation = backstop_client.pool_valuation(&pool);
         assert_eq!(

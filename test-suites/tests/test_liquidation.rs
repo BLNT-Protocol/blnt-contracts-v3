@@ -90,7 +90,8 @@ fn test_liquidations() {
     // have Frodo Q4W some backstop deposits
     let frodo_pre_q4w_amount = 10_000 * SCALAR_7;
     fixture.backstop.distribute();
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -440,7 +441,8 @@ fn test_liquidations() {
     assert_eq!(xlm_bad_debt, backstop_positions.liabilities.get(1).unwrap());
 
     // validate that frodo cannot withdraw backstop deposits if bad debt exists
-    let withdraw_result = fixture.backstop.try_withdraw_blnd_usdc(
+    let withdraw_result = fixture.backstop.try_withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -538,7 +540,8 @@ fn test_liquidations() {
     );
 
     // validate that frodo cannot withdraw backstop during bad debt auction
-    let withdraw_result = fixture.backstop.try_withdraw_blnd_usdc(
+    let withdraw_result = fixture.backstop.try_withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -580,13 +583,15 @@ fn test_liquidations() {
     let original_deposit_remaining = original_deposit - frodo_pre_q4w_amount;
     let pre_withdraw_frodo_bstp = fixture.lp.balance(&frodo);
     // withdraw pre_q4w_amount
-    let first_withdrawal = fixture.backstop.withdraw_blnd_usdc(
+    let first_withdrawal = fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
         &frodo,
     );
-    fixture.backstop.queue_blnd_usdc_withdrawal(
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
@@ -594,7 +599,8 @@ fn test_liquidations() {
     //jump a month
     fixture.jump(45 * 24 * 60 * 60);
     fixture.backstop.distribute();
-    let second_withdrawal = fixture.backstop.withdraw_blnd_usdc(
+    let second_withdrawal = fixture.backstop.withdraw(
+        &backstop::BackstopTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
@@ -609,9 +615,12 @@ fn test_liquidations() {
     // Test bad debt is burned and defaulted correctly
     // Deposit exactly the v3 operational minimum. The first auction can
     // qualify, while its remaining tier capital falls below the minimum.
-    fixture
-        .backstop
-        .deposit_blnd_usdc(&frodo, &pool_fixture.pool.address, &(100 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &(100 * SCALAR_7),
+    );
 
     // Sam re-borrows
     let sam_requests: Vec<Request> = vec![

@@ -68,6 +68,9 @@ partitions share one exchange rate, absorb gains and losses proportionally,
 convert independently with floor rounding, and leave partition dust until
 final redemption.
 
+Public deposit, queue, dequeue, and withdrawal operations select one of the
+three immutable assets through the `BackstopTier` discriminator.
+
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
 shares exist and may initialize a fresh one-to-one exchange rate only after all

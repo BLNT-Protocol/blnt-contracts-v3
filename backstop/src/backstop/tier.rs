@@ -142,9 +142,18 @@ mod tests {
         usdc_client.mint(&user, &300);
 
         let client = BackstopClient::new(&e, &backstop);
-        assert_eq!(client.deposit_blnd_usdc(&user, &pool, &100), 100);
-        assert_eq!(client.deposit_blnd_xlm(&user, &pool, &200), 200);
-        assert_eq!(client.deposit_usdc(&user, &pool, &300), 300);
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::BlndUsdc, &user, &pool, &100),
+            100
+        );
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::BlndXlm, &user, &pool, &200),
+            200
+        );
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::Usdc, &user, &pool, &300),
+            300
+        );
 
         assert_eq!(client.tier_token(&BackstopTier::BlndUsdc), blnd_usdc);
         assert_eq!(client.tier_token(&BackstopTier::BlndXlm), blnd_xlm);
@@ -222,16 +231,16 @@ mod tests {
         blnd_xlm_client.mint(&user, &100);
         usdc_client.mint(&user, &100);
         let client = BackstopClient::new(&e, &backstop);
-        client.deposit_blnd_usdc(&user, &pool, &100);
-        client.deposit_blnd_xlm(&user, &pool, &100);
-        client.deposit_usdc(&user, &pool, &100);
+        client.deposit(&crate::BackstopTier::BlndUsdc, &user, &pool, &100);
+        client.deposit(&crate::BackstopTier::BlndXlm, &user, &pool, &100);
+        client.deposit(&crate::BackstopTier::Usdc, &user, &pool, &100);
 
         for _ in 0..10 {
-            client.queue_blnd_usdc_withdrawal(&user, &pool, &1);
+            client.queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &1);
         }
         for _ in 0..5 {
-            client.queue_blnd_xlm_withdrawal(&user, &pool, &1);
-            client.queue_usdc_withdrawal(&user, &pool, &1);
+            client.queue_withdrawal(&crate::BackstopTier::BlndXlm, &user, &pool, &1);
+            client.queue_withdrawal(&crate::BackstopTier::Usdc, &user, &pool, &1);
         }
         assert_eq!(
             client
@@ -245,12 +254,17 @@ mod tests {
                     .len(),
             MAX_Q4W_SIZE
         );
-        assert!(client.try_queue_usdc_withdrawal(&user, &pool, &1).is_err());
+        assert!(client
+            .try_queue_withdrawal(&crate::BackstopTier::Usdc, &user, &pool, &1)
+            .is_err());
 
-        client.dequeue_blnd_usdc_withdrawal(&user, &pool, &1);
-        client.queue_blnd_xlm_withdrawal(&user, &pool, &1);
+        client.dequeue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &1);
+        client.queue_withdrawal(&crate::BackstopTier::BlndXlm, &user, &pool, &1);
         e.ledger().set_timestamp(10_000 + Q4W_LOCK_TIME + 1);
-        assert_eq!(client.withdraw_blnd_xlm(&user, &pool, &6, &recipient), 6);
+        assert_eq!(
+            client.withdraw(&crate::BackstopTier::BlndXlm, &user, &pool, &6, &recipient),
+            6
+        );
         assert_eq!(blnd_xlm_client.balance(&recipient), 6);
         assert_eq!(
             client.tier_active_shares(&BackstopTier::BlndXlm, &user, &pool),
@@ -287,7 +301,7 @@ mod tests {
         usdc_client.mint(&user, &200);
         factory.set_pool(&incompatible_pool);
         assert!(client
-            .try_deposit_usdc(&user, &incompatible_pool, &100)
+            .try_deposit(&crate::BackstopTier::Usdc, &user, &incompatible_pool, &100)
             .is_err());
         assert_eq!(usdc_client.balance(&user), 200);
         assert_eq!(
@@ -310,7 +324,10 @@ mod tests {
             },
         );
         assert!(!pool_client.backstop_withdrawal_allowed(&backstop));
-        assert_eq!(client.deposit_usdc(&user, &compatible_pool, &100), 100);
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::Usdc, &user, &compatible_pool, &100),
+            100
+        );
         assert_eq!(usdc_client.balance(&user), 100);
     }
 }
