@@ -33,9 +33,19 @@ make
 
 Artifacts are written to `target/wasm32v1-none/optimized`. The build includes
 the pool factory, backstop, pool, and immutable v3 backstop-valuation contract.
-It also rejects an optimized backstop larger than 120,000 bytes, preserving
-the Protocol 27 deployment headroom established by the candidate's deployment
+It rejects any production WASM larger than 120,000 bytes, preserving the
+Protocol 27 deployment headroom established by the candidate's deployment
 testing.
+
+Compare the optimized artifacts with the exact deployed v2 contracts:
+
+```bash
+make wasm-sizes
+```
+
+Continuous integration publishes the Markdown report for every commit. The
+immutable comparison inputs and their artifact hashes are recorded in
+`wasm-size-v2-baseline.json`.
 
 Run the complete native and integration test suite:
 
