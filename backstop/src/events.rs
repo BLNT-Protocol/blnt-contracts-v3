@@ -177,8 +177,8 @@ single_value_event!(
 vec_event!(
     ClaimOngoingBlndEvent,
     "claim_ongoing",
-    [user: Address, pool: Address],
-    [recipient: Address, amount: i128]
+    [tier: BackstopTier, user: Address, pool: Address],
+    [blnd_amount: i128, lp_amount: i128, shares: i128]
 );
 vec_event!(
     ClaimPoolEmissionsEvent,
@@ -456,19 +456,23 @@ impl BackstopEvents {
         RewardZoneRemoveEvent { to_remove }.publish(e);
     }
 
-    /// Emitted when a user claims ongoing BLND from the two eligible tiers.
+    /// Emitted when a user's ongoing BLND compounds into its originating tier.
     pub fn claim_ongoing_blnd(
         e: &Env,
+        tier: BackstopTier,
         user: Address,
         pool: Address,
-        recipient: Address,
-        amount: i128,
+        blnd_amount: i128,
+        lp_amount: i128,
+        shares: i128,
     ) {
         ClaimOngoingBlndEvent {
+            tier,
             user,
             pool,
-            recipient,
-            amount,
+            blnd_amount,
+            lp_amount,
+            shares,
         }
         .publish(e);
     }

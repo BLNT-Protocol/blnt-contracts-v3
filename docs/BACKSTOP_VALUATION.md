@@ -7,7 +7,7 @@ This document composes with
 rules in [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
 
 The backstop-valuation contract is the candidate's immutable pricing boundary
-for BLND:USDC and BLND:XLM Comet LP tokens. It supplies canonical USDC values
+for BLND:USDC and BLND:XLM Comet LP tokens. It supplies Comet-implied USDC values
 for activation, status, take-rate allocation, bad-debt lots, interest lots,
 and verified backstop exhaustion. It also exposes current underlying BLND;
 Section 6.1 of the v3 specification independently defines the canonical spot
@@ -15,87 +15,53 @@ calculation used for reward-zone and emission weight.
 
 ## Immutable deployment configuration
 
-The constructor binds the
-[SEP-40 oracle consumer interface](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0040.md)
-as follows:
-
-- one SEP-40 feed;
-- a Stellar USDC feed base;
-- BLND, USDC, and XLM token addresses;
-- the exact BLND:USDC and BLND:XLM Comet addresses;
-- a TWAP record count; and
-- a maximum accepted price age.
+The constructor binds BLND, USDC, and XLM token addresses and the exact
+BLND:USDC and BLND:XLM Comet addresses.
 
 The valuation contract verifies that all token addresses are distinct, all
 five token interfaces use seven decimals, both Comets contain exactly the
-expected pair at normalized weights 80% BLND and 20% paired asset, and the
-feed advertises BLND and XLM. Its USDC base, precision, and resolution are
-recorded and rechecked on every quote. It exposes the immutable BLND,
-plain-USDC, BLND:USDC, and BLND:XLM binding. The candidate constructor rejects
-the valuation contract unless that binding exactly matches its own immutable
-asset arguments.
+expected pair at normalized weights 80% BLND and 20% paired asset. It exposes
+the immutable BLND, plain-USDC, BLND:USDC, and BLND:XLM binding. The candidate
+constructor rejects the valuation contract unless that binding exactly matches
+its own immutable asset arguments.
 
-There is no administrator, price setter, privileged recovery path, alternate
-oracle, or contract-upgrade method. A new pricing policy requires a separately
-deployed contract version.
+There is no oracle, administrator, price setter, privileged recovery path, or
+contract-upgrade method. A new pricing policy requires a separately deployed
+contract.
 
 Construction and every public read extend the valuation contract's instance
 and code TTL to 90 days whenever either falls below the 89-day threshold.
-Version-only use therefore keeps the valuation contract live even when a pool
-currently holds only plain USDC and no LP quote is required.
+Any periodic public read can therefore keep the valuation contract live even
+when a pool currently holds only plain USDC and no LP quote is required.
 
-## Oracle policy
+## Comet-implied 80:20 formula
 
-The valuation contract asks the immutable SEP-40 feed for the configured
-number of BLND observations and, for BLND:XLM, the same number of XLM
-observations.
-
-- Record count is from 2 through 25.
-- `resolution * (record_count - 1)` is from 30 minutes through 24 hours.
-- Maximum age is at least one resolution and no more than one hour.
-- Every price is positive.
-- Every timestamp is nonfuture, resolution-aligned, and unique.
-- The unordered observations must span the exact configured sequence of
-  uniform ticks.
-- The arithmetic mean rounds down.
-- `valid_until` is the latest observation timestamp plus maximum age,
-  inclusive. BLND:XLM returns the earlier BLND or XLM expiry.
-
-Missing, malformed, changed, or stale oracle data fails the quote. Oracle
-unavailability does not mean that backstop capital is exhausted and therefore
-cannot authorize supplier loss.
-
-## Conservative 80:20 Comet formula
-
-All reserve and LP amounts use seven decimals. Oracle prices use the feed's
-immutable precision \(D_o\). For BLND reserve \(R_b\), paired reserve \(R_q\),
-LP supply \(S\), and prices \(P_b\) and \(P_q\):
+All reserve and LP amounts use seven decimals. Let the BLND:USDC Comet hold
+BLND reserve \(B_u\), USDC reserve \(U\), and LP supply \(S_u\). Its current
+80:20 reserve composition implies total USDC value:
 
 \[
-U_b = \left\lfloor \frac{R_bP_b}{10^{D_o}}\right\rfloor
+T_u = 5U
 \]
 
-For BLND:USDC, \(U_q=R_q\). For BLND:XLM:
+For BLND:USDC LP amount \(A_u\):
 
 \[
-U_q = \left\lfloor \frac{R_qP_q}{10^{D_o}}\right\rfloor
+V_u(A_u) = \left\lfloor A_u\frac{T_u}{S_u}\right\rfloor
 \]
 
-Each side independently implies the total pool value at the fixed weights:
+The same Comet implies a BLND price of \(4U/B_u\) USDC. Let the BLND:XLM
+Comet hold BLND reserve \(B_x\) and LP supply \(S_x\). Its BLND side therefore
+implies total USDC value:
 
 \[
-T_b = \left\lfloor U_b\frac{10^7}{8{,}000{,}000}\right\rfloor
+T_x = \left\lfloor\frac{5B_xU}{B_u}\right\rfloor
 \]
 
-\[
-T_q = \left\lfloor U_q\frac{10^7}{2{,}000{,}000}\right\rfloor
-\]
-
-The USDC value of LP amount \(A\) is:
+For BLND:XLM LP amount \(A_x\):
 
 \[
-V(A) =
-\left\lfloor A\frac{\min(T_b,T_q)}{S}\right\rfloor
+V_x(A_x) = \left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
 \]
 
 The returned underlying BLND is:
@@ -104,19 +70,20 @@ The returned underlying BLND is:
 B(A) = \left\lfloor A\frac{R_b}{S}\right\rfloor
 \]
 
-At the 80:20 target both implied totals match. A one-sided reserve donation or
-swap imbalance can only leave the value unchanged or reduce it, never increase
-it. This avoids treating an instantaneous reserve ratio as an activation
-price. A proportionate liquidity contribution increases reserves and supply
-together and does not inflate value per LP share.
+Every quote rechecks positive LP supplies and reserves and the immutable 80:20
+weights. Plain USDC is valued one-for-one by the backstop. Quotes do not expire;
+`valid_until` is retained in the interface as `u64::MAX`.
 
-The `underlying_blnd` result intentionally follows current Comet composition.
-That matches the separately approved spot-BLND emission policy. Price value
-and emission weight are distinct outputs and MUST NOT be substituted for each
-other. A positive LP amount may round to zero USDC value or zero underlying
+These values deliberately reflect current Comet composition, not an external
+fair-market price. Swaps, one-sided deposits or withdrawals, donations, and a
+deauthorization that changes redemption behavior can change the implied value.
+In particular, BLND:USDC remains the USDC anchor even if USDC is deauthorized.
+The protocol does not automatically pause activation, emissions, take-rate
+allocation, or auctions based on issuer authorization state. A zero or
+otherwise invalid reserve fails closed because no ratio can be computed.
+
+The `underlying_blnd` result also follows current Comet composition. Price
+value and emission weight are distinct outputs and MUST NOT be substituted for
+each other. A positive LP amount may round to zero USDC value or zero underlying
 BLND at seven-decimal precision. That dust contributes nothing to the
 applicable policy but does not make every other pool position unpriceable.
-
-Provider qualification, deployment simulation, and network evidence belong in
-the separate
-[Blend v3 migration repository](https://github.com/levinson/blend-v3-migration/blob/main/docs/ORACLE_DEPLOYMENT.md).

@@ -1802,6 +1802,14 @@ mod tests {
         let (lp_token, _) = testutils::create_comet_lp_pool(&e, &admin, &blnd, &usdc);
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
+        // Keep a real but sub-threshold tier balance so continuation must
+        // obtain a valid quote before proving the tier ineligible.
+        backstop_client.deposit(
+            &backstop::BackstopTier::BlndUsdc,
+            &admin,
+            &pool_address,
+            &SCALAR_7,
+        );
         let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
         let (debt_asset, _) = testutils::create_token_contract(&e, &admin);
         let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
@@ -1850,7 +1858,7 @@ mod tests {
             &e,
             &backstop_client.backstop_valuation(),
         );
-        valuation.set_version(&2);
+        valuation.set_quote_failure(&true);
         assert!(pool_client
             .try_continue_bad_debt_resolution(&BytesN::from_array(&e, &[12; 32]))
             .is_err());
@@ -1871,7 +1879,7 @@ mod tests {
         assert_eq!(reserve_after_failure.d_supply, reserve_before.d_supply);
         assert!(pool_client.try_get_bad_debt_auction().is_err());
 
-        valuation.set_version(&1);
+        valuation.set_quote_failure(&false);
         let continuation =
             pool_client.continue_bad_debt_resolution(&BytesN::from_array(&e, &[13; 32]));
         assert!(!continuation.auction_created);

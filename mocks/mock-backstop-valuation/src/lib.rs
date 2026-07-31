@@ -1,6 +1,8 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -23,7 +25,14 @@ pub struct BackstopValuationBinding {
 #[contracttype]
 enum DataKey {
     Binding,
-    Version,
+    QuoteFailure,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracterror]
+#[repr(u32)]
+enum MockBackstopValuationError {
+    QuoteFailure = 1,
 }
 
 #[contract]
@@ -33,18 +42,20 @@ pub struct MockBackstopValuation;
 impl MockBackstopValuation {
     pub fn __constructor(e: Env, binding: BackstopValuationBinding) {
         e.storage().instance().set(&DataKey::Binding, &binding);
-        e.storage().instance().set(&DataKey::Version, &1u32);
-    }
-
-    pub fn version(e: Env) -> u32 {
-        e.storage().instance().get(&DataKey::Version).unwrap()
     }
 
     pub fn binding(e: Env) -> BackstopValuationBinding {
         e.storage().instance().get(&DataKey::Binding).unwrap()
     }
 
-    pub fn quote(_e: Env, _token: Address, amount: i128) -> AssetValuation {
+    pub fn quote(e: Env, _token: Address, amount: i128) -> AssetValuation {
+        if e.storage()
+            .instance()
+            .get(&DataKey::QuoteFailure)
+            .unwrap_or(false)
+        {
+            panic_with_error!(&e, MockBackstopValuationError::QuoteFailure);
+        }
         AssetValuation {
             underlying_blnd: amount,
             usdc_value: amount,
@@ -52,7 +63,8 @@ impl MockBackstopValuation {
         }
     }
 
-    pub fn set_version(e: Env, version: u32) {
-        e.storage().instance().set(&DataKey::Version, &version);
+    /// Test-only failure injection for fail-closed valuation paths.
+    pub fn set_quote_failure(e: Env, fail: bool) {
+        e.storage().instance().set(&DataKey::QuoteFailure, &fail);
     }
 }

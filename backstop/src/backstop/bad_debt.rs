@@ -2,7 +2,7 @@ use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, I256};
 
 use crate::{
-    constants::{BACKSTOP_VALUATION_VERSION, SCALAR_7},
+    constants::SCALAR_7,
     dependencies::{AssetValuation, BackstopValuationClient},
     emissions, storage, BackstopError,
 };
@@ -197,10 +197,6 @@ fn build_bad_debt_lot_quote(e: &Env, pool: &Address, debt_value: i128) -> Option
         BAD_DEBT_LOT_PREMIUM_DENOMINATOR,
     );
     let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
-    if adapter.version() != BACKSTOP_VALUATION_VERSION {
-        panic_with_error!(e, BackstopError::InvalidBackstopValuation);
-    }
-
     for tier in [
         BackstopTier::BlndXlm,
         BackstopTier::BlndUsdc,

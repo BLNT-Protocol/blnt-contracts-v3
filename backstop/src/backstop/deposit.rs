@@ -6,6 +6,29 @@ use super::{
     interest_tier_locked, require_compatible_pool, tier_token, update_tier_totals, BackstopTier,
 };
 
+/// Credit tier tokens already held by the backstop and mint user shares.
+pub(crate) fn credit_tier_shares(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool_address: &Address,
+    amount: i128,
+) -> i128 {
+    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
+    let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, user);
+    let to_mint = pool_balance.convert_to_shares(amount);
+    if to_mint <= 0 {
+        panic_with_error!(e, &BackstopError::InvalidShareMintAmount);
+    }
+    pool_balance.deposit(amount, to_mint);
+    user_balance.add_shares(to_mint);
+
+    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
+    storage::set_user_balance_for_tier(e, tier, pool_address, user, &user_balance);
+    update_tier_totals(e, tier, amount, to_mint, 0);
+    to_mint
+}
+
 /// Perform a deposit into one fixed backstop tier.
 pub fn execute_deposit_for_tier(
     e: &Env,
@@ -24,30 +47,22 @@ pub fn execute_deposit_for_tier(
     }
     emissions::prepare_pool_weight_change(e, tier, pool_address);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
-    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
-    let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
-
     #[cfg(test)]
-    if tier == BackstopTier::BlndUsdc {
-        emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
+    {
+        let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
+        let user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
+        if tier == BackstopTier::BlndUsdc {
+            emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
+        }
     }
 
     let backstop_token_client = TokenClient::new(e, &tier_token(e, tier));
     backstop_token_client.transfer(from, &e.current_contract_address(), &amount);
 
-    let to_mint = pool_balance.convert_to_shares(amount);
-    if to_mint <= 0 {
-        panic_with_error!(e, &BackstopError::InvalidShareMintAmount);
-    }
-    pool_balance.deposit(amount, to_mint);
-    user_balance.add_shares(to_mint);
+    let to_mint = credit_tier_shares(e, tier, from, pool_address, amount);
     if tier == BackstopTier::BlndUsdc {
         migration::record_blnd_usdc_deposit(e, from, pool_address, amount, to_mint);
     }
-
-    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
-    update_tier_totals(e, tier, amount, to_mint, 0);
     emissions::finish_pool_weight_change(e, tier, pool_address);
 
     to_mint

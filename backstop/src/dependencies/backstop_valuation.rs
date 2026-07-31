@@ -22,7 +22,6 @@ pub struct BackstopValuationBinding {
 #[contractclient(name = "BackstopValuationClient")]
 #[allow(dead_code)]
 pub trait BackstopValuation {
-    fn version(env: Env) -> u32;
     fn binding(env: Env) -> BackstopValuationBinding;
     fn quote(env: Env, token: Address, amount: i128) -> AssetValuation;
 }

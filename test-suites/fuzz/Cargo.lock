@@ -1926,6 +1926,7 @@ dependencies = [
 name = "test-suites-fuzz"
 version = "0.0.0"
 dependencies = [
+ "backstop",
  "extension-trait",
  "libfuzzer-sys",
  "pool",

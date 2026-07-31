@@ -6,10 +6,7 @@ use crate::{
         BadDebtLotQuote, BlndEmissionValues, InterestLotQuote, PoolBackstopData, PoolStatusQuote,
         PoolTierState, PoolValuation, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
     },
-    constants::{
-        ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-        BACKSTOP_VALUATION_VERSION,
-    },
+    constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::{BackstopValuationBinding, BackstopValuationClient, PoolFactoryClient},
     emissions::{
         self, BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
@@ -344,8 +341,14 @@ pub trait Backstop {
         tier: BackstopTier,
     ) -> UserOngoingEmissions;
 
-    /// Claim both eligible backstop tiers' ongoing BLND to a chosen recipient.
-    fn claim_ongoing_blnd(e: Env, user: Address, pool: Address, recipient: Address) -> i128;
+    /// Compound one eligible tier's ongoing BLND into that tier's Comet LP.
+    fn claim_ongoing_blnd(
+        e: Env,
+        tier: BackstopTier,
+        user: Address,
+        pool: Address,
+        min_lp_tokens_out: i128,
+    ) -> i128;
 
     /// Return one pool's reserved, unclaimed 30% tranche.
     fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation;
@@ -452,9 +455,7 @@ impl BackstopContract {
             blnd_xlm: blnd_xlm_token.clone(),
             usdc: usdc_token.clone(),
         };
-        if valuation.version() != BACKSTOP_VALUATION_VERSION
-            || valuation.binding() != expected_binding
-        {
+        if valuation.binding() != expected_binding {
             panic_with_error!(&e, BackstopError::InvalidBackstopValuation);
         }
 
@@ -995,11 +996,25 @@ impl Backstop for BackstopContract {
         emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool)
     }
 
-    fn claim_ongoing_blnd(e: Env, user: Address, pool: Address, recipient: Address) -> i128 {
+    fn claim_ongoing_blnd(
+        e: Env,
+        tier: BackstopTier,
+        user: Address,
+        pool: Address,
+        min_lp_tokens_out: i128,
+    ) -> i128 {
         storage::extend_instance(&e);
-        let amount = emissions::claim_user_ongoing_blnd(&e, &user, &pool, &recipient);
-        BackstopEvents::claim_ongoing_blnd(&e, user, pool, recipient, amount);
-        amount
+        let claim = emissions::claim_user_ongoing_blnd(&e, tier, &user, &pool, min_lp_tokens_out);
+        BackstopEvents::claim_ongoing_blnd(
+            &e,
+            tier,
+            user,
+            pool,
+            claim.blnd_amount,
+            claim.lp_amount,
+            claim.shares,
+        );
+        claim.lp_amount
     }
 
     fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation {

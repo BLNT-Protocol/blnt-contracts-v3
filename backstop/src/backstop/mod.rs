@@ -1,4 +1,5 @@
 mod deposit;
+pub(crate) use deposit::credit_tier_shares;
 pub use deposit::execute_deposit_for_tier;
 
 mod fund_management;

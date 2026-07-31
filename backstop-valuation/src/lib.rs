@@ -2,19 +2,13 @@
 
 use soroban_sdk::{
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error, Address,
-    Env, Map, Symbol, Vec, I256,
+    Env, Vec, I256,
 };
 
-const ADAPTER_VERSION: u32 = 1;
-const SCALAR_7: i128 = 10_000_000;
 const BLND_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
+const PAIR_VALUE_MULTIPLIER: i128 = 5;
 const TOKEN_DECIMALS: u32 = 7;
-const MIN_TWAP_RECORDS: u32 = 2;
-const MAX_TWAP_RECORDS: u32 = 25;
-const MIN_TWAP_WINDOW_SECONDS: u64 = 30 * 60;
-const MAX_TWAP_WINDOW_SECONDS: u64 = 24 * 60 * 60;
-const MAX_PRICE_AGE_SECONDS: u64 = 60 * 60;
 const DAY_IN_LEDGERS: u32 = 17_280;
 const INSTANCE_TTL_THRESHOLD: u32 = 89 * DAY_IN_LEDGERS;
 const INSTANCE_TTL_BUMP: u32 = 90 * DAY_IN_LEDGERS;
@@ -38,30 +32,10 @@ pub struct AdapterBinding {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct PriceData {
-    pub price: i128,
-    pub timestamp: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub enum OracleAsset {
-    Stellar(Address),
-    Other(Symbol),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
 pub struct AdapterConfig {
     pub blnd: Address,
     pub blnd_usdc: Address,
     pub blnd_xlm: Address,
-    pub max_price_age: u64,
-    pub oracle: Address,
-    pub oracle_base: OracleAsset,
-    pub oracle_decimals: u32,
-    pub oracle_resolution: u32,
-    pub twap_records: u32,
     pub usdc: Address,
     pub xlm: Address,
 }
@@ -78,24 +52,11 @@ enum DataKey {
 pub enum BackstopValuationError {
     AlreadyInitialized = 1600,
     InvalidConfiguration = 1601,
-    InvalidOracle = 1602,
     InvalidComet = 1603,
     InvalidAmount = 1604,
     UnsupportedAsset = 1605,
-    InvalidPrice = 1606,
-    StalePrice = 1607,
     InvalidReserve = 1608,
     ArithmeticError = 1609,
-}
-
-#[contractclient(name = "Sep40Client")]
-#[allow(dead_code)]
-trait Sep40 {
-    fn base(env: Env) -> OracleAsset;
-    fn assets(env: Env) -> Vec<OracleAsset>;
-    fn decimals(env: Env) -> u32;
-    fn resolution(env: Env) -> u32;
-    fn prices(env: Env, asset: OracleAsset, records: u32) -> Option<Vec<PriceData>>;
 }
 
 #[contractclient(name = "CometClient")]
@@ -118,44 +79,18 @@ pub struct BackstopValuation;
 
 #[contractimpl]
 impl BackstopValuation {
-    #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         env: Env,
-        oracle: Address,
-        oracle_base: OracleAsset,
         blnd: Address,
         usdc: Address,
         xlm: Address,
         blnd_usdc: Address,
         blnd_xlm: Address,
-        twap_records: u32,
-        max_price_age: u64,
     ) {
         if env.storage().instance().has(&DataKey::Config) {
             panic_with_error!(&env, BackstopValuationError::AlreadyInitialized);
         }
-        validate_distinct_addresses(&env, &oracle, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm);
-
-        let oracle_client = Sep40Client::new(&env, &oracle);
-        let oracle_decimals = oracle_client.decimals();
-        let oracle_resolution = oracle_client.resolution();
-        validate_oracle_configuration(
-            &env,
-            twap_records,
-            max_price_age,
-            oracle_decimals,
-            oracle_resolution,
-        );
-        if oracle_base != OracleAsset::Stellar(usdc.clone()) || oracle_client.base() != oracle_base
-        {
-            panic_with_error!(&env, BackstopValuationError::InvalidOracle);
-        }
-        let oracle_assets = oracle_client.assets();
-        if !oracle_assets.contains(OracleAsset::Stellar(blnd.clone()))
-            || !oracle_assets.contains(OracleAsset::Stellar(xlm.clone()))
-        {
-            panic_with_error!(&env, BackstopValuationError::InvalidOracle);
-        }
+        validate_distinct_addresses(&env, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm);
 
         validate_token_decimals(&env, &blnd);
         validate_token_decimals(&env, &usdc);
@@ -165,26 +100,17 @@ impl BackstopValuation {
         validate_comet(&env, &blnd_usdc, &blnd, &usdc);
         validate_comet(&env, &blnd_xlm, &blnd, &xlm);
 
-        let config = AdapterConfig {
-            blnd,
-            blnd_usdc,
-            blnd_xlm,
-            max_price_age,
-            oracle,
-            oracle_base,
-            oracle_decimals,
-            oracle_resolution,
-            twap_records,
-            usdc,
-            xlm,
-        };
-        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(
+            &DataKey::Config,
+            &AdapterConfig {
+                blnd,
+                blnd_usdc,
+                blnd_xlm,
+                usdc,
+                xlm,
+            },
+        );
         extend_instance_ttl(&env);
-    }
-
-    pub fn version(env: Env) -> u32 {
-        extend_instance_ttl(&env);
-        ADAPTER_VERSION
     }
 
     pub fn binding(env: Env) -> AdapterBinding {
@@ -208,35 +134,39 @@ impl BackstopValuation {
         if amount <= 0 {
             panic_with_error!(&env, BackstopValuationError::InvalidAmount);
         }
+
         let config = read_config(&env);
-        verify_oracle_identity(&env, &config);
+        let anchor = read_comet(&env, &config.blnd_usdc, &config.blnd, &config.usdc);
         if token == config.blnd_usdc {
-            quote_comet(&env, &config, &token, &config.usdc, amount, None)
+            let total_value = checked_mul(&env, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
+            quote_amount(&env, amount, total_value, &anchor)
         } else if token == config.blnd_xlm {
-            let xlm_price = read_twap(&env, &config, &config.xlm);
-            quote_comet(&env, &config, &token, &config.xlm, amount, Some(xlm_price))
+            let target = read_comet(&env, &config.blnd_xlm, &config.blnd, &config.xlm);
+            let anchor_value = checked_mul(&env, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
+            let total_value =
+                mul_div_floor(&env, target.blnd_reserve, anchor_value, anchor.blnd_reserve);
+            quote_amount(&env, amount, total_value, &target)
         } else {
             panic_with_error!(&env, BackstopValuationError::UnsupportedAsset);
         }
     }
 }
 
-#[derive(Clone)]
-struct Twap {
-    price: i128,
-    valid_until: u64,
+struct CometComposition {
+    blnd_reserve: i128,
+    pair_reserve: i128,
+    total_supply: i128,
 }
 
 fn validate_distinct_addresses(
     env: &Env,
-    oracle: &Address,
     blnd: &Address,
     usdc: &Address,
     xlm: &Address,
     blnd_usdc: &Address,
     blnd_xlm: &Address,
 ) {
-    let addresses = [oracle, blnd, usdc, xlm, blnd_usdc, blnd_xlm];
+    let addresses = [blnd, usdc, xlm, blnd_usdc, blnd_xlm];
     for (index, address) in addresses.iter().enumerate() {
         if addresses
             .iter()
@@ -245,29 +175,6 @@ fn validate_distinct_addresses(
         {
             panic_with_error!(env, BackstopValuationError::InvalidConfiguration);
         }
-    }
-}
-
-fn validate_oracle_configuration(
-    env: &Env,
-    twap_records: u32,
-    max_price_age: u64,
-    oracle_decimals: u32,
-    oracle_resolution: u32,
-) {
-    if !(MIN_TWAP_RECORDS..=MAX_TWAP_RECORDS).contains(&twap_records)
-        || oracle_decimals > 18
-        || oracle_resolution == 0
-        || max_price_age < u64::from(oracle_resolution)
-        || max_price_age > MAX_PRICE_AGE_SECONDS
-    {
-        panic_with_error!(env, BackstopValuationError::InvalidConfiguration);
-    }
-    let history_span = u64::from(oracle_resolution)
-        .checked_mul(u64::from(twap_records - 1))
-        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError));
-    if !(MIN_TWAP_WINDOW_SECONDS..=MAX_TWAP_WINDOW_SECONDS).contains(&history_span) {
-        panic_with_error!(env, BackstopValuationError::InvalidConfiguration);
     }
 }
 
@@ -290,135 +197,50 @@ fn validate_comet(env: &Env, comet: &Address, blnd: &Address, pair: &Address) {
     }
 }
 
-fn verify_oracle_identity(env: &Env, config: &AdapterConfig) {
-    let client = Sep40Client::new(env, &config.oracle);
-    if client.base() != config.oracle_base
-        || client.decimals() != config.oracle_decimals
-        || client.resolution() != config.oracle_resolution
-    {
-        panic_with_error!(env, BackstopValuationError::InvalidOracle);
-    }
-}
-
-fn read_twap(env: &Env, config: &AdapterConfig, asset: &Address) -> Twap {
-    let prices = Sep40Client::new(env, &config.oracle)
-        .prices(&OracleAsset::Stellar(asset.clone()), &config.twap_records)
-        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::InvalidPrice));
-    if prices.len() != config.twap_records {
-        panic_with_error!(env, BackstopValuationError::InvalidPrice);
-    }
-
-    let now = env.ledger().timestamp();
-    let resolution = u64::from(config.oracle_resolution);
-    let expected_span = resolution
-        .checked_mul(u64::from(config.twap_records - 1))
-        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError));
-    let mut timestamps = Map::<u64, bool>::new(env);
-    let mut minimum_timestamp = u64::MAX;
-    let mut maximum_timestamp = 0;
-    let mut sum = I256::from_i32(env, 0);
-    for datum in prices.iter() {
-        if datum.price <= 0
-            || datum.timestamp > now
-            || datum.timestamp % resolution != 0
-            || timestamps.contains_key(datum.timestamp)
-        {
-            panic_with_error!(env, BackstopValuationError::InvalidPrice);
-        }
-        timestamps.set(datum.timestamp, true);
-        minimum_timestamp = minimum_timestamp.min(datum.timestamp);
-        maximum_timestamp = maximum_timestamp.max(datum.timestamp);
-        sum = sum.add(&I256::from_i128(env, datum.price));
-    }
-    if maximum_timestamp
-        .checked_sub(minimum_timestamp)
-        .filter(|span| *span == expected_span)
-        .is_none()
-    {
-        panic_with_error!(env, BackstopValuationError::InvalidPrice);
-    }
-    let valid_until = maximum_timestamp
-        .checked_add(config.max_price_age)
-        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError));
-    if now > valid_until {
-        panic_with_error!(env, BackstopValuationError::StalePrice);
-    }
-    let price = sum
-        .div(&I256::from_i128(env, i128::from(config.twap_records)))
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError));
-    if price <= 0 {
-        panic_with_error!(env, BackstopValuationError::InvalidPrice);
-    }
-    Twap { price, valid_until }
-}
-
-fn quote_comet(
-    env: &Env,
-    config: &AdapterConfig,
-    comet: &Address,
-    pair: &Address,
-    amount: i128,
-    pair_twap: Option<Twap>,
-) -> AssetValuation {
-    let comet_client = CometClient::new(env, comet);
-    let total_supply = comet_client.get_total_supply();
-    let blnd_reserve = comet_client.get_balance(&config.blnd);
-    let pair_reserve = comet_client.get_balance(pair);
+fn read_comet(env: &Env, comet: &Address, blnd: &Address, pair: &Address) -> CometComposition {
+    let client = CometClient::new(env, comet);
+    let total_supply = client.get_total_supply();
+    let blnd_reserve = client.get_balance(blnd);
+    let pair_reserve = client.get_balance(pair);
     if total_supply <= 0
-        || amount > total_supply
         || blnd_reserve <= 0
         || pair_reserve <= 0
-        || comet_client.get_normalized_weight(&config.blnd) != BLND_WEIGHT
-        || comet_client.get_normalized_weight(pair) != PAIR_WEIGHT
+        || client.get_normalized_weight(blnd) != BLND_WEIGHT
+        || client.get_normalized_weight(pair) != PAIR_WEIGHT
     {
         panic_with_error!(env, BackstopValuationError::InvalidReserve);
     }
-
-    let blnd_twap = read_twap(env, config, &config.blnd);
-    let blnd_reserve_value = mul_div_floor(
-        env,
+    CometComposition {
         blnd_reserve,
-        blnd_twap.price,
-        ten_to_power(env, config.oracle_decimals),
-    );
-    let (pair_price, pair_valid_until) = pair_twap
-        .map(|twap| (twap.price, twap.valid_until))
-        .unwrap_or((SCALAR_7, u64::MAX));
-    let pair_reserve_value = mul_div_floor(
-        env,
         pair_reserve,
-        pair_price,
-        if pair == &config.usdc {
-            SCALAR_7
-        } else {
-            ten_to_power(env, config.oracle_decimals)
-        },
-    );
-    // At the immutable 80:20 target, either reserve independently implies the
-    // same total LP value. Taking the lesser implication prevents a one-sided
-    // reserve donation or temporary imbalance from inflating the quote.
-    let blnd_implied_total = mul_div_floor(env, blnd_reserve_value, SCALAR_7, BLND_WEIGHT);
-    let pair_implied_total = mul_div_floor(env, pair_reserve_value, SCALAR_7, PAIR_WEIGHT);
-    let conservative_total = blnd_implied_total.min(pair_implied_total);
-    let usdc_value = mul_div_floor(env, conservative_total, amount, total_supply);
-    let underlying_blnd = mul_div_floor(env, blnd_reserve, amount, total_supply);
-
-    AssetValuation {
-        underlying_blnd,
-        usdc_value,
-        valid_until: blnd_twap.valid_until.min(pair_valid_until),
+        total_supply,
     }
 }
 
-fn ten_to_power(env: &Env, exponent: u32) -> i128 {
-    let mut value = 1_i128;
-    for _ in 0..exponent {
-        value = value
-            .checked_mul(10)
-            .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError));
+fn quote_amount(
+    env: &Env,
+    amount: i128,
+    total_value: i128,
+    composition: &CometComposition,
+) -> AssetValuation {
+    if amount > composition.total_supply || total_value <= 0 {
+        panic_with_error!(env, BackstopValuationError::InvalidReserve);
     }
-    value
+    AssetValuation {
+        underlying_blnd: mul_div_floor(
+            env,
+            amount,
+            composition.blnd_reserve,
+            composition.total_supply,
+        ),
+        usdc_value: mul_div_floor(env, amount, total_value, composition.total_supply),
+        valid_until: u64::MAX,
+    }
+}
+
+fn checked_mul(env: &Env, left: i128, right: i128) -> i128 {
+    left.checked_mul(right)
+        .unwrap_or_else(|| panic_with_error!(env, BackstopValuationError::ArithmeticError))
 }
 
 fn mul_div_floor(env: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
@@ -451,92 +273,21 @@ mod tests {
 
     use super::*;
     use soroban_sdk::{
-        testutils::{storage::Instance as _, Address as _, Ledger},
+        testutils::{storage::Instance as _, Address as _},
         vec, Address,
     };
 
-    #[derive(Clone)]
-    #[contracttype]
-    enum MockOracleKey {
-        Assets,
-        Base,
-        Decimals,
-        Price(Address),
-        Resolution,
-    }
-
     #[contract]
-    struct MockOracle;
+    struct MockToken;
 
     #[contractimpl]
-    impl MockOracle {
-        pub fn __constructor(
-            env: Env,
-            base: OracleAsset,
-            assets: Vec<OracleAsset>,
-            decimals: u32,
-            resolution: u32,
-        ) {
-            env.storage().instance().set(&MockOracleKey::Base, &base);
-            env.storage()
-                .instance()
-                .set(&MockOracleKey::Assets, &assets);
-            env.storage()
-                .instance()
-                .set(&MockOracleKey::Decimals, &decimals);
-            env.storage()
-                .instance()
-                .set(&MockOracleKey::Resolution, &resolution);
-        }
-
-        pub fn base(env: Env) -> OracleAsset {
-            env.storage().instance().get(&MockOracleKey::Base).unwrap()
-        }
-
-        pub fn assets(env: Env) -> Vec<OracleAsset> {
-            env.storage()
-                .instance()
-                .get(&MockOracleKey::Assets)
-                .unwrap()
+    impl MockToken {
+        pub fn __constructor(env: Env, decimals: u32) {
+            env.storage().instance().set(&0_u32, &decimals);
         }
 
         pub fn decimals(env: Env) -> u32 {
-            env.storage()
-                .instance()
-                .get(&MockOracleKey::Decimals)
-                .unwrap()
-        }
-
-        pub fn resolution(env: Env) -> u32 {
-            env.storage()
-                .instance()
-                .get(&MockOracleKey::Resolution)
-                .unwrap()
-        }
-
-        pub fn prices(env: Env, asset: OracleAsset, _records: u32) -> Option<Vec<PriceData>> {
-            let OracleAsset::Stellar(address) = asset else {
-                panic!("unsupported mock asset");
-            };
-            env.storage().instance().get(&MockOracleKey::Price(address))
-        }
-
-        pub fn set_prices(env: Env, asset: Address, prices: Vec<PriceData>) {
-            env.storage()
-                .instance()
-                .set(&MockOracleKey::Price(asset), &prices);
-        }
-
-        pub fn clear_prices(env: Env, asset: Address) {
-            env.storage()
-                .instance()
-                .remove(&MockOracleKey::Price(asset));
-        }
-
-        pub fn set_resolution(env: Env, resolution: u32) {
-            env.storage()
-                .instance()
-                .set(&MockOracleKey::Resolution, &resolution);
+            env.storage().instance().get(&0_u32).unwrap()
         }
     }
 
@@ -549,7 +300,7 @@ mod tests {
         Pair,
         PairReserve,
         PairWeight,
-        TotalSupply,
+        Supply,
     }
 
     #[contract]
@@ -562,9 +313,9 @@ mod tests {
             env: Env,
             blnd: Address,
             pair: Address,
-            total_supply: i128,
             blnd_reserve: i128,
             pair_reserve: i128,
+            supply: i128,
             blnd_weight: i128,
             pair_weight: i128,
         ) {
@@ -572,23 +323,17 @@ mod tests {
             env.storage().instance().set(&MockCometKey::Pair, &pair);
             env.storage()
                 .instance()
-                .set(&MockCometKey::TotalSupply, &total_supply);
-            env.storage()
-                .instance()
                 .set(&MockCometKey::BlndReserve, &blnd_reserve);
             env.storage()
                 .instance()
                 .set(&MockCometKey::PairReserve, &pair_reserve);
+            env.storage().instance().set(&MockCometKey::Supply, &supply);
             env.storage()
                 .instance()
                 .set(&MockCometKey::BlndWeight, &blnd_weight);
             env.storage()
                 .instance()
                 .set(&MockCometKey::PairWeight, &pair_weight);
-        }
-
-        pub fn decimals(_env: Env) -> u32 {
-            TOKEN_DECIMALS
         }
 
         pub fn get_tokens(env: Env) -> Vec<Address> {
@@ -599,40 +344,54 @@ mod tests {
             ]
         }
 
+        pub fn decimals(_env: Env) -> u32 {
+            TOKEN_DECIMALS
+        }
+
         pub fn get_balance(env: Env, token: Address) -> i128 {
-            let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
-            let key = if token == blnd {
-                MockCometKey::BlndReserve
+            if token == env.storage().instance().get(&MockCometKey::Blnd).unwrap() {
+                env.storage()
+                    .instance()
+                    .get(&MockCometKey::BlndReserve)
+                    .unwrap()
+            } else if token == env.storage().instance().get(&MockCometKey::Pair).unwrap() {
+                env.storage()
+                    .instance()
+                    .get(&MockCometKey::PairReserve)
+                    .unwrap()
             } else {
-                MockCometKey::PairReserve
-            };
-            env.storage().instance().get(&key).unwrap()
+                0
+            }
         }
 
         pub fn get_total_supply(env: Env) -> i128 {
-            env.storage()
-                .instance()
-                .get(&MockCometKey::TotalSupply)
-                .unwrap()
+            env.storage().instance().get(&MockCometKey::Supply).unwrap()
         }
 
         pub fn get_normalized_weight(env: Env, token: Address) -> i128 {
-            let blnd: Address = env.storage().instance().get(&MockCometKey::Blnd).unwrap();
-            let key = if token == blnd {
-                MockCometKey::BlndWeight
+            if token == env.storage().instance().get(&MockCometKey::Blnd).unwrap() {
+                env.storage()
+                    .instance()
+                    .get(&MockCometKey::BlndWeight)
+                    .unwrap()
+            } else if token == env.storage().instance().get(&MockCometKey::Pair).unwrap() {
+                env.storage()
+                    .instance()
+                    .get(&MockCometKey::PairWeight)
+                    .unwrap()
             } else {
-                MockCometKey::PairWeight
-            };
-            env.storage().instance().get(&key).unwrap()
+                0
+            }
         }
 
-        pub fn set_reserves(env: Env, blnd_reserve: i128, pair_reserve: i128) {
+        pub fn set_reserves(env: Env, blnd_reserve: i128, pair_reserve: i128, supply: i128) {
             env.storage()
                 .instance()
                 .set(&MockCometKey::BlndReserve, &blnd_reserve);
             env.storage()
                 .instance()
                 .set(&MockCometKey::PairReserve, &pair_reserve);
+            env.storage().instance().set(&MockCometKey::Supply, &supply);
         }
     }
 
@@ -642,105 +401,72 @@ mod tests {
         blnd_usdc: Address,
         blnd_xlm: Address,
         env: Env,
-        oracle: Address,
         usdc: Address,
         xlm: Address,
     }
 
     impl Fixture {
-        fn new() -> Self {
+        fn create() -> Self {
             let env = Env::default();
-            env.mock_all_auths();
-            env.ledger().set_timestamp(3_600);
-            let blnd = register_token(&env);
-            let usdc = register_token(&env);
-            let xlm = register_token(&env);
+            env.cost_estimate().budget().reset_unlimited();
+            let blnd = env.register(MockToken, (TOKEN_DECIMALS,));
+            let usdc = env.register(MockToken, (TOKEN_DECIMALS,));
+            let xlm = env.register(MockToken, (TOKEN_DECIMALS,));
             let blnd_usdc = env.register(
                 MockComet,
                 (
-                    &blnd,
-                    &usdc,
-                    &(100 * SCALAR_7),
-                    &(1_600 * SCALAR_7),
-                    &(20 * SCALAR_7),
-                    &BLND_WEIGHT,
-                    &PAIR_WEIGHT,
+                    blnd.clone(),
+                    usdc.clone(),
+                    1_000 * 10_000_000_i128,
+                    25 * 10_000_000_i128,
+                    100 * 10_000_000_i128,
+                    BLND_WEIGHT,
+                    PAIR_WEIGHT,
                 ),
             );
             let blnd_xlm = env.register(
                 MockComet,
                 (
-                    &blnd,
-                    &xlm,
-                    &(100 * SCALAR_7),
-                    &(1_600 * SCALAR_7),
-                    &(200 * SCALAR_7),
-                    &BLND_WEIGHT,
-                    &PAIR_WEIGHT,
+                    blnd.clone(),
+                    xlm.clone(),
+                    500 * 10_000_000_i128,
+                    100 * 10_000_000_i128,
+                    50 * 10_000_000_i128,
+                    BLND_WEIGHT,
+                    PAIR_WEIGHT,
                 ),
             );
-            let base = OracleAsset::Stellar(usdc.clone());
-            let oracle = env.register(
-                MockOracle,
-                (
-                    &base,
-                    &vec![
-                        &env,
-                        OracleAsset::Stellar(blnd.clone()),
-                        OracleAsset::Stellar(xlm.clone()),
-                    ],
-                    &7_u32,
-                    &300_u32,
-                ),
-            );
-            let oracle_client = MockOracleClient::new(&env, &oracle);
-            oracle_client.set_prices(&blnd, &uniform_prices(&env, 500_000));
-            oracle_client.set_prices(&xlm, &uniform_prices(&env, 1_000_000));
-            let adapter_id = env.register(
+            let adapter = env.register(
                 BackstopValuation,
                 (
-                    &oracle, &base, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm, &7_u32, &600_u64,
+                    blnd.clone(),
+                    usdc.clone(),
+                    xlm.clone(),
+                    blnd_usdc.clone(),
+                    blnd_xlm.clone(),
                 ),
             );
             Self {
-                adapter: adapter_id,
+                adapter,
                 blnd,
                 blnd_usdc,
                 blnd_xlm,
                 env,
-                oracle,
                 usdc,
                 xlm,
             }
         }
 
-        fn adapter(&self) -> BackstopValuationClient<'_> {
+        fn client(&self) -> BackstopValuationClient<'_> {
             BackstopValuationClient::new(&self.env, &self.adapter)
         }
     }
 
-    fn register_token(env: &Env) -> Address {
-        env.register_stellar_asset_contract_v2(Address::generate(env))
-            .address()
-    }
-
-    fn uniform_prices(env: &Env, price: i128) -> Vec<PriceData> {
-        let mut prices = Vec::new(env);
-        for index in 0_u64..7 {
-            prices.push_back(PriceData {
-                price,
-                timestamp: 1_800 + index * 300,
-            });
-        }
-        prices
-    }
-
     #[test]
-    fn quotes_balanced_lp_tokens_from_twap_and_current_composition() {
-        let fixture = Fixture::new();
-        assert_eq!(fixture.adapter().version(), ADAPTER_VERSION);
+    fn exposes_config_and_binding() {
+        let fixture = Fixture::create();
         assert_eq!(
-            fixture.adapter().binding(),
+            fixture.client().binding(),
             AdapterBinding {
                 blnd: fixture.blnd.clone(),
                 blnd_usdc: fixture.blnd_usdc.clone(),
@@ -748,303 +474,174 @@ mod tests {
                 usdc: fixture.usdc.clone(),
             }
         );
-        let config = fixture.adapter().config();
-        assert_eq!(config.oracle, fixture.oracle);
         assert_eq!(
-            config.oracle_base,
-            OracleAsset::Stellar(fixture.usdc.clone())
-        );
-        assert_eq!(config.blnd, fixture.blnd);
-        assert_eq!(config.xlm, fixture.xlm);
-
-        assert_eq!(
-            fixture
-                .adapter()
-                .quote(&fixture.blnd_usdc, &(10 * SCALAR_7)),
-            AssetValuation {
-                underlying_blnd: 160 * SCALAR_7,
-                usdc_value: 10 * SCALAR_7,
-                valid_until: 4_200,
-            }
-        );
-        assert_eq!(
-            fixture.adapter().quote(&fixture.blnd_xlm, &(10 * SCALAR_7)),
-            AssetValuation {
-                underlying_blnd: 160 * SCALAR_7,
-                usdc_value: 10 * SCALAR_7,
-                valid_until: 4_200,
+            fixture.client().config(),
+            AdapterConfig {
+                blnd: fixture.blnd,
+                blnd_usdc: fixture.blnd_usdc,
+                blnd_xlm: fixture.blnd_xlm,
+                usdc: fixture.usdc,
+                xlm: fixture.xlm,
             }
         );
     }
 
     #[test]
-    fn version_only_usage_refreshes_instance_and_code_ttl() {
-        let fixture = Fixture::new();
-        fixture.env.as_contract(&fixture.adapter, || {
-            assert_eq!(
-                fixture.env.storage().instance().get_ttl(),
-                INSTANCE_TTL_BUMP
-            );
-        });
-
-        fixture
-            .env
-            .ledger()
-            .set_sequence_number(fixture.env.ledger().sequence() + 2 * DAY_IN_LEDGERS);
-        fixture.env.as_contract(&fixture.adapter, || {
-            assert_eq!(
-                fixture.env.storage().instance().get_ttl(),
-                INSTANCE_TTL_BUMP - 2 * DAY_IN_LEDGERS
-            );
-        });
-
-        assert_eq!(fixture.adapter().version(), ADAPTER_VERSION);
-        fixture.env.as_contract(&fixture.adapter, || {
-            assert_eq!(
-                fixture.env.storage().instance().get_ttl(),
-                INSTANCE_TTL_BUMP
-            );
-        });
-    }
-
-    #[test]
-    fn twap_accepts_unordered_ticks_and_floors_the_average() {
-        let fixture = Fixture::new();
-        let mut prices = Vec::new(&fixture.env);
-        for (timestamp, price) in [
-            (3_600, 500_006),
-            (1_800, 500_000),
-            (3_000, 500_004),
-            (2_100, 500_001),
-            (2_700, 500_003),
-            (2_400, 500_002),
-            (3_300, 500_005),
-        ] {
-            prices.push_back(PriceData { price, timestamp });
-        }
-        MockOracleClient::new(&fixture.env, &fixture.oracle).set_prices(&fixture.blnd, &prices);
-        let quote = fixture
-            .adapter()
-            .quote(&fixture.blnd_usdc, &(10 * SCALAR_7));
-        assert_eq!(quote.usdc_value, 10 * SCALAR_7);
-        assert_eq!(quote.valid_until, 4_200);
-    }
-
-    #[test]
-    fn one_sided_reserve_increases_cannot_inflate_value() {
-        let fixture = Fixture::new();
-        let comet = MockCometClient::new(&fixture.env, &fixture.blnd_usdc);
-        comet.set_reserves(&(3_200 * SCALAR_7), &(20 * SCALAR_7));
+    fn values_both_lp_tokens_from_comet_reserves() {
+        let fixture = Fixture::create();
         assert_eq!(
             fixture
-                .adapter()
-                .quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-                .usdc_value,
-            10 * SCALAR_7
-        );
-        comet.set_reserves(&(1_600 * SCALAR_7), &(40 * SCALAR_7));
-        assert_eq!(
-            fixture
-                .adapter()
-                .quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-                .usdc_value,
-            10 * SCALAR_7
-        );
-        comet.set_reserves(&(800 * SCALAR_7), &(20 * SCALAR_7));
-        assert_eq!(
-            fixture
-                .adapter()
-                .quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-                .usdc_value,
-            5 * SCALAR_7
-        );
-    }
-
-    #[test]
-    fn malformed_missing_stale_and_changed_oracle_data_fail_closed() {
-        let fixture = Fixture::new();
-        fixture.env.ledger().set_timestamp(4_201);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        fixture.env.ledger().set_timestamp(3_600);
-        let oracle = MockOracleClient::new(&fixture.env, &fixture.oracle);
-        let mut gapped = uniform_prices(&fixture.env, 500_000);
-        gapped.set(
-            3,
-            PriceData {
-                price: 500_000,
-                timestamp: 2_500,
-            },
-        );
-        oracle.set_prices(&fixture.blnd, &gapped);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        let mut duplicate = uniform_prices(&fixture.env, 500_000);
-        duplicate.set(
-            4,
-            PriceData {
-                price: 500_000,
-                timestamp: 2_700,
-            },
-        );
-        oracle.set_prices(&fixture.blnd, &duplicate);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        let mut nonpositive = uniform_prices(&fixture.env, 500_000);
-        nonpositive.set(
-            0,
-            PriceData {
-                price: 0,
-                timestamp: 1_800,
-            },
-        );
-        oracle.set_prices(&fixture.blnd, &nonpositive);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        let mut future = Vec::new(&fixture.env);
-        for index in 0_u64..7 {
-            future.push_back(PriceData {
-                price: 500_000,
-                timestamp: 2_100 + index * 300,
-            });
-        }
-        oracle.set_prices(&fixture.blnd, &future);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        oracle.clear_prices(&fixture.blnd);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-
-        oracle.set_prices(&fixture.blnd, &uniform_prices(&fixture.env, 500_000));
-        oracle.set_resolution(&301);
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-    }
-
-    #[test]
-    fn invalid_amount_asset_and_reserves_fail_closed() {
-        let fixture = Fixture::new();
-        assert!(fixture.adapter().try_quote(&fixture.blnd_usdc, &0).is_err());
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.usdc, &(10 * SCALAR_7))
-            .is_err());
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(101 * SCALAR_7))
-            .is_err());
-        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).set_reserves(&0, &(20 * SCALAR_7));
-        assert!(fixture
-            .adapter()
-            .try_quote(&fixture.blnd_usdc, &(10 * SCALAR_7))
-            .is_err());
-    }
-
-    #[test]
-    fn positive_dust_amount_can_round_to_zero_without_blocking_valuation() {
-        let fixture = Fixture::new();
-        MockCometClient::new(&fixture.env, &fixture.blnd_usdc)
-            .set_reserves(&(1_600 * SCALAR_7), &1);
-        assert_eq!(
-            fixture.adapter().quote(&fixture.blnd_usdc, &1),
+                .client()
+                .quote(&fixture.blnd_usdc, &(20 * 10_000_000_i128)),
             AssetValuation {
-                underlying_blnd: 16,
-                usdc_value: 0,
-                valid_until: 4_200,
+                underlying_blnd: 200 * 10_000_000,
+                usdc_value: 25 * 10_000_000,
+                valid_until: u64::MAX,
             }
         );
+        assert_eq!(
+            fixture
+                .client()
+                .quote(&fixture.blnd_xlm, &(10 * 10_000_000_i128)),
+            AssetValuation {
+                underlying_blnd: 100 * 10_000_000,
+                usdc_value: 125_000_000,
+                valid_until: u64::MAX,
+            }
+        );
+    }
+
+    #[test]
+    fn blnd_xlm_cross_value_tracks_blnd_usdc_spot_ratio() {
+        let fixture = Fixture::create();
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).set_reserves(
+            &(500 * 10_000_000_i128),
+            &(25 * 10_000_000_i128),
+            &(100 * 10_000_000_i128),
+        );
+        assert_eq!(
+            fixture
+                .client()
+                .quote(&fixture.blnd_xlm, &(10 * 10_000_000_i128))
+                .usdc_value,
+            25 * 10_000_000
+        );
+    }
+
+    #[test]
+    fn proportionate_anchor_liquidity_preserves_value_per_lp() {
+        let fixture = Fixture::create();
+        let before = fixture
+            .client()
+            .quote(&fixture.blnd_usdc, &(10 * 10_000_000_i128));
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).set_reserves(
+            &(2_000 * 10_000_000_i128),
+            &(50 * 10_000_000_i128),
+            &(200 * 10_000_000_i128),
+        );
+        assert_eq!(
+            fixture
+                .client()
+                .quote(&fixture.blnd_usdc, &(10 * 10_000_000_i128)),
+            before
+        );
+    }
+
+    #[test]
+    fn invalid_amount_asset_or_reserve_fails_closed() {
+        let fixture = Fixture::create();
+        assert!(fixture.client().try_quote(&fixture.blnd_usdc, &0).is_err());
+        assert!(fixture
+            .client()
+            .try_quote(&Address::generate(&fixture.env), &1)
+            .is_err());
+        MockCometClient::new(&fixture.env, &fixture.blnd_usdc).set_reserves(
+            &0,
+            &(25 * 10_000_000_i128),
+            &(100 * 10_000_000_i128),
+        );
+        assert!(fixture.client().try_quote(&fixture.blnd_usdc, &1).is_err());
+    }
+
+    #[test]
+    #[should_panic]
+    fn constructor_rejects_wrong_decimals() {
+        let env = Env::default();
+        env.cost_estimate().budget().reset_unlimited();
+        let blnd = env.register(MockToken, (TOKEN_DECIMALS,));
+        let usdc = env.register(MockToken, (6_u32,));
+        let xlm = env.register(MockToken, (TOKEN_DECIMALS,));
+        let blnd_usdc = env.register(
+            MockComet,
+            (
+                blnd.clone(),
+                usdc.clone(),
+                1_i128,
+                1_i128,
+                1_i128,
+                BLND_WEIGHT,
+                PAIR_WEIGHT,
+            ),
+        );
+        let blnd_xlm = env.register(
+            MockComet,
+            (
+                blnd.clone(),
+                xlm.clone(),
+                1_i128,
+                1_i128,
+                1_i128,
+                7_000_000_i128,
+                3_000_000_i128,
+            ),
+        );
+        env.register(BackstopValuation, (blnd, usdc, xlm, blnd_usdc, blnd_xlm));
     }
 
     #[test]
     #[should_panic]
     fn constructor_rejects_wrong_comet_weights() {
         let env = Env::default();
-        register_constructor_fixture(&env, true, 7_000_000, 3_000_000);
-    }
-
-    #[test]
-    #[should_panic]
-    fn constructor_rejects_non_usdc_oracle_base() {
-        let env = Env::default();
-        register_constructor_fixture(&env, false, BLND_WEIGHT, PAIR_WEIGHT);
-    }
-
-    fn register_constructor_fixture(
-        env: &Env,
-        use_usdc_base: bool,
-        blnd_weight: i128,
-        pair_weight: i128,
-    ) {
-        env.ledger().set_timestamp(3_600);
-        let blnd = register_token(env);
-        let usdc = register_token(env);
-        let xlm = register_token(env);
+        env.cost_estimate().budget().reset_unlimited();
+        let blnd = env.register(MockToken, (TOKEN_DECIMALS,));
+        let usdc = env.register(MockToken, (TOKEN_DECIMALS,));
+        let xlm = env.register(MockToken, (TOKEN_DECIMALS,));
         let blnd_usdc = env.register(
             MockComet,
             (
-                &blnd,
-                &usdc,
-                &(100 * SCALAR_7),
-                &(1_600 * SCALAR_7),
-                &(20 * SCALAR_7),
-                &blnd_weight,
-                &pair_weight,
+                blnd.clone(),
+                usdc.clone(),
+                1_i128,
+                1_i128,
+                1_i128,
+                BLND_WEIGHT,
+                PAIR_WEIGHT,
             ),
         );
         let blnd_xlm = env.register(
             MockComet,
             (
-                &blnd,
-                &xlm,
-                &(100 * SCALAR_7),
-                &(1_600 * SCALAR_7),
-                &(200 * SCALAR_7),
-                &BLND_WEIGHT,
-                &PAIR_WEIGHT,
+                blnd.clone(),
+                xlm.clone(),
+                1_i128,
+                1_i128,
+                1_i128,
+                7_000_000_i128,
+                3_000_000_i128,
             ),
         );
-        let base = if use_usdc_base {
-            OracleAsset::Stellar(usdc.clone())
-        } else {
-            OracleAsset::Other(Symbol::new(env, "USD"))
-        };
-        let oracle = env.register(
-            MockOracle,
-            (
-                &base,
-                &vec![
-                    env,
-                    OracleAsset::Stellar(blnd.clone()),
-                    OracleAsset::Stellar(xlm.clone()),
-                ],
-                &7_u32,
-                &300_u32,
-            ),
-        );
-        env.register(
-            BackstopValuation,
-            (
-                &oracle, &base, &blnd, &usdc, &xlm, &blnd_usdc, &blnd_xlm, &7_u32, &600_u64,
-            ),
-        );
+        env.register(BackstopValuation, (blnd, usdc, xlm, blnd_usdc, blnd_xlm));
+    }
+
+    #[test]
+    fn public_reads_extend_instance_ttl() {
+        let fixture = Fixture::create();
+        fixture.env.as_contract(&fixture.adapter, || {
+            fixture.env.storage().instance().extend_ttl(0, 1);
+        });
+        fixture.client().binding();
+        fixture.env.as_contract(&fixture.adapter, || {
+            assert!(fixture.env.storage().instance().get_ttl() >= INSTANCE_TTL_THRESHOLD);
+        });
     }
 }

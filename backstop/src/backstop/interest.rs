@@ -2,10 +2,7 @@ use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, I256};
 
 use crate::{
-    constants::{BACKSTOP_VALUATION_VERSION, SCALAR_7},
-    dependencies::BackstopValuationClient,
-    emissions,
-    errors::BackstopError,
+    constants::SCALAR_7, dependencies::BackstopValuationClient, emissions, errors::BackstopError,
     storage,
 };
 
@@ -252,9 +249,6 @@ pub(crate) fn interest_tier_locked(e: &Env, tier: BackstopTier, pool: &Address) 
 
 fn build_take_rate_values(e: &Env, pool: &Address) -> TakeRateValues {
     let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
-    if adapter.version() != BACKSTOP_VALUATION_VERSION {
-        panic_with_error!(e, BackstopError::InvalidBackstopValuation);
-    }
     TakeRateValues {
         blnd_usdc: quote_tier_value(e, &adapter, BackstopTier::BlndUsdc, pool),
         blnd_xlm: quote_tier_value(e, &adapter, BackstopTier::BlndXlm, pool),
@@ -297,9 +291,6 @@ fn build_interest_lot_quote(e: &Env, tier: BackstopTier, lot_value: i128) -> Int
         (SCALAR_7, u64::MAX)
     } else {
         let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
-        if adapter.version() != BACKSTOP_VALUATION_VERSION {
-            panic_with_error!(e, BackstopError::InvalidBackstopValuation);
-        }
         let quote = adapter.quote(&bid_token, &SCALAR_7);
         if quote.underlying_blnd < 0 || quote.usdc_value <= 0 {
             panic_with_error!(e, BackstopError::InvalidValuation);

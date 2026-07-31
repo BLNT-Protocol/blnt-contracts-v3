@@ -26,8 +26,8 @@ pub fn create_mock_backstop_valuation(
     )
 }
 
-pub fn set_mock_backstop_valuation_version(e: &Env, valuation: &Address, version: u32) {
-    MockBackstopValuationClient::new(e, valuation).set_version(&version);
+pub fn set_mock_backstop_valuation_failure(e: &Env, valuation: &Address, fail: bool) {
+    MockBackstopValuationClient::new(e, valuation).set_quote_failure(&fail);
 }
 
 pub fn create_backstop<'a>(

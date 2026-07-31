@@ -250,9 +250,12 @@ impl ClaimBackstop {
     pub fn run(&self, fixture: &TestFixture, user_index: usize) {
         let pool_fixture = fixture.pools.get(0).unwrap();
         let user = fixture.users.get(user_index).unwrap();
-        let r = fixture
-            .backstop
-            .try_claim_ongoing_blnd(&user, &pool_fixture.pool.address, &user);
+        let r = fixture.backstop.try_claim_ongoing_blnd(
+            &backstop::BackstopTier::BlndUsdc,
+            &user,
+            &pool_fixture.pool.address,
+            &0,
+        );
         verify_contract_result(&fixture.env, &r);
     }
 }

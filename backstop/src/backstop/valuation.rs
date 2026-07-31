@@ -1,10 +1,7 @@
 use soroban_sdk::{contracttype, panic_with_error, Address, Env, I256};
 
 use crate::{
-    constants::{
-        ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-        BACKSTOP_VALUATION_VERSION, SCALAR_7,
-    },
+    constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC, SCALAR_7},
     dependencies::{AssetValuation, BackstopValuationClient},
     errors::BackstopError,
     storage,
@@ -75,10 +72,6 @@ pub fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     // registration is sufficient and avoids a pool -> backstop -> pool cycle.
     require_registered_pool(e, pool);
     let adapter = BackstopValuationClient::new(e, &storage::get_backstop_valuation(e));
-    if adapter.version() != BACKSTOP_VALUATION_VERSION {
-        panic_with_error!(e, BackstopError::InvalidBackstopValuation);
-    }
-
     let (blnd_usdc_active, blnd_usdc_queued) =
         pool_tier_asset_partition(e, BackstopTier::BlndUsdc, pool);
     let (blnd_xlm_active, blnd_xlm_queued) =

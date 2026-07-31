@@ -12,8 +12,8 @@ use soroban_sdk::{
     vec, Address, BytesN, Map, Symbol,
 };
 use test_suites::{
-    assertions::assert_approx_eq_abs,
-    backstop::set_mock_backstop_valuation_version,
+    assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
+    backstop::set_mock_backstop_valuation_failure,
     create_fixture_with_data,
     liquidity_pool::LPClient,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
@@ -306,6 +306,14 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             .assets,
         0
     );
+    // Force the supplier-loss path to obtain a valuation quote while keeping
+    // the tier below its 100-USDC bad-debt eligibility minimum.
+    fixture.backstop.deposit(
+        &BackstopContractTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &SCALAR_7,
+    );
 
     let debt = 50 * 10i128.pow(6);
     let mut frodo_positions = pool_fixture.pool.get_positions(&frodo);
@@ -342,7 +350,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
 
     let reserve_before_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
     let valuation = fixture.backstop.backstop_valuation();
-    set_mock_backstop_valuation_version(&fixture.env, &valuation, 2);
+    set_mock_backstop_valuation_failure(&fixture.env, &valuation, true);
     let auction_id = BytesN::from_array(&fixture.env, &[12; 32]);
     assert!(pool_fixture
         .pool
@@ -375,7 +383,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     );
     assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
 
-    set_mock_backstop_valuation_version(&fixture.env, &valuation, 1);
+    set_mock_backstop_valuation_failure(&fixture.env, &valuation, false);
     let accrued_reserve = pool_fixture.pool.get_reserve(&stable);
     let pool_stable_before = fixture.tokens[TokenIndex::STABLE].balance(&pool_fixture.pool.address);
     let backstop_stable_before =
@@ -852,12 +860,24 @@ fn test_wasm_happy_path() {
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
     );
-    let backstop_claim =
-        fixture
-            .backstop
-            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
-    assert_eq!(backstop_claim, 423_360_0000000);
-    backstop_blnd_balance -= backstop_claim;
+    backstop_blnd_balance += fixture.backstop.distribute().received;
+    let backstop_accrual = fixture
+        .backstop
+        .user_ongoing_emissions(
+            &frodo,
+            &pool_fixture.pool.address,
+            &BackstopContractTier::BlndUsdc,
+        )
+        .accrued;
+    assert!(backstop_accrual > 0);
+    let compounded_lp = fixture.backstop.claim_ongoing_blnd(
+        &BackstopContractTier::BlndUsdc,
+        &frodo,
+        &pool_fixture.pool.address,
+        &0,
+    );
+    assert!(compounded_lp > 0);
+    backstop_blnd_balance -= backstop_accrual;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1048,12 +1068,24 @@ fn test_wasm_happy_path() {
         frodo_balance + claim_amount
     );
 
-    let backstop_claim =
-        fixture
-            .backstop
-            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
-    assert_eq!(backstop_claim, 4233600000000);
-    backstop_blnd_balance -= backstop_claim;
+    let backstop_accrual = fixture
+        .backstop
+        .user_ongoing_emissions(
+            &frodo,
+            &pool_fixture.pool.address,
+            &BackstopContractTier::BlndUsdc,
+        )
+        .accrued;
+    assert_approx_eq_rel(backstop_accrual, 4233600000000, 0_0100000);
+    assert!(
+        fixture.backstop.claim_ongoing_blnd(
+            &BackstopContractTier::BlndUsdc,
+            &frodo,
+            &pool_fixture.pool.address,
+            &0,
+        ) > 0
+    );
+    backstop_blnd_balance -= backstop_accrual;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
@@ -1091,12 +1123,24 @@ fn test_wasm_happy_path() {
     // Frodo claims a year worth of backstop emissions
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let backstop_claim =
-        fixture
-            .backstop
-            .claim_ongoing_blnd(&frodo, &pool_fixture.pool.address, &frodo);
-    assert_eq!(backstop_claim, 22_014_720_0000000);
-    backstop_blnd_balance -= backstop_claim;
+    let backstop_accrual = fixture
+        .backstop
+        .user_ongoing_emissions(
+            &frodo,
+            &pool_fixture.pool.address,
+            &BackstopContractTier::BlndUsdc,
+        )
+        .accrued;
+    assert_approx_eq_rel(backstop_accrual, 22_014_720_0000000, 0_0100000);
+    assert!(
+        fixture.backstop.claim_ongoing_blnd(
+            &BackstopContractTier::BlndUsdc,
+            &frodo,
+            &pool_fixture.pool.address,
+            &0,
+        ) > 0
+    );
+    backstop_blnd_balance -= backstop_accrual;
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance

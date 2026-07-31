@@ -1,10 +1,16 @@
 use sep_41_token::TokenClient;
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, Vec, I256};
+use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
+    contracttype, panic_with_error, vec, Address, Env, IntoVal, Symbol, Val, Vec, I256,
+};
 
 use crate::{
-    backstop::{require_registered_pool, BackstopTier, BlndEmissionValues},
+    backstop::{
+        credit_tier_shares, interest_tier_locked, require_registered_pool, tier_token,
+        BackstopTier, BlndEmissionValues,
+    },
     constants::SCALAR_14,
-    dependencies::EmitterClient,
+    dependencies::{CometClient, EmitterClient},
     errors::BackstopError,
     migration,
     storage::{
@@ -34,6 +40,12 @@ pub struct OngoingDistribution {
     pub pool_carry: i128,
     pub received: i128,
     pub split_carry: i128,
+}
+
+pub(crate) struct OngoingClaim {
+    pub blnd_amount: i128,
+    pub lp_amount: i128,
+    pub shares: i128,
 }
 
 pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
@@ -225,40 +237,94 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
 
 pub(crate) fn claim_user_ongoing_blnd(
     e: &Env,
+    tier: BackstopTier,
     user: &Address,
     pool: &Address,
-    recipient: &Address,
-) -> i128 {
+    min_lp_tokens_out: i128,
+) -> OngoingClaim {
     user.require_auth();
     require_registered_pool(e, pool);
+    require_emission_tier(e, tier);
+    if min_lp_tokens_out < 0 {
+        panic_with_error!(e, BackstopError::NegativeAmountError);
+    }
+    if interest_tier_locked(e, tier, pool) {
+        panic_with_error!(e, BackstopError::InterestTierLocked);
+    }
+    prepare_pool_weight_change(e, tier, pool);
 
-    let mut blnd_usdc = checkpoint_user_ongoing_emissions(e, BackstopTier::BlndUsdc, user, pool);
-    let mut blnd_xlm = checkpoint_user_ongoing_emissions(e, BackstopTier::BlndXlm, user, pool);
-    let amount = checked_add(e, blnd_usdc.accrued, blnd_xlm.accrued);
-    if amount <= 0 {
+    let mut user_emissions = checkpoint_user_ongoing_emissions(e, tier, user, pool);
+    let blnd_amount = user_emissions.accrued;
+    if blnd_amount <= 0 {
         panic_with_error!(e, BackstopError::NoOngoingEmissions);
     }
 
-    blnd_usdc.accrued = 0;
-    blnd_xlm.accrued = 0;
-    set_user_ongoing_emissions(e, BackstopTier::BlndUsdc, user, pool, &blnd_usdc);
-    set_user_ongoing_emissions(e, BackstopTier::BlndXlm, user, pool, &blnd_xlm);
+    user_emissions.accrued = 0;
+    set_user_ongoing_emissions(e, tier, user, pool, &user_emissions);
 
     let mut pool_state = get_pool_ongoing_emissions(e, pool);
-    pool_state.accrued_backstop = checked_sub(e, pool_state.accrued_backstop, amount);
+    pool_state.accrued_backstop = checked_sub(e, pool_state.accrued_backstop, blnd_amount);
     set_pool_ongoing_emissions(e, pool, &pool_state);
 
     let mut ongoing = get_ongoing_emission_state(e);
-    ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, amount);
-    ongoing.total_claimed = checked_add(e, ongoing.total_claimed, amount);
+    ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnd_amount);
+    ongoing.total_claimed = checked_add(e, ongoing.total_claimed, blnd_amount);
     set_ongoing_emission_state(e, &ongoing);
 
-    TokenClient::new(e, &storage::get_blnd_token(e)).transfer(
-        &e.current_contract_address(),
-        recipient,
-        &amount,
+    let backstop = e.current_contract_address();
+    let blnd = storage::get_blnd_token(e);
+    let lp_token = tier_token(e, tier);
+    let blnd_client = TokenClient::new(e, &blnd);
+    let lp_client = TokenClient::new(e, &lp_token);
+    let blnd_before = blnd_client.balance(&backstop);
+    let lp_before = lp_client.balance(&backstop);
+    let approval_ledger = e
+        .ledger()
+        .sequence()
+        .checked_div(100_000)
+        .and_then(|period| period.checked_add(1))
+        .and_then(|period| period.checked_mul(100_000))
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    let approval_args: Vec<Val> = vec![
+        e,
+        backstop.clone().into_val(e),
+        lp_token.clone().into_val(e),
+        blnd_amount.into_val(e),
+        approval_ledger.into_val(e),
+    ];
+    e.authorize_as_current_contract(vec![
+        e,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: blnd.clone(),
+                fn_name: Symbol::new(e, "approve"),
+                args: approval_args,
+            },
+            sub_invocations: vec![e],
+        }),
+    ]);
+    let lp_amount = CometClient::new(e, &lp_token).dep_tokn_amt_in_get_lp_tokns_out(
+        &blnd,
+        &blnd_amount,
+        &min_lp_tokens_out,
+        &backstop,
     );
-    amount
+    let blnd_after = blnd_client.balance(&backstop);
+    let lp_after = lp_client.balance(&backstop);
+    if blnd_before.checked_sub(blnd_after) != Some(blnd_amount)
+        || lp_after.checked_sub(lp_before) != Some(lp_amount)
+        || lp_amount <= 0
+    {
+        panic_with_error!(e, BackstopError::BalanceError);
+    }
+
+    let shares = credit_tier_shares(e, tier, user, pool, lp_amount);
+    finish_pool_weight_change(e, tier, pool);
+    OngoingClaim {
+        blnd_amount,
+        lp_amount,
+        shares,
+    }
 }
 
 pub(crate) fn get_pool_emission_reservation(e: &Env, pool: &Address) -> PoolEmissionReservation {
@@ -616,6 +682,7 @@ mod tests {
         backstop: Address,
         blnd: Address,
         blnd_usdc: Address,
+        blnd_xlm: Address,
         e: Env,
         factory: Address,
     }
@@ -650,6 +717,7 @@ mod tests {
                 backstop,
                 blnd,
                 blnd_usdc,
+                blnd_xlm,
                 e,
                 factory,
             }
@@ -833,8 +901,6 @@ mod tests {
         let pool = fixture.pool(10 * SCALAR_7, 10 * SCALAR_7);
         let blnd_usdc_user = Address::generate(&fixture.e);
         let blnd_xlm_user = Address::generate(&fixture.e);
-        let blnd_usdc_recipient = Address::generate(&fixture.e);
-        let blnd_xlm_recipient = Address::generate(&fixture.e);
         fixture.user_position(
             BackstopTier::BlndUsdc,
             &blnd_usdc_user,
@@ -861,25 +927,48 @@ mod tests {
             35_000_000
         );
 
-        assert_eq!(
-            fixture
-                .client()
-                .claim_ongoing_blnd(&blnd_usdc_user, &pool, &blnd_usdc_recipient),
-            35_000_000
+        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
+        let blnd_usdc_before =
+            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
+        let blnd_xlm_before =
+            TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop);
+        let blnd_usdc_out = fixture.client().claim_ongoing_blnd(
+            &BackstopTier::BlndUsdc,
+            &blnd_usdc_user,
+            &pool,
+            &0,
         );
         assert_eq!(
             fixture
                 .client()
-                .claim_ongoing_blnd(&blnd_xlm_user, &pool, &blnd_xlm_recipient),
-            35_000_000
+                .user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            0
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&blnd_usdc_recipient),
+            fixture
+                .client()
+                .user_ongoing_emissions(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm)
+                .accrued,
             35_000_000
         );
+        let blnd_xlm_out =
+            fixture
+                .client()
+                .claim_ongoing_blnd(&BackstopTier::BlndXlm, &blnd_xlm_user, &pool, &0);
+        assert!(blnd_usdc_out > 0);
+        assert!(blnd_xlm_out > 0);
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&blnd_xlm_recipient),
-            35_000_000
+            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
+            blnd_before - 70_000_000
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
+            blnd_usdc_before + blnd_usdc_out
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop),
+            blnd_xlm_before + blnd_xlm_out
         );
         assert_eq!(
             fixture.client().ongoing_emission_state().backstop_claimed,
@@ -888,6 +977,52 @@ mod tests {
         assert_eq!(
             fixture.client().pool_ongoing_emissions(&pool).accrued_pool,
             3 * SCALAR_7
+        );
+    }
+
+    #[test]
+    fn failed_compounding_preserves_the_tier_accrual() {
+        let fixture = Fixture::create();
+        let pool = fixture.pool(10 * SCALAR_7, 0);
+        let user = Address::generate(&fixture.e);
+        fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, 10 * SCALAR_7);
+        fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
+
+        fixture.e.ledger().set_timestamp(1_010);
+        fixture.client().distribute();
+        let accrued = fixture
+            .client()
+            .user_ongoing_emissions(&user, &pool, &BackstopTier::BlndUsdc)
+            .accrued;
+        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
+        let shares_before = fixture
+            .client()
+            .tier_shares(&BackstopTier::BlndUsdc, &user, &pool);
+
+        assert!(fixture
+            .client()
+            .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &user, &pool, &i128::MAX,)
+            .is_err());
+        assert_eq!(
+            fixture
+                .client()
+                .user_ongoing_emissions(&user, &pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            accrued
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
+            blnd_before
+        );
+        assert_eq!(
+            fixture
+                .client()
+                .tier_shares(&BackstopTier::BlndUsdc, &user, &pool),
+            shares_before
+        );
+        assert_eq!(
+            fixture.client().ongoing_emission_state().backstop_claimed,
+            0
         );
     }
 

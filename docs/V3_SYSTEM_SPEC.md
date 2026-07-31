@@ -134,14 +134,15 @@ Equality qualifies. Falling below maintenance deactivates a pool; reactivation
 requires the entry threshold.
 
 The candidate immutably binds the backstop-valuation contract address and
-rejects a version or asset-binding mismatch at construction.
-[BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) governs its quotes. Active and
-queued pool-attributed LP amounts are quoted separately, while accounted plain
-USDC is valued one-for-one. Zero LP needs no quote; any incompatible, failed,
-negative, or expired quote fails atomically. Section 3.3 determines
-eligibility. This valuation governs activation, status, reward-zone
+rejects an asset-binding mismatch at construction.
+[BACKSTOP_VALUATION.md](BACKSTOP_VALUATION.md) governs its Comet-implied
+quotes. Active and queued pool-attributed LP amounts are quoted separately,
+while accounted plain USDC is valued one-for-one. Zero LP needs no quote; any
+incompatible, failed, or negative quote fails atomically. Section 3.3
+determines eligibility. This valuation governs activation, status, reward-zone
 membership, take-rate allocation, auction sizing, and supplier-loss
-eligibility; spot Comet composition is used only for BLND-emission weight.
+eligibility. Emission weight uses the same-invocation underlying-BLND
+composition defined separately in Section 6.1.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -229,7 +230,7 @@ Only the registered pool may mutate its commitment; reads do not renew it.
 Bad-debt eligibility requires at least 100 USDC of available tier capital;
 interest-auction creation requires at least 100 USDC in the selected tier's
 pending lot. Equality qualifies. A successfully valued smaller amount is
-ineligible, while unavailable, invalid, or stale valuation fails closed.
+ineligible, while unavailable or invalid valuation fails closed.
 
 A partial fill removes selected base amounts, applies the inherited time
 modifier only to actual transfers, and synchronizes both records using a
@@ -462,9 +463,10 @@ A\frac{R_{\mathrm{BLND},t}}{S_t}
 
 Here \(A\) is accounted active LP, \(R\) the Comet's BLND balance, and \(S\)
 LP supply. Nonpositive supply, negative inputs, or \(A>S\) fail closed. Direct
-transfers are excluded and plain USDC has zero weight. This intentionally uses
-spot composition rather than backstop valuation or a TWAP; checkpoint
-manipulation exposure is accepted and MUST be disclosed.
+transfers are excluded and plain USDC has zero weight. This calculation reads
+Comet composition directly rather than substituting the valuation contract's
+USDC-value output; checkpoint manipulation exposure is accepted and MUST be
+disclosed.
 
 Pool and user allocation uses bounded accumulators without iterating over all
 pools or depositors. Every remainder carries at its original scope.
@@ -482,11 +484,20 @@ release, balance or composition changes, membership, and pool status never
 rewrite prior allocation. A position MUST NOT earn through two tiers or both
 eligible and ineligible accounting.
 
-The owner authorizes a claim and selects its recipient. One claim checkpoints
-both eligible tiers for one pool, reduces only its accrued 70% tranche, updates
-backstop-claimed and total-claimed counters, and transfers atomically. It
-cannot include the 30% pool tranche, redirect or reweight entitlement, or
-compound every claim into one fixed tier.
+The owner authorizes a claim for one eligible tier and supplies a minimum LP
+output. The claim checkpoints that tier for one pool, reduces only its accrued
+70% tranche, deposits the BLND single-sided into that tier's Comet, and credits
+the resulting LP shares to the same owner, pool, and tier. Exact BLND and LP
+balance deltas govern settlement. A failed or zero-output conversion leaves the
+accrual unchanged. A successful claim updates backstop-claimed and total-claimed
+counters by the BLND consumed and returns the LP amount received.
+
+BLND:USDC accrual compounds into BLND:USDC and BLND:XLM accrual compounds into
+BLND:XLM. Claims are separate so one impaired Comet cannot block the other.
+Compounded shares are active backstop capital, receive no retroactive emission
+credit, and do not count as migration prefunding or migration backfill capital.
+Plain USDC is ineligible. The operation cannot include the 30% pool tranche,
+redirect entitlement, or move a claim between tiers.
 
 ### 6.2 Pool supply and borrow emissions — **Custody extension**
 

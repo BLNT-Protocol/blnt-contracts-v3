@@ -9,7 +9,7 @@ use soroban_sdk::{
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, event_from_end},
-    backstop::{create_mock_backstop_valuation, set_mock_backstop_valuation_version},
+    backstop::create_mock_backstop_valuation,
     create_fixture_with_data,
     test_fixture::{TokenIndex, SCALAR_7},
 };
@@ -462,12 +462,17 @@ fn test_backstop() {
         bstop_bstop_token_balance
     );
 
-    // Sam claims direct BLND emissions earned on the backstop deposit.
-    let bstop_blend_balance = &fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    // Sam compounds BLND emissions into the originating BLND:USDC tier.
+    let bstop_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    let bstop_lp_balance = bstop_token.balance(&fixture.backstop.address);
     let sam_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
-    let blnd_claimed = fixture
+    let sam_shares = fixture
         .backstop
-        .claim_ongoing_blnd(&sam, &pool.address, &sam);
+        .tier_shares(&BackstopTier::BlndUsdc, &sam, &pool.address);
+    let lp_compounded =
+        fixture
+            .backstop
+            .claim_ongoing_blnd(&BackstopTier::BlndUsdc, &sam, &pool.address, &0);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -478,15 +483,17 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "claim_ongoing_blnd"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
-                        sam.to_val(),
+                        0_i128.into_val(&fixture.env),
                     ]
                 )),
                 sub_invocations: std::vec![]
             }
         )
     );
+    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
 
     // 6d23hr at 20% of 0.7 BLND/sec
     // 7d + 16d1s at 11% of 0.7 BLND/sec
@@ -498,7 +505,12 @@ fn test_backstop() {
     let emitted_blnd_2 = ((23 * 24 * 60 * 60 + 1) * SCALAR_7)
         .fixed_mul_floor(emission_share_2, SCALAR_7)
         .unwrap();
-    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
+    let blnd_compounded =
+        bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    let shares_minted = fixture
+        .backstop
+        .tier_shares(&BackstopTier::BlndUsdc, &sam, &pool.address)
+        - sam_shares;
     assert_eq!(
         event,
         vec![
@@ -507,24 +519,26 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "claim_ongoing"),
+                    BackstopTier::BlndUsdc,
                     sam.clone(),
                     pool.address.clone()
                 )
                     .into_val(&fixture.env),
-                (sam.clone(), blnd_claimed).into_val(&fixture.env),
+                (blnd_compounded, lp_compounded, shares_minted).into_val(&fixture.env),
             )
         ]
     );
 
-    assert_approx_eq_abs(blnd_claimed, emitted_blnd_1 + emitted_blnd_2, SCALAR_7);
+    assert_approx_eq_abs(blnd_compounded, emitted_blnd_1 + emitted_blnd_2, SCALAR_7);
+    assert_eq!(
+        bstop_token.balance(&fixture.backstop.address),
+        bstop_lp_balance + lp_compounded
+    );
+    assert!(lp_compounded > 0);
+    assert!(shares_minted > 0);
     assert_eq!(
         fixture.tokens[TokenIndex::BLND].balance(&sam),
-        sam_blend_balance + blnd_claimed
-    );
-    assert_approx_eq_abs(
-        bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        blnd_claimed,
-        SCALAR_7,
+        sam_blend_balance
     );
 }
 
@@ -685,47 +699,6 @@ fn test_backstop_constructor_rejects_wrong_valuation_binding() {
             usdc_token,
             pool_factory,
             wrong_valuation,
-        ),
-    );
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1014)")]
-fn test_backstop_constructor_rejects_wrong_valuation_version() {
-    let e = Env::default();
-    let contract_id = Address::generate(&e);
-    let blnd_usdc_token = Address::generate(&e);
-    let blnd_xlm_token = Address::generate(&e);
-    let blnd_token = Address::generate(&e);
-    let usdc_token = Address::generate(&e);
-    let pool_factory = e.register(
-        MockPoolFactory {},
-        (PoolInitMeta {
-            backstop: contract_id.clone(),
-            pool_hash: BytesN::from_array(&e, &[0; 32]),
-            blnd_id: blnd_token.clone(),
-        },),
-    );
-    let valuation = create_mock_backstop_valuation(
-        &e,
-        &blnd_token,
-        &blnd_usdc_token,
-        &blnd_xlm_token,
-        &usdc_token,
-    );
-    set_mock_backstop_valuation_version(&e, &valuation, 2);
-
-    e.register_at(
-        &contract_id,
-        BackstopContract {},
-        (
-            blnd_usdc_token,
-            blnd_xlm_token,
-            Address::generate(&e),
-            blnd_token,
-            usdc_token,
-            pool_factory,
-            valuation,
         ),
     );
 }
