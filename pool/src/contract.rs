@@ -7,7 +7,7 @@ use crate::{
     events::PoolEvents,
     pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
     storage::{self, ReserveConfig},
-    PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
+    BackstopTier, PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, String, Vec,
@@ -315,17 +315,22 @@ pub trait Pool {
         lot_assets: Vec<Address>,
     ) -> InterestAuctionData;
 
-    /// Return this pool's single active tier-specific interest auction.
-    fn get_interest_auction(e: Env) -> InterestAuctionData;
+    /// Return this pool's active interest auction for one tier.
+    fn get_interest_auction(e: Env, tier: BackstopTier) -> InterestAuctionData;
 
-    /// Fill part or all of the active tier-specific interest auction.
-    fn fill_interest_auction(e: Env, filler: Address, percent: u32) -> InterestAuctionFill;
+    /// Fill part or all of one active tier-specific interest auction.
+    fn fill_interest_auction(
+        e: Env,
+        tier: BackstopTier,
+        filler: Address,
+        percent: u32,
+    ) -> InterestAuctionFill;
 
     /// Return one reserve's pending tier-specific interest-credit state.
     fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState;
 
-    /// Permissionlessly release an interest auction after 500 ledgers.
-    fn delete_stale_interest_auction(e: Env);
+    /// Permissionlessly release one tier's interest auction after 500 ledgers.
+    fn delete_stale_interest_auction(e: Env, tier: BackstopTier);
 
     /// Fetch an auction from the ledger. Returns the base auction. On fill, this will be scaled based on the
     /// number of blocks that have passed since the auction was created.
@@ -679,13 +684,18 @@ impl Pool for PoolContract {
         auction
     }
 
-    fn get_interest_auction(e: Env) -> InterestAuctionData {
-        auctions::get_interest_auction(&e)
+    fn get_interest_auction(e: Env, tier: BackstopTier) -> InterestAuctionData {
+        auctions::get_interest_auction(&e, tier)
     }
 
-    fn fill_interest_auction(e: Env, filler: Address, percent: u32) -> InterestAuctionFill {
+    fn fill_interest_auction(
+        e: Env,
+        tier: BackstopTier,
+        filler: Address,
+        percent: u32,
+    ) -> InterestAuctionFill {
         storage::extend_instance(&e);
-        let fill = auctions::fill_interest_auction(&e, &filler, percent);
+        let fill = auctions::fill_interest_auction(&e, tier, &filler, percent);
         PoolEvents::fill_interest_auction(&e, filler, percent, fill.clone());
         fill
     }
@@ -694,9 +704,9 @@ impl Pool for PoolContract {
         auctions::interest_reserve_state(&e, &asset)
     }
 
-    fn delete_stale_interest_auction(e: Env) {
+    fn delete_stale_interest_auction(e: Env, tier: BackstopTier) {
         storage::extend_instance(&e);
-        let auction_id = auctions::delete_stale_interest_auction(&e);
+        let auction_id = auctions::delete_stale_interest_auction(&e, tier);
         PoolEvents::delete_interest_auction(&e, auction_id);
     }
 

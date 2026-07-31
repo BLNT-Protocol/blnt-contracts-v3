@@ -111,7 +111,7 @@ pub struct InterestAuctionFill {
 #[derive(Clone)]
 #[contracttype]
 enum InterestAuctionDataKey {
-    InterestAuction,
+    InterestAuction(super::BackstopTier),
 }
 
 #[derive(Clone)]
@@ -126,7 +126,7 @@ pub fn create_interest_auction(
     auction_id: &BytesN<32>,
     lot_assets: &Vec<Address>,
 ) -> InterestAuctionData {
-    if has_interest_auction(e) {
+    if has_interest_auction_id(e, auction_id) {
         panic_with_error!(e, PoolError::AuctionInProgress);
     }
     let mut pool = Pool::load(e);
@@ -194,8 +194,11 @@ pub fn create_interest_auction(
     let mut selected = None;
     for offset in 0..3_u32 {
         let index = (cursor + offset) % 3;
-        if tier_values[index as usize] >= INTEREST_TIER_MINIMUM_VALUE_USDC {
-            selected = Some(tier_from_index(index));
+        let tier = tier_from_index(index);
+        if !has_interest_auction(e, tier)
+            && tier_values[index as usize] >= INTEREST_TIER_MINIMUM_VALUE_USDC
+        {
+            selected = Some(tier);
             break;
         }
     }
@@ -258,14 +261,19 @@ pub fn create_interest_auction(
     auction
 }
 
-pub fn get_interest_auction(e: &Env) -> InterestAuctionData {
+pub fn get_interest_auction(e: &Env, tier: super::BackstopTier) -> InterestAuctionData {
     e.storage()
         .temporary()
-        .get(&InterestAuctionDataKey::InterestAuction)
+        .get(&InterestAuctionDataKey::InterestAuction(tier))
         .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
 }
 
-pub fn fill_interest_auction(e: &Env, filler: &Address, percent: u32) -> InterestAuctionFill {
+pub fn fill_interest_auction(
+    e: &Env,
+    tier: super::BackstopTier,
+    filler: &Address,
+    percent: u32,
+) -> InterestAuctionFill {
     let pool_address = e.current_contract_address();
     let backstop = storage::get_backstop(e);
     if filler == &pool_address || filler == &backstop || percent == 0 || percent > 100 {
@@ -273,7 +281,7 @@ pub fn fill_interest_auction(e: &Env, filler: &Address, percent: u32) -> Interes
     }
     filler.require_auth();
 
-    let auction = get_interest_auction(e);
+    let auction = get_interest_auction(e, tier);
     let fill = scale_interest_auction(e, &auction, percent);
     let mut pool = Pool::load(e);
     for (asset, amount) in fill.lot.iter() {
@@ -294,6 +302,7 @@ pub fn fill_interest_auction(e: &Env, filler: &Address, percent: u32) -> Interes
 
     let remaining = BackstopClient::new(e, &backstop).settle_interest_lot(
         &pool_address,
+        &to_backstop_tier(tier),
         &auction.auction_id,
         &fill.base_bid_amount,
         &fill.bid_amount,
@@ -307,14 +316,14 @@ pub fn fill_interest_auction(e: &Env, filler: &Address, percent: u32) -> Interes
     } else {
         e.storage()
             .temporary()
-            .remove(&InterestAuctionDataKey::InterestAuction);
+            .remove(&InterestAuctionDataKey::InterestAuction(tier));
     }
     pool.store_cached_reserves(e);
     fill
 }
 
-pub fn delete_stale_interest_auction(e: &Env) -> BytesN<32> {
-    let auction = get_interest_auction(e);
+pub fn delete_stale_interest_auction(e: &Env, tier: super::BackstopTier) -> BytesN<32> {
+    let auction = get_interest_auction(e, tier);
     let stale_at = auction
         .auction
         .block
@@ -323,11 +332,14 @@ pub fn delete_stale_interest_auction(e: &Env) -> BytesN<32> {
     if e.ledger().sequence() < stale_at {
         panic_with_error!(e, PoolError::BadRequest);
     }
-    BackstopClient::new(e, &storage::get_backstop(e))
-        .release_interest_lot(&e.current_contract_address(), &auction.auction_id);
+    BackstopClient::new(e, &storage::get_backstop(e)).release_interest_lot(
+        &e.current_contract_address(),
+        &to_backstop_tier(tier),
+        &auction.auction_id,
+    );
     e.storage()
         .temporary()
-        .remove(&InterestAuctionDataKey::InterestAuction);
+        .remove(&InterestAuctionDataKey::InterestAuction(tier));
     auction.auction_id
 }
 
@@ -335,21 +347,35 @@ pub fn interest_reserve_state(e: &Env, asset: &Address) -> InterestReserveState 
     get_interest_reserve_state(e, asset)
 }
 
-fn has_interest_auction(e: &Env) -> bool {
+fn has_interest_auction(e: &Env, tier: super::BackstopTier) -> bool {
     e.storage()
         .temporary()
-        .has(&InterestAuctionDataKey::InterestAuction)
+        .has(&InterestAuctionDataKey::InterestAuction(tier))
+}
+
+fn has_interest_auction_id(e: &Env, auction_id: &BytesN<32>) -> bool {
+    for tier in [
+        super::BackstopTier::BlndUsdc,
+        super::BackstopTier::BlndXlm,
+        super::BackstopTier::Usdc,
+    ] {
+        if e.storage()
+            .temporary()
+            .get::<_, InterestAuctionData>(&InterestAuctionDataKey::InterestAuction(tier))
+            .is_some_and(|auction| auction.auction_id == *auction_id)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn set_interest_auction(e: &Env, auction: &InterestAuctionData) {
+    let key = InterestAuctionDataKey::InterestAuction(auction.tier);
+    e.storage().temporary().set(&key, auction);
     e.storage()
         .temporary()
-        .set(&InterestAuctionDataKey::InterestAuction, auction);
-    e.storage().temporary().extend_ttl(
-        &InterestAuctionDataKey::InterestAuction,
-        AUCTION_TTL_THRESHOLD,
-        AUCTION_TTL_BUMP,
-    );
+        .extend_ttl(&key, AUCTION_TTL_THRESHOLD, AUCTION_TTL_BUMP);
 }
 
 fn get_interest_reserve_state(e: &Env, asset: &Address) -> InterestReserveState {
@@ -651,12 +677,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interest_auction_key_is_isolated_from_bad_debt() {
+    fn interest_auction_keys_are_isolated_by_tier_and_from_bad_debt() {
         let e = Env::default();
         let contract = create_pool(&e);
         let asset = Address::generate(&e);
         let bid_token = Address::generate(&e);
-        let auction = InterestAuctionData {
+        let blnd_usdc_auction = InterestAuctionData {
             auction_id: BytesN::from_array(&e, &[2; 32]),
             auction: AuctionData {
                 bid: soroban_sdk::map![&e, (bid_token, 12)],
@@ -669,9 +695,28 @@ mod tests {
             tier: super::super::BackstopTier::BlndUsdc,
             valid_until: u64::MAX,
         };
+        let blnd_xlm_auction = InterestAuctionData {
+            auction_id: BytesN::from_array(&e, &[3; 32]),
+            auction: blnd_usdc_auction.auction.clone(),
+            bid_valid_until: u64::MAX,
+            lot_value: 10,
+            target_value: 12,
+            tier: super::super::BackstopTier::BlndXlm,
+            valid_until: u64::MAX,
+        };
 
         e.as_contract(&contract, || {
-            set_interest_auction(&e, &auction);
+            set_interest_auction(&e, &blnd_usdc_auction);
+            set_interest_auction(&e, &blnd_xlm_auction);
+            assert_eq!(
+                get_interest_auction(&e, super::super::BackstopTier::BlndUsdc),
+                blnd_usdc_auction
+            );
+            assert_eq!(
+                get_interest_auction(&e, super::super::BackstopTier::BlndXlm),
+                blnd_xlm_auction
+            );
+            assert!(!has_interest_auction(&e, super::super::BackstopTier::Usdc));
             assert!(
                 !super::super::bad_debt_auction::has_prepared_bad_debt_auction(&e),
                 "interest and bad-debt auction keys must remain independent"

@@ -278,13 +278,14 @@ pub trait Backstop {
         lot_value: i128,
     ) -> InterestLotQuote;
 
-    /// Release a pool-authorized interest commitment.
-    fn release_interest_lot(e: Env, pool: Address, auction_id: BytesN<32>);
+    /// Release a pool-authorized interest commitment for one tier.
+    fn release_interest_lot(e: Env, pool: Address, tier: BackstopTier, auction_id: BytesN<32>);
 
     /// Donate one time-scaled bid and resize or complete its commitment.
     fn settle_interest_lot(
         e: Env,
         pool: Address,
+        tier: BackstopTier,
         auction_id: BytesN<32>,
         base_bid_amount: i128,
         bid_amount: i128,
@@ -295,6 +296,7 @@ pub trait Backstop {
     fn interest_commitment(
         e: Env,
         pool: Address,
+        tier: BackstopTier,
         auction_id: BytesN<32>,
     ) -> Option<InterestLotQuote>;
 
@@ -908,16 +910,17 @@ impl Backstop for BackstopContract {
         quote
     }
 
-    fn release_interest_lot(e: Env, pool: Address, auction_id: BytesN<32>) {
+    fn release_interest_lot(e: Env, pool: Address, tier: BackstopTier, auction_id: BytesN<32>) {
         storage::extend_instance(&e);
         pool.require_auth();
-        backstop::release_interest_lot(&e, &pool, &auction_id);
+        backstop::release_interest_lot(&e, &pool, tier, &auction_id);
         BackstopEvents::interest_lot_released(&e, pool, auction_id);
     }
 
     fn settle_interest_lot(
         e: Env,
         pool: Address,
+        tier: BackstopTier,
         auction_id: BytesN<32>,
         base_bid_amount: i128,
         bid_amount: i128,
@@ -925,12 +928,10 @@ impl Backstop for BackstopContract {
     ) -> Option<InterestLotQuote> {
         storage::extend_instance(&e);
         pool.require_auth();
-        let tier = backstop::interest_commitment(&e, &pool, &auction_id)
-            .unwrap_or_else(|| panic_with_error!(&e, BackstopError::InterestCommitmentNotFound))
-            .tier;
         let remaining = backstop::settle_interest_lot(
             &e,
             &pool,
+            tier,
             &auction_id,
             base_bid_amount,
             bid_amount,
@@ -952,10 +953,11 @@ impl Backstop for BackstopContract {
     fn interest_commitment(
         e: Env,
         pool: Address,
+        tier: BackstopTier,
         auction_id: BytesN<32>,
     ) -> Option<InterestLotQuote> {
         storage::extend_instance(&e);
-        backstop::interest_commitment(&e, &pool, &auction_id)
+        backstop::interest_commitment(&e, &pool, tier, &auction_id)
     }
 
     /********** Emissions **********/

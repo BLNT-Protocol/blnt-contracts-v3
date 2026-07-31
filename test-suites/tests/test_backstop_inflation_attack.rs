@@ -142,7 +142,7 @@ fn test_backstop_interest_auction_inflation_attack() {
     pool_client.gulp(&fixture.tokens[TokenIndex::XLM].address);
 
     // -> start and fill interest auction
-    pool_client.new_interest_auction(
+    let interest_auction = pool_client.new_interest_auction(
         &soroban_sdk::BytesN::from_array(&fixture.env, &[1; 32]),
         &vec![
             &fixture.env,
@@ -150,7 +150,7 @@ fn test_backstop_interest_auction_inflation_attack() {
         ],
     );
     fixture.jump_with_sequence(201 * 5);
-    pool_client.fill_interest_auction(&sauron, &100);
+    pool_client.fill_interest_auction(&interest_auction.tier, &sauron, &100);
 
     // -> check new backstop share value
     let backstop_data = fixture.backstop.pool_data(&pool_address);

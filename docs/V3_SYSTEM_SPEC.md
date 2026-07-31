@@ -94,8 +94,9 @@ User, pool, and global shares decrease only when an expired withdrawal
 transfers custody out.
 
 An interest-auction commitment blocks deposits and actual withdrawals only in
-its selected tier. Queueing and dequeueing remain available. Permissionless
-deletion releases the lock at the inherited 500-ledger stale boundary.
+its selected tier. Each pool may hold at most one such commitment per tier and
+three total. Queueing and dequeueing remain available. Permissionless deletion
+releases the selected tier's lock at the inherited 500-ledger stale boundary.
 
 Every withdrawal calls
 `backstop_withdrawal_allowed(backstop)` on the attributed pool. The callback
@@ -217,10 +218,10 @@ inherited.
 
 ### 5.1 Shared tier-auction lifecycle
 
-Each pool may have one active auction of each type. Creation atomically stores
-matching pool and backstop records for one identifier, selected tier, and base
-amounts with a 46-day temporary lifetime. Only the registered pool may mutate
-its commitment; reads do not renew it.
+Each pool may have one active bad-debt auction and one active interest auction
+per tier. Creation atomically stores matching pool and backstop records for one
+identifier, selected tier, and base amounts with a 46-day temporary lifetime.
+Only the registered pool may mutate its commitment; reads do not renew it.
 
 Bad-debt eligibility requires at least 100 USDC of available tier capital;
 interest-auction creation requires at least 100 USDC in the selected tier's
@@ -311,14 +312,17 @@ configured reserves. Creation atomically:
 2. Checkpoint each asset's newly available backstop credit into its three
    pending tier amounts through one canonical backstop weighting quote.
 3. Value each tier's pending amounts with the pool's immutable reserve oracle.
-4. Starting at the pool's stored cyclic tier cursor, select the first qualifying
-   tier whose pending lot meets the shared minimum.
+4. Starting at the pool's stored cyclic tier cursor, select the first
+   qualifying tier without an active auction whose pending lot meets the shared
+   minimum.
 5. Reserve the selected pending amounts in a next-ledger auction and advance
    the cursor to the next tier.
 
 Omitted reserves remain pending or uncheckpointed. Selection is cyclic among
-qualifying tiers, and the reserved lot remains in persistent pending
-accounting so expiry cannot lose or reweight it.
+qualifying unlocked tiers. Each pool may have one active auction per tier and
+three total; active identifiers must be unique within the pool. Get, fill, and
+stale-delete operations identify the tier. The reserved lot remains in
+persistent pending accounting so expiry cannot lose or reweight it.
 
 The selected seven-decimal tier token is the bid. Its verified base value MUST
 equal 120% of the reserve lot, rounded up in token units.

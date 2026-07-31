@@ -63,7 +63,7 @@ struct InterestCommitment {
 #[derive(Clone)]
 #[contracttype]
 enum InterestDataKey {
-    InterestLot(Address),
+    InterestLot(Address, BackstopTier),
 }
 
 /// Allocate a bounded reserve-credit batch using canonical pool-tier value.
@@ -132,7 +132,9 @@ pub(crate) fn commit_interest_lot(
     lot_value: i128,
 ) -> InterestLotQuote {
     require_registered_pool(e, pool);
-    if get_interest_commitment(e, pool).is_some() {
+    if get_interest_commitment(e, pool, tier).is_some()
+        || has_interest_commitment_id(e, pool, auction_id)
+    {
         panic_with_error!(e, BackstopError::InterestCommitmentExists);
     }
     if storage::get_pool_balance_for_tier(e, tier, pool).shares == 0 {
@@ -143,6 +145,7 @@ pub(crate) fn commit_interest_lot(
     set_interest_commitment(
         e,
         pool,
+        tier,
         &InterestCommitment {
             auction_id: auction_id.clone(),
             quote: quote.clone(),
@@ -152,20 +155,26 @@ pub(crate) fn commit_interest_lot(
 }
 
 /// Release one matching interest-auction commitment.
-pub(crate) fn release_interest_lot(e: &Env, pool: &Address, auction_id: &BytesN<32>) {
+pub(crate) fn release_interest_lot(
+    e: &Env,
+    pool: &Address,
+    tier: BackstopTier,
+    auction_id: &BytesN<32>,
+) {
     require_registered_pool(e, pool);
-    let commitment = get_interest_commitment(e, pool)
+    let commitment = get_interest_commitment(e, pool, tier)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InterestCommitmentNotFound));
-    if commitment.auction_id != *auction_id {
+    if commitment.auction_id != *auction_id || commitment.quote.tier != tier {
         panic_with_error!(e, BackstopError::InterestCommitmentNotFound);
     }
-    remove_interest_commitment(e, pool);
+    remove_interest_commitment(e, pool, tier);
 }
 
 /// Donate the time-scaled bid and resize or remove its commitment.
 pub(crate) fn settle_interest_lot(
     e: &Env,
     pool: &Address,
+    tier: BackstopTier,
     auction_id: &BytesN<32>,
     base_bid_amount: i128,
     bid_amount: i128,
@@ -181,13 +190,15 @@ pub(crate) fn settle_interest_lot(
         panic_with_error!(e, BackstopError::InvalidInterestLot);
     }
 
-    let mut commitment = get_interest_commitment(e, pool)
+    let mut commitment = get_interest_commitment(e, pool, tier)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InterestCommitmentNotFound));
-    if commitment.auction_id != *auction_id || base_bid_amount > commitment.quote.bid_amount {
+    if commitment.auction_id != *auction_id
+        || commitment.quote.tier != tier
+        || base_bid_amount > commitment.quote.bid_amount
+    {
         panic_with_error!(e, BackstopError::InterestCommitmentNotFound);
     }
 
-    let tier = commitment.quote.tier;
     if bid_amount > 0 {
         let token = TokenClient::new(e, &tier_token(e, tier));
         let backstop = e.current_contract_address();
@@ -205,7 +216,7 @@ pub(crate) fn settle_interest_lot(
     let previous_bid_amount = commitment.quote.bid_amount;
     let remaining_bid_amount = checked_sub(e, previous_bid_amount, base_bid_amount);
     if remaining_bid_amount == 0 {
-        remove_interest_commitment(e, pool);
+        remove_interest_commitment(e, pool, tier);
         None
     } else {
         commitment.quote.lot_value = proportional_floor(
@@ -215,7 +226,7 @@ pub(crate) fn settle_interest_lot(
             previous_bid_amount,
         );
         commitment.quote.bid_amount = remaining_bid_amount;
-        set_interest_commitment(e, pool, &commitment);
+        set_interest_commitment(e, pool, tier, &commitment);
         Some(commitment.quote)
     }
 }
@@ -223,9 +234,10 @@ pub(crate) fn settle_interest_lot(
 pub(crate) fn interest_commitment(
     e: &Env,
     pool: &Address,
+    tier: BackstopTier,
     auction_id: &BytesN<32>,
 ) -> Option<InterestLotQuote> {
-    get_interest_commitment(e, pool).and_then(|commitment| {
+    get_interest_commitment(e, pool, tier).and_then(|commitment| {
         if commitment.auction_id == *auction_id {
             Some(commitment.quote)
         } else {
@@ -235,7 +247,7 @@ pub(crate) fn interest_commitment(
 }
 
 pub(crate) fn interest_tier_locked(e: &Env, tier: BackstopTier, pool: &Address) -> bool {
-    get_interest_commitment(e, pool).is_some_and(|commitment| commitment.quote.tier == tier)
+    get_interest_commitment(e, pool, tier).is_some()
 }
 
 fn build_take_rate_values(e: &Env, pool: &Address) -> TakeRateValues {
@@ -328,24 +340,51 @@ fn apply_pool_tier_gain(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     emissions::finish_pool_weight_change(e, tier, pool);
 }
 
-fn get_interest_commitment(e: &Env, pool: &Address) -> Option<InterestCommitment> {
+fn get_interest_commitment(
+    e: &Env,
+    pool: &Address,
+    tier: BackstopTier,
+) -> Option<InterestCommitment> {
     e.storage()
         .temporary()
-        .get(&InterestDataKey::InterestLot(pool.clone()))
+        .get(&InterestDataKey::InterestLot(pool.clone(), tier))
 }
 
-fn set_interest_commitment(e: &Env, pool: &Address, commitment: &InterestCommitment) {
-    let key = InterestDataKey::InterestLot(pool.clone());
+fn set_interest_commitment(
+    e: &Env,
+    pool: &Address,
+    tier: BackstopTier,
+    commitment: &InterestCommitment,
+) {
+    if commitment.quote.tier != tier {
+        panic_with_error!(e, BackstopError::InvalidInterestLot);
+    }
+    let key = InterestDataKey::InterestLot(pool.clone(), tier);
     e.storage().temporary().set(&key, commitment);
     e.storage()
         .temporary()
         .extend_ttl(&key, AUCTION_TTL_THRESHOLD, AUCTION_TTL_BUMP);
 }
 
-fn remove_interest_commitment(e: &Env, pool: &Address) {
+fn remove_interest_commitment(e: &Env, pool: &Address, tier: BackstopTier) {
     e.storage()
         .temporary()
-        .remove(&InterestDataKey::InterestLot(pool.clone()));
+        .remove(&InterestDataKey::InterestLot(pool.clone(), tier));
+}
+
+fn has_interest_commitment_id(e: &Env, pool: &Address, auction_id: &BytesN<32>) -> bool {
+    for tier in [
+        BackstopTier::BlndUsdc,
+        BackstopTier::BlndXlm,
+        BackstopTier::Usdc,
+    ] {
+        if get_interest_commitment(e, pool, tier)
+            .is_some_and(|commitment| commitment.auction_id == *auction_id)
+        {
+            return true;
+        }
+    }
+    false
 }
 
 fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
@@ -450,15 +489,15 @@ mod tests {
     }
 
     #[test]
-    fn interest_commitment_key_is_isolated_from_bad_debt() {
+    fn interest_commitment_keys_are_isolated_by_tier_and_from_bad_debt() {
         let e = Env::default();
         let contract = create_backstop(&e);
         let pool = Address::generate(&e);
         let bid_token = Address::generate(&e);
-        let commitment = InterestCommitment {
+        let blnd_usdc_commitment = InterestCommitment {
             auction_id: BytesN::from_array(&e, &[1; 32]),
             quote: InterestLotQuote {
-                bid_token,
+                bid_token: bid_token.clone(),
                 bid_amount: 12,
                 lot_value: 10,
                 tier: BackstopTier::BlndUsdc,
@@ -466,9 +505,32 @@ mod tests {
                 valid_until: u64::MAX,
             },
         };
+        let blnd_xlm_commitment = InterestCommitment {
+            auction_id: BytesN::from_array(&e, &[2; 32]),
+            quote: InterestLotQuote {
+                bid_token,
+                bid_amount: 24,
+                lot_value: 20,
+                tier: BackstopTier::BlndXlm,
+                target_value: 24,
+                valid_until: u64::MAX,
+            },
+        };
 
         e.as_contract(&contract, || {
-            set_interest_commitment(&e, &pool, &commitment);
+            set_interest_commitment(&e, &pool, BackstopTier::BlndUsdc, &blnd_usdc_commitment);
+            set_interest_commitment(&e, &pool, BackstopTier::BlndXlm, &blnd_xlm_commitment);
+            assert_eq!(
+                get_interest_commitment(&e, &pool, BackstopTier::BlndUsdc),
+                Some(blnd_usdc_commitment)
+            );
+            assert_eq!(
+                get_interest_commitment(&e, &pool, BackstopTier::BlndXlm),
+                Some(blnd_xlm_commitment)
+            );
+            assert!(interest_tier_locked(&e, BackstopTier::BlndUsdc, &pool));
+            assert!(interest_tier_locked(&e, BackstopTier::BlndXlm, &pool));
+            assert!(!interest_tier_locked(&e, BackstopTier::Usdc, &pool));
             assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 0);
         });
     }

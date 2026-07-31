@@ -995,7 +995,7 @@ fn test_stale_liquidation_deletion() {
 
     // Start an interest auction
     let auction_id = BytesN::from_array(&fixture.env, &[7; 32]);
-    pool_fixture.pool.new_interest_auction(
+    let created_auction = pool_fixture.pool.new_interest_auction(
         &auction_id,
         &vec![
             &fixture.env,
@@ -1009,13 +1009,17 @@ fn test_stale_liquidation_deletion() {
     fixture.jump_with_sequence(500 * 5);
 
     // validate the auction can't be deleted
-    let early_delete = pool_fixture.pool.try_delete_stale_interest_auction();
+    let early_delete = pool_fixture
+        .pool
+        .try_delete_stale_interest_auction(&created_auction.tier);
     assert_eq!(
         early_delete.err(),
         Some(Ok(Error::from_contract_error(1200)))
     );
 
-    let auction = pool_fixture.pool.get_interest_auction();
+    let auction = pool_fixture
+        .pool
+        .get_interest_auction(&created_auction.tier);
     assert_eq!(auction.auction.bid.len(), 1);
     assert_eq!(auction.auction.lot.len(), 3);
 
@@ -1023,7 +1027,9 @@ fn test_stale_liquidation_deletion() {
     fixture.jump_with_sequence(5);
 
     // delete the auction
-    pool_fixture.pool.delete_stale_interest_auction();
+    pool_fixture
+        .pool
+        .delete_stale_interest_auction(&created_auction.tier);
     assert!(fixture.env.auths().is_empty());
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
@@ -1038,7 +1044,9 @@ fn test_stale_liquidation_deletion() {
         ]
     );
 
-    let auction = pool_fixture.pool.try_get_interest_auction();
+    let auction = pool_fixture
+        .pool
+        .try_get_interest_auction(&created_auction.tier);
     assert!(auction.is_err());
 }
 
