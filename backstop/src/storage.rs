@@ -123,6 +123,7 @@ const TOTAL_BACKFILL_CLAIMED_KEY: &str = "BFClaimed";
 const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
+const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
 
 #[derive(Clone)]
 #[contracttype]
@@ -584,6 +585,21 @@ pub fn set_reward_zone_checkpoint(e: &Env, timestamp: u64) {
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Return whether the candidate has completed an ongoing reward-zone distribution.
+pub fn get_reward_zone_distribution_started(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, REWARD_ZONE_DISTRIBUTED_KEY))
+        .unwrap_or(false)
+}
+
+/// Record that the candidate has completed an ongoing reward-zone distribution.
+pub fn set_reward_zone_distribution_started(e: &Env) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, REWARD_ZONE_DISTRIBUTED_KEY), &true);
 }
 
 /// Return whether the configured BLND token has been bound to emitter output.

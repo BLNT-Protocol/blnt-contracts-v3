@@ -172,6 +172,7 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
         storage::set_blnd_binding_verified(e);
     }
     storage::set_reward_zone_checkpoint(e, checkpoint);
+    storage::set_reward_zone_distribution_started(e);
 
     OngoingDistribution {
         backstop_allocated,

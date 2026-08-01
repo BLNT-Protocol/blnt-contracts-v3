@@ -12,19 +12,26 @@ fn exercise_reward_zone(wasm: bool) {
 
     fixture.create_pool(String::from_str(&e, "Reward zone one"), 0_1000000, 6, 0);
     let first = fixture.pools[0].pool.address.clone();
-    let second = if wasm {
+    let (second, third) = if wasm {
         fixture.create_pool(String::from_str(&e, "Reward zone two"), 0_1000000, 6, 0);
-        fixture.pools[1].pool.address.clone()
+        fixture.create_pool(String::from_str(&e, "Reward zone three"), 0_1000000, 6, 0);
+        (
+            fixture.pools[1].pool.address.clone(),
+            fixture.pools[2].pool.address.clone(),
+        )
     } else {
         // The native mock factory generates the same test address on each
         // deploy invocation, so register a distinct compatible mock directly.
-        let pool = Address::generate(&e);
-        MockPoolFactoryClient::new(&e, &fixture.pool_factory.address).set_mock_pool(&pool);
-        pool
+        let second = Address::generate(&e);
+        let third = Address::generate(&e);
+        let factory = MockPoolFactoryClient::new(&e, &fixture.pool_factory.address);
+        factory.set_mock_pool(&second);
+        factory.set_mock_pool(&third);
+        (second, third)
     };
 
     fixture.tokens[TokenIndex::BLND].mint(&depositor, &(1_000 * SCALAR_7));
-    fixture.tokens[TokenIndex::USDC].mint(&depositor, &(30_000 * SCALAR_7));
+    fixture.tokens[TokenIndex::USDC].mint(&depositor, &(50_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(10 * SCALAR_7),
         &vec![&e, i128::MAX, i128::MAX],
@@ -33,7 +40,7 @@ fn exercise_reward_zone(wasm: bool) {
 
     let lp_deposit = SCALAR_7;
     let usdc_deposit = fixture.backstop.activation_entry_threshold() - lp_deposit;
-    for pool in [&first, &second] {
+    for pool in [&first, &second, &third] {
         fixture.backstop.deposit(
             &backstop::BackstopTier::BlndUsdc,
             &depositor,
@@ -49,29 +56,33 @@ fn exercise_reward_zone(wasm: bool) {
     }
 
     fixture.backstop.add_reward(&first, &None);
-    assert_eq!(fixture.backstop.reward_zone(), vec![&e, first.clone()]);
-    assert!(fixture.backstop.try_add_reward(&second, &None).is_err());
+    fixture.backstop.add_reward(&second, &None);
+    assert_eq!(fixture.backstop.reward_zone().len(), 2);
+    assert!(fixture.backstop.reward_zone().contains(&first));
+    assert!(fixture.backstop.reward_zone().contains(&second));
 
     fixture.backstop.distribute();
     assert_eq!(
         fixture.backstop.reward_zone_checkpoint().unwrap().timestamp,
         e.ledger().timestamp()
     );
-    assert!(!fixture.backstop.reward_zone().contains(&second));
     assert!(
         fixture
             .backstop
-            .quote_pool_activation(&second, &false)
+            .quote_pool_activation(&third, &false)
             .meets_threshold
     );
     assert!(
         fixture
             .backstop
-            .pool_spot_blnd_emission_values(&second)
+            .pool_spot_blnd_emission_values(&third)
             .blnd_usdc
             > 0
     );
-    fixture.backstop.add_reward(&second, &None);
+    fixture.jump(60 * 60 + 1);
+    assert!(fixture.backstop.try_add_reward(&third, &None).is_err());
+    fixture.backstop.distribute();
+    fixture.backstop.add_reward(&third, &None);
 
     fixture.backstop.queue_withdrawal(
         &backstop::BackstopTier::BlndUsdc,
@@ -79,7 +90,6 @@ fn exercise_reward_zone(wasm: bool) {
         &second,
         &lp_deposit,
     );
-    fixture.jump(60 * 60 + 1);
     fixture.backstop.remove_reward(&second);
     assert!(!fixture.backstop.reward_zone().contains(&second));
     assert_eq!(
