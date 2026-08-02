@@ -13,10 +13,7 @@ use crate::{
     dependencies::{CometClient, EmitterClient},
     errors::BackstopError,
     migration,
-    storage::{
-        self, OngoingEmissionState, PoolEmissionReservation, PoolOngoingEmissions,
-        UserOngoingEmissions,
-    },
+    storage::{self, OngoingEmissionState, PoolOngoingEmissions, UserOngoingEmissions},
 };
 
 use super::policy::{
@@ -75,6 +72,7 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
     let last_distribution = state.last_distribution.unwrap();
     let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
     let binding_verified = storage::get_blnd_binding_verified(e);
+    let emitter_checkpoint_before = emitter.get_last_distro(&backstop);
     let balance_before = if binding_verified {
         None
     } else {
@@ -88,31 +86,30 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
     let elapsed = checkpoint
         .checked_sub(last_distribution)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::DistributionTooSoon));
-    if elapsed < MIN_DISTRIBUTION_INTERVAL_SECONDS || checkpoint > e.ledger().timestamp() {
+    let current_elapsed = checkpoint
+        .checked_sub(emitter_checkpoint_before)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidOngoingBalance));
+    if elapsed < MIN_DISTRIBUTION_INTERVAL_SECONDS {
         panic_with_error!(e, BackstopError::DistributionTooSoon);
     }
+    if emitter_checkpoint_before < last_distribution
+        || checkpoint > e.ledger().timestamp()
+        || emitted != emissions_for_seconds(e, current_elapsed)
+    {
+        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
+    }
 
-    let outstanding = checked_sub(e, state.total_distributed, state.total_claimed);
-    let protected_balance = checked_sub(e, outstanding, migration::unfunded_backfill(e));
-    let balance = blnd.balance(&backstop);
     if let Some(balance_before) = balance_before {
-        let binding_delta = checked_signed_sub(e, balance, balance_before);
+        let binding_delta = checked_signed_sub(e, blnd.balance(&backstop), balance_before);
         if emitted <= 0 || binding_delta != emitted {
             panic_with_error!(e, BackstopError::InvalidOngoingBalance);
         }
-    }
-    if balance < protected_balance {
-        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
-    }
-    let received = checked_sub(e, balance, protected_balance);
-    if received <= 0 || received < emitted {
-        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
     }
 
     let result = allocate_distribution(
         e,
         &mut state,
-        received,
+        emissions_for_seconds(e, elapsed),
         checkpoint,
         weights,
         total_eligible_blnd,
@@ -141,9 +138,7 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> OngoingDistributi
     if total_eligible_blnd == 0 {
         return advance_without_distribution(e, &mut state, checkpoint);
     }
-    let accrued = (elapsed as i128)
-        .checked_mul(SCALAR_7)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    let accrued = emissions_for_seconds(e, elapsed);
     let remaining = checked_sub(
         e,
         MAX_BACKFILLED_EMISSIONS,
@@ -378,7 +373,6 @@ pub(crate) fn claim_user_ongoing_blnd(
 
     let mut ongoing = get_ongoing_emission_state(e);
     ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnd_amount);
-    ongoing.total_claimed = checked_add(e, ongoing.total_claimed, blnd_amount);
     set_ongoing_emission_state(e, &ongoing);
 
     let backstop = e.current_contract_address();
@@ -437,19 +431,13 @@ pub(crate) fn claim_user_ongoing_blnd(
     }
 }
 
-pub(crate) fn get_pool_emission_reservation(e: &Env, pool: &Address) -> PoolEmissionReservation {
-    let reservation = storage::get_pool_emission_reservation(e, pool);
-    validate_pool_emission_reservation(e, &reservation);
-    reservation
-}
-
 pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> i128 {
     pool.require_auth();
     require_registered_pool(e, pool);
+    migration::require_backfill_funded(e);
 
-    let mut reservation = get_pool_emission_reservation(e, pool);
     let now = e.ledger().timestamp();
-    if reservation.last_gulp.is_some_and(|last_gulp| {
+    if storage::get_pool_emission_gulp(e, pool).is_some_and(|last_gulp| {
         last_gulp
             .checked_add(POOL_EMISSION_GULP_INTERVAL_SECONDS)
             .is_none_or(|next_gulp| next_gulp > now)
@@ -463,39 +451,20 @@ pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> i128 {
         return 0;
     }
     pool_state.accrued_pool = 0;
-    reservation.available = checked_add(e, reservation.available, amount);
-    reservation.last_gulp = Some(now);
+
+    let backstop = e.current_contract_address();
+    let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
+    let allowance = checked_add(e, blnd.allowance(&backstop, pool), amount);
+    let expiration_ledger = e
+        .ledger()
+        .sequence()
+        .checked_add(storage::LEDGER_BUMP_USER)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    blnd.approve(&backstop, pool, &allowance, &expiration_ledger);
+
     set_pool_ongoing_emissions(e, pool, &pool_state);
-    set_pool_emission_reservation(e, pool, &reservation);
+    storage::set_pool_emission_gulp(e, pool, now);
     amount
-}
-
-pub(crate) fn claim_reserved_pool_emissions(
-    e: &Env,
-    pool: &Address,
-    recipient: &Address,
-    amount: i128,
-) {
-    migration::require_backfill_funded(e);
-    if amount <= 0 {
-        panic_with_error!(e, BackstopError::InvalidEmissionValue);
-    }
-    pool.require_auth();
-    require_registered_pool(e, pool);
-
-    let mut reservation = get_pool_emission_reservation(e, pool);
-    reservation.available = checked_sub(e, reservation.available, amount);
-    set_pool_emission_reservation(e, pool, &reservation);
-
-    let mut ongoing = get_ongoing_emission_state(e);
-    ongoing.total_claimed = checked_add(e, ongoing.total_claimed, amount);
-    set_ongoing_emission_state(e, &ongoing);
-
-    TokenClient::new(e, &storage::get_blnd_token(e)).transfer(
-        &e.current_contract_address(),
-        recipient,
-        &amount,
-    );
 }
 
 pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
@@ -694,11 +663,6 @@ fn set_pool_ongoing_emissions(e: &Env, pool: &Address, state: &PoolOngoingEmissi
     storage::set_pool_ongoing_emissions(e, pool, state);
 }
 
-fn set_pool_emission_reservation(e: &Env, pool: &Address, reservation: &PoolEmissionReservation) {
-    validate_pool_emission_reservation(e, reservation);
-    storage::set_pool_emission_reservation(e, pool, reservation);
-}
-
 fn validate_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
     if state.backstop_allocated < 0
         || state.backstop_carry < 0
@@ -706,16 +670,9 @@ fn validate_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
         || state.pool_allocated < 0
         || state.pool_carry < 0
         || state.split_carry < 0
-        || state.total_claimed < 0
         || state.total_distributed < 0
         || state.backstop_claimed > state.backstop_allocated
-        || state.backstop_claimed > state.total_claimed
-        || state.total_claimed > state.total_distributed
     {
-        panic_with_error!(e, BackstopError::InvalidEmissionValue);
-    }
-    let pool_claimed = checked_sub(e, state.total_claimed, state.backstop_claimed);
-    if pool_claimed > state.pool_allocated {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
 }
@@ -743,16 +700,6 @@ fn validate_user_ongoing_emissions(e: &Env, state: &UserOngoingEmissions) {
     }
 }
 
-fn validate_pool_emission_reservation(e: &Env, reservation: &PoolEmissionReservation) {
-    if reservation.available < 0
-        || reservation
-            .last_gulp
-            .is_some_and(|last_gulp| last_gulp > e.ledger().timestamp())
-    {
-        panic_with_error!(e, BackstopError::InvalidEmissionValue);
-    }
-}
-
 fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
@@ -766,6 +713,12 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
 
 fn checked_signed_sub(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_sub(right)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
+}
+
+fn emissions_for_seconds(e: &Env, seconds: u64) -> i128 {
+    i128::from(seconds)
+        .checked_mul(SCALAR_7)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
 }
 
@@ -900,7 +853,7 @@ mod tests {
     }
 
     #[test]
-    fn reconciles_actual_blnd_and_conserves_all_carries() {
+    fn allocates_by_emitter_checkpoint_and_ignores_unrelated_blnd() {
         let fixture = Fixture::create();
         let first = fixture.pool(10 * SCALAR_7, 0);
         let second = fixture.pool(0, 10 * SCALAR_7);
@@ -947,8 +900,8 @@ mod tests {
         MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
         let second_distribution = fixture.distribution();
-        assert_eq!(second_distribution.distributed, 5 * SCALAR_7 + 1);
-        assert_eq!(second_distribution.split_carry, 1);
+        assert_eq!(second_distribution.distributed, 5 * SCALAR_7);
+        assert_eq!(second_distribution.split_carry, 0);
         assert_eq!(
             fixture.client().ongoing_emission_state(),
             OngoingEmissionState {
@@ -958,9 +911,8 @@ mod tests {
                 last_distribution: Some(1_015),
                 pool_allocated: 45_000_000,
                 pool_carry: 0,
-                split_carry: 1,
-                total_claimed: 0,
-                total_distributed: 15 * SCALAR_7 + 1,
+                split_carry: 0,
+                total_distributed: 15 * SCALAR_7,
             }
         );
     }
@@ -978,6 +930,30 @@ mod tests {
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             5 * SCALAR_7
+        );
+    }
+
+    #[test]
+    fn direct_emitter_call_is_allocated_once_at_the_next_checkpoint() {
+        let fixture = Fixture::create();
+        let pool = fixture.pool(10 * SCALAR_7, 0);
+        fixture.set_reward_zone(&vec![&fixture.e, pool]);
+        let emitter = fixture
+            .e
+            .as_contract(&fixture.backstop, || storage::get_emitter(&fixture.e));
+        let emitter = EmitterClient::new(&fixture.e, &emitter);
+
+        fixture.e.ledger().set_timestamp(1_005);
+        assert_eq!(emitter.distribute(), 5 * SCALAR_7);
+        fixture.e.ledger().set_timestamp(1_010);
+        assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
+        assert!(fixture.client().blnd_binding_verified());
+
+        fixture.e.ledger().set_timestamp(1_015);
+        assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
+        assert_eq!(
+            fixture.client().ongoing_emission_state().total_distributed,
+            15 * SCALAR_7
         );
     }
 
@@ -1018,12 +994,10 @@ mod tests {
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
         let blnd_xlm_before =
             TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop);
-        let blnd_usdc_out = fixture.client().claim_ongoing_blnd(
-            &BackstopTier::BlndUsdc,
-            &blnd_usdc_user,
-            &pool,
-            &0,
-        );
+        let blnd_usdc_out =
+            fixture
+                .client()
+                .claim(&BackstopTier::BlndUsdc, &blnd_usdc_user, &pool, &0);
         assert_eq!(
             fixture
                 .client()
@@ -1041,7 +1015,7 @@ mod tests {
         let blnd_xlm_out =
             fixture
                 .client()
-                .claim_ongoing_blnd(&BackstopTier::BlndXlm, &blnd_xlm_user, &pool, &0);
+                .claim(&BackstopTier::BlndXlm, &blnd_xlm_user, &pool, &0);
         assert!(blnd_usdc_out > 0);
         assert!(blnd_xlm_out > 0);
         assert_eq!(
@@ -1088,7 +1062,7 @@ mod tests {
 
         assert!(fixture
             .client()
-            .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &user, &pool, &i128::MAX,)
+            .try_claim(&BackstopTier::BlndUsdc, &user, &pool, &i128::MAX,)
             .is_err());
         assert_eq!(
             fixture
@@ -1115,7 +1089,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_tranche_is_reserved_and_paid_by_the_registered_pool() {
+    fn pool_tranche_is_allowed_and_spent_by_the_registered_pool() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let recipient = Address::generate(&fixture.e);
@@ -1123,31 +1097,25 @@ mod tests {
 
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
-        assert_eq!(fixture.client().gulp_pool_emissions(&pool), 3 * SCALAR_7);
+        assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
+        let blnd = TokenClient::new(&fixture.e, &fixture.blnd);
+        assert_eq!(blnd.allowance(&fixture.backstop, &pool), 3 * SCALAR_7);
         assert_eq!(
-            fixture.client().pool_emission_reservation(&pool),
-            PoolEmissionReservation {
-                available: 3 * SCALAR_7,
-                last_gulp: Some(1_010),
-            }
+            fixture.e.as_contract(&fixture.backstop, || {
+                storage::get_pool_emission_gulp(&fixture.e, &pool)
+            }),
+            Some(1_010)
         );
-        assert!(fixture.client().try_gulp_pool_emissions(&pool).is_err());
+        assert!(fixture.client().try_gulp_emissions(&pool).is_err());
 
-        fixture
-            .client()
-            .claim_pool_emissions(&pool, &recipient, &SCALAR_7);
-        assert_eq!(
-            fixture.client().pool_emission_reservation(&pool).available,
-            2 * SCALAR_7
-        );
-        assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&recipient),
-            SCALAR_7
-        );
-        assert_eq!(
-            fixture.client().ongoing_emission_state().total_claimed,
-            SCALAR_7
-        );
+        fixture.e.as_contract(&pool, || {
+            blnd.transfer_from(&pool, &fixture.backstop, &recipient, &SCALAR_7);
+        });
+        assert_eq!(blnd.allowance(&fixture.backstop, &pool), 2 * SCALAR_7);
+        assert_eq!(blnd.balance(&recipient), SCALAR_7);
+
+        fixture.e.ledger().set_timestamp(1_015);
+        assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
     }
 
     #[test]
@@ -1179,7 +1147,6 @@ mod tests {
                 pool_allocated: 0,
                 pool_carry: 0,
                 split_carry: 0,
-                total_claimed: 0,
                 total_distributed: 0,
             }
         );

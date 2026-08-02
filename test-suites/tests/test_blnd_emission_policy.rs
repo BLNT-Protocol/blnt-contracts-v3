@@ -51,7 +51,7 @@ fn exercise_blnd_emission_policy(wasm: bool) {
         }
     );
 
-    let blnd_xlm_token = fixture.backstop.tier_token(&BackstopTier::BlndXlm);
+    let blnd_xlm_token = fixture.backstop.backstop_token(&BackstopTier::BlndXlm);
     let blnd_xlm = LPClient::new(&e, &blnd_xlm_token);
     let blnd_usdc_amount = fixture.lp.get_total_supply() / 10;
     let blnd_xlm_amount = blnd_xlm.get_total_supply() / 5;

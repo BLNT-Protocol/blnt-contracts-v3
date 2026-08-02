@@ -324,7 +324,6 @@ pub fn set_backstop(e: &Env, backstop: &Address) {
 /********** External Token Contracts **********/
 
 /// Fetch the BLND token ID
-#[cfg(test)]
 pub fn get_blnd_token(e: &Env) -> Address {
     e.storage()
         .instance()

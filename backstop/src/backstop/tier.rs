@@ -82,9 +82,9 @@ mod tests {
             300
         );
 
-        assert_eq!(client.tier_token(&BackstopTier::BlndUsdc), blnd_usdc);
-        assert_eq!(client.tier_token(&BackstopTier::BlndXlm), blnd_xlm);
-        assert_eq!(client.tier_token(&BackstopTier::Usdc), usdc);
+        assert_eq!(client.backstop_token(&BackstopTier::BlndUsdc), blnd_usdc);
+        assert_eq!(client.backstop_token(&BackstopTier::BlndXlm), blnd_xlm);
+        assert_eq!(client.backstop_token(&BackstopTier::Usdc), usdc);
         let pool_data = client.pool_data(&pool);
         assert_eq!(pool_data.blnd_usdc.assets, 100);
         assert_eq!(pool_data.blnd_usdc.shares, 100);

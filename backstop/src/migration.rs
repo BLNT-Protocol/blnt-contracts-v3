@@ -101,15 +101,6 @@ pub(crate) fn require_backfill_funded(e: &Env) {
     }
 }
 
-pub(crate) fn unfunded_backfill(e: &Env) -> i128 {
-    let scheduled = scheduled_backfill(e);
-    match storage::get_backfill_funded_amount(e) {
-        None => scheduled,
-        Some(funded) if funded == scheduled => 0,
-        Some(_) => panic_with_error!(e, BackstopError::InvalidBackfillFunding),
-    }
-}
-
 pub(crate) fn status(e: &Env) -> MigrationStatus {
     if is_active(e) {
         MigrationStatus::Active
@@ -429,7 +420,6 @@ fn open_epoch(e: &Env, unlock: u64) -> u64 {
             pool_allocated: 0,
             pool_carry: 0,
             split_carry: 0,
-            total_claimed: 0,
             total_distributed: 0,
         },
     );
@@ -476,7 +466,6 @@ pub(crate) fn activate_for_test(e: &Env, checkpoint: u64) {
             pool_allocated: 0,
             pool_carry: 0,
             split_carry: 0,
-            total_claimed: 0,
             total_distributed: 0,
         },
     );
@@ -643,7 +632,7 @@ mod tests {
         );
         assert!(fixture
             .client()
-            .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
+            .try_claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
             .is_err());
 
         fixture.prepare_swap_and_sync();
@@ -661,8 +650,9 @@ mod tests {
         );
         assert!(fixture
             .client()
-            .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
+            .try_claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
             .is_err());
+        assert!(fixture.client().try_gulp_emissions(&fixture.pool).is_err());
 
         fixture.client().drop();
         assert_eq!(fixture.client().funded_backfill(), Some(scheduled));
@@ -672,6 +662,7 @@ mod tests {
             scheduled + 10 * SCALAR_7
         );
         assert!(fixture.client().try_drop().is_err());
+        assert!(fixture.client().gulp_emissions(&fixture.pool) > 0);
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
             20 * SCALAR_7
@@ -770,12 +761,10 @@ mod tests {
             accrued_before_queue
         );
         assert!(
-            fixture.client().claim_ongoing_blnd(
-                &BackstopTier::BlndUsdc,
-                &fixture.user,
-                &fixture.pool,
-                &0,
-            ) > 0
+            fixture
+                .client()
+                .claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
+                > 0
         );
         assert!(
             fixture

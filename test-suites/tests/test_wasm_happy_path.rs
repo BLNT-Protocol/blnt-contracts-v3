@@ -537,7 +537,9 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &dusty_lp_assets,
     );
     let dust_provider = Address::generate(&fixture.env);
-    let blnd_xlm_address = fixture.backstop.tier_token(&BackstopContractTier::BlndXlm);
+    let blnd_xlm_address = fixture
+        .backstop
+        .backstop_token(&BackstopContractTier::BlndXlm);
     let blnd_xlm = LPClient::new(&fixture.env, &blnd_xlm_address);
     fixture.tokens[TokenIndex::BLND].mint(&dust_provider, &(1_000 * SCALAR_7));
     fixture.tokens[TokenIndex::XLM].mint(&dust_provider, &(25 * SCALAR_7));
@@ -896,7 +898,7 @@ fn test_wasm_happy_path() {
         )
         .accrued;
     assert!(backstop_accrual > 0);
-    let compounded_lp = fixture.backstop.claim_ongoing_blnd(
+    let compounded_lp = fixture.backstop.claim(
         &BackstopContractTier::BlndUsdc,
         &frodo,
         &pool_fixture.pool.address,
@@ -1104,7 +1106,7 @@ fn test_wasm_happy_path() {
         .accrued;
     assert_approx_eq_rel(backstop_accrual, 4233600000000, 0_0100000);
     assert!(
-        fixture.backstop.claim_ongoing_blnd(
+        fixture.backstop.claim(
             &BackstopContractTier::BlndUsdc,
             &frodo,
             &pool_fixture.pool.address,
@@ -1159,7 +1161,7 @@ fn test_wasm_happy_path() {
         .accrued;
     assert_approx_eq_rel(backstop_accrual, 22_014_720_0000000, 0_0100000);
     assert!(
-        fixture.backstop.claim_ongoing_blnd(
+        fixture.backstop.claim(
             &BackstopContractTier::BlndUsdc,
             &frodo,
             &pool_fixture.pool.address,

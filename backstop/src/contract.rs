@@ -9,8 +9,8 @@ use crate::{
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
     emissions::{
-        self, BlndEmissionQuote, OngoingBlndSplit, OngoingEmissionState, PoolEmissionReservation,
-        PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
+        self, BlndEmissionQuote, OngoingBlndSplit, OngoingEmissionState, PoolOngoingEmissions,
+        RewardZoneCheckpoint, UserOngoingEmissions,
     },
     errors::BackstopError,
     events::BackstopEvents,
@@ -77,7 +77,7 @@ pub trait Backstop {
     fn pool_data(e: Env, pool: Address) -> PoolData;
 
     /// Fetch the token contract bound to one fixed backstop tier.
-    fn tier_token(e: Env, tier: BackstopTier) -> Address;
+    fn backstop_token(e: Env, tier: BackstopTier) -> Address;
 
     /// Fetch one user's active shares and bounded withdrawal queue in a tier.
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
@@ -87,9 +87,6 @@ pub trait Backstop {
 
     /// Preview tokens returned by a tier withdrawal.
     fn preview_tier_withdrawal(e: Env, tier: BackstopTier, pool: Address, shares: i128) -> i128;
-
-    /// Return the BLND:USDC token through the v2-compatible getter.
-    fn backstop_token(e: Env) -> Address;
 
     /// Return the candidate's incumbent-emitter migration state.
     fn migration_status(e: Env) -> MigrationStatus;
@@ -273,7 +270,7 @@ pub trait Backstop {
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
 
-    /// Return aggregate BLND obligations, allocations, claims, and carries.
+    /// Return aggregate BLND allocations, backstop claims, and carries.
     fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
 
     /// Return one pool's ongoing BLND allocation and active tier amounts.
@@ -291,7 +288,7 @@ pub trait Backstop {
     ) -> UserOngoingEmissions;
 
     /// Compound one eligible tier's accrued BLND into that tier's Comet LP.
-    fn claim_ongoing_blnd(
+    fn claim(
         e: Env,
         tier: BackstopTier,
         user: Address,
@@ -299,14 +296,8 @@ pub trait Backstop {
         min_lp_tokens_out: i128,
     ) -> i128;
 
-    /// Return one pool's reserved, unclaimed 30% tranche.
-    fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation;
-
-    /// Move one pool's accrued 30% tranche into its claim reservation.
-    fn gulp_pool_emissions(e: Env, pool: Address) -> i128;
-
-    /// Pay an authorized reserve-token claim from one pool's reservation.
-    fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128);
+    /// Grant one pool an allowance for its accrued 30% tranche.
+    fn gulp_emissions(e: Env, pool: Address) -> i128;
 
     /// Add a threshold-qualified pool with positive active BLND to the reward zone.
     ///
@@ -463,7 +454,7 @@ impl Backstop for BackstopContract {
         build_pool_data(&e, &pool)
     }
 
-    fn tier_token(e: Env, tier: BackstopTier) -> Address {
+    fn backstop_token(e: Env, tier: BackstopTier) -> Address {
         tier_token(&e, tier)
     }
 
@@ -479,10 +470,6 @@ impl Backstop for BackstopContract {
     fn preview_tier_withdrawal(e: Env, tier: BackstopTier, pool: Address, shares: i128) -> i128 {
         require_nonnegative(&e, shares);
         preview_withdrawal(&storage::get_pool_balance_for_tier(&e, tier, &pool), shares)
-    }
-
-    fn backstop_token(e: Env) -> Address {
-        storage::get_blnd_usdc_token(&e)
     }
 
     fn migration_status(e: Env) -> MigrationStatus {
@@ -846,7 +833,7 @@ impl Backstop for BackstopContract {
         emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool)
     }
 
-    fn claim_ongoing_blnd(
+    fn claim(
         e: Env,
         tier: BackstopTier,
         user: Address,
@@ -855,7 +842,7 @@ impl Backstop for BackstopContract {
     ) -> i128 {
         storage::extend_instance(&e);
         let claim = emissions::claim_user_ongoing_blnd(&e, tier, &user, &pool, min_lp_tokens_out);
-        BackstopEvents::claim_ongoing_blnd(
+        BackstopEvents::claim(
             &e,
             tier,
             user,
@@ -867,23 +854,11 @@ impl Backstop for BackstopContract {
         claim.lp_amount
     }
 
-    fn pool_emission_reservation(e: Env, pool: Address) -> PoolEmissionReservation {
-        storage::extend_instance(&e);
-        backstop::require_registered_pool(&e, &pool);
-        emissions::get_pool_emission_reservation(&e, &pool)
-    }
-
-    fn gulp_pool_emissions(e: Env, pool: Address) -> i128 {
+    fn gulp_emissions(e: Env, pool: Address) -> i128 {
         storage::extend_instance(&e);
         let amount = emissions::gulp_pool_ongoing_emissions(&e, &pool);
         BackstopEvents::gulp_emissions(&e, pool, 0, amount);
         amount
-    }
-
-    fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128) {
-        storage::extend_instance(&e);
-        emissions::claim_reserved_pool_emissions(&e, &pool, &recipient, amount);
-        BackstopEvents::claim_pool_emissions(&e, pool, recipient, amount);
     }
 
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>) {

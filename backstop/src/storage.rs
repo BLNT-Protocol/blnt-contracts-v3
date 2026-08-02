@@ -79,14 +79,6 @@ pub struct UserOngoingEmissions {
     pub index: i128,
 }
 
-/// Pool-owned reservation of the 30% supply/borrow tranche.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct PoolEmissionReservation {
-    pub available: i128,
-    pub last_gulp: Option<u64>,
-}
-
 /// Aggregate accounting for migration-backfill and ongoing BLND obligations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -98,7 +90,6 @@ pub struct OngoingEmissionState {
     pub pool_allocated: i128,
     pub pool_carry: i128,
     pub split_carry: i128,
-    pub total_claimed: i128,
     pub total_distributed: i128,
 }
 
@@ -158,7 +149,7 @@ pub enum BackstopDataKey {
     BEmisData(Address),
     UEmisData(PoolUserKey),
     PoolOngoingEmissions(Address),
-    PoolEmissionReservation(Address),
+    PoolEmissionGulp(Address),
     UserOngoingEmissions(PoolUserTierKey),
 }
 
@@ -605,7 +596,6 @@ pub fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
             pool_allocated: 0,
             pool_carry: 0,
             split_carry: 0,
-            total_claimed: 0,
             total_distributed: 0,
         })
 }
@@ -694,29 +684,22 @@ pub fn set_user_ongoing_emissions(
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 }
 
-/// Get one pool's reserved, unclaimed 30% tranche.
-pub fn get_pool_emission_reservation(e: &Env, pool: &Address) -> PoolEmissionReservation {
-    let key = BackstopDataKey::PoolEmissionReservation(pool.clone());
-    get_persistent_default(
-        e,
-        &key,
-        || PoolEmissionReservation {
-            available: 0,
-            last_gulp: None,
-        },
-        LEDGER_THRESHOLD_SHARED,
-        LEDGER_BUMP_SHARED,
-    )
+/// Get the timestamp of one pool's latest 30% tranche gulp.
+pub fn get_pool_emission_gulp(e: &Env, pool: &Address) -> Option<u64> {
+    let key = BackstopDataKey::PoolEmissionGulp(pool.clone());
+    let last_gulp = e.storage().persistent().get(&key);
+    if last_gulp.is_some() {
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+    }
+    last_gulp
 }
 
-/// Set one pool's reserved, unclaimed 30% tranche.
-pub fn set_pool_emission_reservation(
-    e: &Env,
-    pool: &Address,
-    reservation: &PoolEmissionReservation,
-) {
-    let key = BackstopDataKey::PoolEmissionReservation(pool.clone());
-    e.storage().persistent().set(&key, reservation);
+/// Set the timestamp of one pool's latest 30% tranche gulp.
+pub fn set_pool_emission_gulp(e: &Env, pool: &Address, last_gulp: u64) {
+    let key = BackstopDataKey::PoolEmissionGulp(pool.clone());
+    e.storage().persistent().set(&key, &last_gulp);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);

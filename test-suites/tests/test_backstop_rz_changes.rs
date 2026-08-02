@@ -94,7 +94,7 @@ fn test_backstop_rz_changes_handle_emissions() {
         .accrued;
     assert_eq!(accrued, 907_200 * SCALAR_7);
     assert!(
-        fixture.backstop.claim_ongoing_blnd(
+        fixture.backstop.claim(
             &backstop::BackstopTier::BlndUsdc,
             &sam,
             &pool_fixture.pool.address,
@@ -105,7 +105,7 @@ fn test_backstop_rz_changes_handle_emissions() {
     fixture.jump(60 * 60 * 24 * 4);
     assert!(fixture
         .backstop
-        .try_claim_ongoing_blnd(
+        .try_claim(
             &backstop::BackstopTier::BlndUsdc,
             &sam,
             &pool_fixture.pool.address,

@@ -1,9 +1,9 @@
 use cast::{i128, u64};
+use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env, Vec, I256};
 
 use crate::{
     constants::{MAX_RESERVES, SCALAR_7},
-    dependencies::BackstopClient,
     errors::PoolError,
     pool::User,
     storage::{self, ReserveEmissionCarry, ReserveEmissionData, UserEmissionData},
@@ -65,8 +65,9 @@ pub fn execute_claim(e: &Env, from: &Address, reserve_token_ids: &Vec<u32>, to: 
 
     if to_claim > 0 {
         let backstop = storage::get_backstop(e);
-        BackstopClient::new(e, &backstop).claim_pool_emissions(
+        TokenClient::new(e, &storage::get_blnd_token(e)).transfer_from(
             &e.current_contract_address(),
+            &backstop,
             to,
             &to_claim,
         );
@@ -392,33 +393,12 @@ mod tests {
     use crate::{pool::Positions, testutils};
 
     use super::*;
-    use sep_41_token::TokenClient;
     use soroban_sdk::{
-        contract, contractimpl, map,
+        map,
         testutils::{Address as AddressTestTrait, Ledger, LedgerInfo},
         unwrap::UnwrapOptimized,
         vec,
     };
-
-    #[contract]
-    struct MockPoolEmissionBackstop;
-
-    #[contractimpl]
-    impl MockPoolEmissionBackstop {
-        pub fn __constructor(e: Env, blnd: Address) {
-            e.storage().instance().set(&0_u32, &blnd);
-        }
-
-        pub fn claim_pool_emissions(e: Env, pool: Address, recipient: Address, amount: i128) {
-            pool.require_auth();
-            let blnd: Address = e.storage().instance().get(&0_u32).unwrap();
-            TokenClient::new(&e, &blnd).transfer(
-                &e.current_contract_address(),
-                &recipient,
-                &amount,
-            );
-        }
-    }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
@@ -1585,9 +1565,10 @@ mod tests {
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
 
-        let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
-        let backstop = e.register(MockPoolEmissionBackstop, (blnd.clone(),));
+        let (_blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let backstop = Address::generate(&e);
         blnd_token_client.mint(&backstop, &100_000_0000000);
+        blnd_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
@@ -1700,9 +1681,10 @@ mod tests {
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
 
-        let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
-        let backstop = e.register(MockPoolEmissionBackstop, (blnd.clone(),));
+        let (_blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let backstop = Address::generate(&e);
         blnd_token_client.mint(&backstop, &100_000_0000000);
+        blnd_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed

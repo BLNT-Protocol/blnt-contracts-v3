@@ -429,7 +429,7 @@ that amount from the emitter for this backstop alone. An exact increase in the
 configured BLND balance is required. Backstop and pool claims remain disabled
 until the full positive schedule is funded. Backfill uses the ordinary claim
 paths: BLND:USDC claims compound into that tier and the 30% pool tranche uses
-its ordinary reservation and claim accounting.
+the inherited pool allowance and claim accounting.
 
 ### 6.2 Ongoing backstop-depositor emissions — **Extended and safety fixed**
 
@@ -449,6 +449,13 @@ E_{\mathrm{total}} - E_{\mathrm{backstop}} - E_{\mathrm{pool}}
 The candidate retains \(C_{\mathrm{next}}\) for the next split. Both tranches
 use the same reward-zone pool weight; the pool tranche remains segregated
 under Section 6.3.
+
+After activation, the distributable amount is one BLND per elapsed emitter
+checkpoint second, matching v2. Each call verifies the emitter's returned mint
+for the interval since its immediately preceding checkpoint. A prior direct
+emitter call is therefore allocated once at the next candidate checkpoint,
+while unrelated BLND transfers create no emission entitlement. The first
+positive candidate call also verifies an exact configured-BLND balance delta.
 
 The maximum-30-pool permissionless reward zone in `V2-BACKSTOP-005` applies
 with these changes:
@@ -575,8 +582,8 @@ output. The claim checkpoints that tier for one pool, reduces only its accrued
 70% tranche, deposits the BLND single-sided into that tier's Comet, and credits
 the resulting LP shares to the same owner, pool, and tier. Exact BLND and LP
 balance deltas govern settlement. A failed or zero-output conversion leaves the
-accrual unchanged. A successful claim updates backstop-claimed and total-claimed
-counters by the BLND consumed and returns the LP amount received.
+accrual unchanged. A successful claim updates the backstop-claimed counter by
+the BLND consumed and returns the LP amount received.
 
 BLND:USDC accrual compounds into BLND:USDC and BLND:XLM accrual compounds into
 BLND:XLM. Claims are separate so one impaired Comet cannot block the other.
@@ -584,18 +591,19 @@ Compounded shares are active backstop capital, receive no retroactive emission
 credit. Plain USDC is ineligible. The operation cannot include the 30% pool
 tranche, redirect entitlement, or move a claim between tiers.
 
-### 6.3 Pool supply and borrow emissions — **Custody extension**
+### 6.3 Pool supply and borrow emissions — **Extended**
 
 `V2-EMISSIONS-003` applies with these extensions:
 
 - Configuration input is bounded to 60 entries before last-write-wins
   replacement. Empty configuration remains valid, but a gulp with no enabled
-  positive weight fails before reserving candidate allocation; accrued BLND
+  positive weight fails before consuming candidate allocation; accrued BLND
   remains available.
-- The candidate retains pool-tranche custody. A registered pool authorizes
-  reservation of \(E_{\mathrm{pool},p}\), subject to the inherited 24-hour and
-  one-BLND minimums. Rejection leaves it available; reservation grants no
-  allowance and is not a claim.
+- A registered pool authorizes a gulp of \(E_{\mathrm{pool},p}\), subject to the
+  inherited 24-hour and one-BLND minimums. The backstop increases that pool's
+  configured-BLND allowance by the gulped amount, and the pool schedules its
+  reserve-token streams atomically. Rejection leaves the accrued tranche
+  available.
 - Floor remainder carries independently at pool, reserve-token, and user
   scopes. A later gulp checkpoints the seven-day stream, combines exact
   unvested BLND, and restarts it. The reserve-token index scale is
@@ -607,9 +615,9 @@ tranche, redirect entitlement, or move a claim between tiers.
   and removed identifiers retain existing streams.
 - The owner authorizes a claim over a nonempty bounded list of unique valid
   identifiers and selects the recipient. The pool clears only those accruals
-  and authorizes exact consumption of its reservation. Pool state, reservation,
-  claimed accounting, and transfer are atomic. This increases total ongoing
-  claimed BLND, not the backstop-claimed counter.
+  and pays the recipient with `transfer_from` against its backstop allowance.
+  Pool state and transfer are atomic and do not change the backstop-claimed
+  counter.
 
 ## 7. Numeric and resource safety — **Extended**
 

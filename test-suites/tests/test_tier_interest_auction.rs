@@ -45,7 +45,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let pool = &fixture.pools[0].pool;
     let pool_address = pool.address.clone();
 
-    let blnd_xlm_token = fixture.backstop.tier_token(&BackstopTier::BlndXlm);
+    let blnd_xlm_token = fixture.backstop.backstop_token(&BackstopTier::BlndXlm);
     let blnd_xlm = LPClient::new(&e, &blnd_xlm_token);
     fixture.tokens[TokenIndex::BLND].mint(&operator, &(500_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&operator, &(50_000 * SCALAR_7));

@@ -169,16 +169,10 @@ single_value_event!(
     to_remove: Address
 );
 vec_event!(
-    ClaimOngoingBlndEvent,
-    "claim_ongoing",
+    ClaimEvent,
+    "claim",
     [tier: BackstopTier, user: Address, pool: Address],
     [blnd_amount: i128, lp_amount: i128, shares: i128]
-);
-vec_event!(
-    ClaimPoolEmissionsEvent,
-    "claim_pool",
-    [pool: Address],
-    [recipient: Address, amount: i128]
 );
 vec_event!(
     DrawEvent,
@@ -435,7 +429,7 @@ impl BackstopEvents {
     }
 
     /// Emitted when a user's ongoing BLND compounds into its originating tier.
-    pub fn claim_ongoing_blnd(
+    pub fn claim(
         e: &Env,
         tier: BackstopTier,
         user: Address,
@@ -444,23 +438,13 @@ impl BackstopEvents {
         lp_amount: i128,
         shares: i128,
     ) {
-        ClaimOngoingBlndEvent {
+        ClaimEvent {
             tier,
             user,
             pool,
             blnd_amount,
             lp_amount,
             shares,
-        }
-        .publish(e);
-    }
-
-    /// Emitted when a pool pays a reserve-token emission claim.
-    pub fn claim_pool_emissions(e: &Env, pool: Address, recipient: Address, amount: i128) {
-        ClaimPoolEmissionsEvent {
-            pool,
-            recipient,
-            amount,
         }
         .publish(e);
     }

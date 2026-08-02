@@ -74,7 +74,7 @@ pub fn gulp_emissions(e: &Env) -> i128 {
     require_enabled_pool_emissions(e);
     let backstop = storage::get_backstop(e);
     let new_emissions =
-        BackstopClient::new(e, &backstop).gulp_pool_emissions(&e.current_contract_address());
+        BackstopClient::new(e, &backstop).gulp_emissions(&e.current_contract_address());
     do_gulp_emissions(e, new_emissions);
     new_emissions
 }

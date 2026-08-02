@@ -36,9 +36,9 @@ fn test_backstop() {
     let bstop_token = &fixture.lp;
     let sam = Address::generate(&fixture.env);
 
-    // Verify constructor set the backstop token
+    // Verify constructor bound the BLND:USDC tier token.
     assert_eq!(
-        fixture.backstop.backstop_token(),
+        fixture.backstop.backstop_token(&BackstopTier::BlndUsdc),
         bstop_token.address.clone()
     );
 
@@ -481,10 +481,9 @@ fn test_backstop() {
         .backstop
         .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
         .shares;
-    let lp_compounded =
-        fixture
-            .backstop
-            .claim_ongoing_blnd(&BackstopTier::BlndUsdc, &sam, &pool.address, &0);
+    let lp_compounded = fixture
+        .backstop
+        .claim(&BackstopTier::BlndUsdc, &sam, &pool.address, &0);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -492,7 +491,7 @@ fn test_backstop() {
             AuthorizedInvocation {
                 function: AuthorizedFunction::Contract((
                     fixture.backstop.address.clone(),
-                    Symbol::new(&fixture.env, "claim_ongoing_blnd"),
+                    Symbol::new(&fixture.env, "claim"),
                     vec![
                         &fixture.env,
                         BackstopTier::BlndUsdc.into_val(&fixture.env),
@@ -531,7 +530,7 @@ fn test_backstop() {
             (
                 fixture.backstop.address.clone(),
                 (
-                    Symbol::new(&fixture.env, "claim_ongoing"),
+                    Symbol::new(&fixture.env, "claim"),
                     BackstopTier::BlndUsdc,
                     sam.clone(),
                     pool.address.clone()
@@ -631,7 +630,10 @@ fn test_backstop_constructor() {
     });
 
     let backstop_client = BackstopClient::new(&e, &contract_id);
-    assert_eq!(backstop_client.backstop_token(), backstop_token);
+    assert_eq!(
+        backstop_client.backstop_token(&BackstopTier::BlndUsdc),
+        backstop_token
+    );
     assert_eq!(backstop_client.migration_status(), MigrationStatus::Pending);
     assert_eq!(backstop_client.prefunding_start(), 0);
     assert_eq!(
