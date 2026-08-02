@@ -60,11 +60,40 @@ pub struct BlndEmissionValues {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct PoolValuation {
+pub(crate) struct PoolValuation {
     pub active_blnd: BlndEmissionValues,
     pub active_values: ActivationValues,
     pub queued_values: ActivationValues,
     pub valid_until: u64,
+}
+
+/// One pool's accounting and canonical valuation for a fixed backstop tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolTierData {
+    /// Underlying BLND represented by active, uncommitted tier assets.
+    pub active_blnd: i128,
+    /// USDC value of active, uncommitted tier assets.
+    pub active_value: i128,
+    /// Total tier-token assets, including assets committed to an auction.
+    pub assets: i128,
+    /// Shares currently queued for withdrawal.
+    pub queued_shares: i128,
+    /// USDC value of queued, uncommitted tier assets.
+    pub queued_value: i128,
+    /// Total issued shares, including queued shares.
+    pub shares: i128,
+}
+
+/// One pool's complete three-tier backstop accounting and valuation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolData {
+    pub blnd_usdc: PoolTierData,
+    pub blnd_xlm: PoolTierData,
+    pub usdc: PoolTierData,
+    /// Earliest expiry shared by the tier valuations in this snapshot.
+    pub valuation_valid_until: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -78,7 +107,52 @@ pub struct PoolStatusQuote {
     pub transition_allowed: bool,
 }
 
-pub fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
+pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolData {
+    let valuation = build_pool_valuation(e, pool);
+    let blnd_usdc = storage::get_pool_balance_for_tier(e, BackstopTier::BlndUsdc, pool);
+    let blnd_xlm = storage::get_pool_balance_for_tier(e, BackstopTier::BlndXlm, pool);
+    let usdc = storage::get_pool_balance_for_tier(e, BackstopTier::Usdc, pool);
+
+    PoolData {
+        blnd_usdc: tier_data(
+            &blnd_usdc,
+            valuation.active_blnd.blnd_usdc,
+            valuation.active_values.blnd_usdc,
+            valuation.queued_values.blnd_usdc,
+        ),
+        blnd_xlm: tier_data(
+            &blnd_xlm,
+            valuation.active_blnd.blnd_xlm,
+            valuation.active_values.blnd_xlm,
+            valuation.queued_values.blnd_xlm,
+        ),
+        usdc: tier_data(
+            &usdc,
+            0,
+            valuation.active_values.usdc,
+            valuation.queued_values.usdc,
+        ),
+        valuation_valid_until: valuation.valid_until,
+    }
+}
+
+fn tier_data(
+    balance: &PoolBalance,
+    active_blnd: i128,
+    active_value: i128,
+    queued_value: i128,
+) -> PoolTierData {
+    PoolTierData {
+        active_blnd,
+        active_value,
+        assets: balance.tokens,
+        queued_shares: balance.q4w,
+        queued_value,
+        shares: balance.shares,
+    }
+}
+
+pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     // A pool invokes this while refreshing its own status. Factory
     // registration is sufficient and avoids a pool -> backstop -> pool cycle.
     require_registered_pool(e, pool);
@@ -561,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_pool_valuation_partitions_accounted_tier_assets() {
+    fn canonical_pool_data_combines_tier_accounting_and_valuation() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
 
@@ -610,23 +684,41 @@ mod tests {
             &(2_000 * SCALAR_7),
         );
 
-        let valuation = backstop_client.pool_valuation(&pool);
+        let pool_data = backstop_client.pool_data(&pool);
         assert_eq!(
-            valuation.active_values,
-            values(3_000 * SCALAR_7, 3_000 * SCALAR_7, 6_500 * SCALAR_7)
-        );
-        assert_eq!(
-            valuation.queued_values,
-            values(1_000 * SCALAR_7, 2_000 * SCALAR_7, 0)
-        );
-        assert_eq!(
-            valuation.active_blnd,
-            BlndEmissionValues {
-                blnd_usdc: 3_000 * SCALAR_7,
-                blnd_xlm: 3_000 * SCALAR_7,
+            pool_data.blnd_usdc,
+            PoolTierData {
+                active_blnd: 3_000 * SCALAR_7,
+                active_value: 3_000 * SCALAR_7,
+                assets: 4_000 * SCALAR_7,
+                queued_shares: 1_000 * SCALAR_7,
+                queued_value: 1_000 * SCALAR_7,
+                shares: 4_000 * SCALAR_7,
             }
         );
-        assert_eq!(valuation.valid_until, u64::MAX);
+        assert_eq!(
+            pool_data.blnd_xlm,
+            PoolTierData {
+                active_blnd: 3_000 * SCALAR_7,
+                active_value: 3_000 * SCALAR_7,
+                assets: 5_000 * SCALAR_7,
+                queued_shares: 2_000 * SCALAR_7,
+                queued_value: 2_000 * SCALAR_7,
+                shares: 5_000 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            pool_data.usdc,
+            PoolTierData {
+                active_blnd: 0,
+                active_value: 6_500 * SCALAR_7,
+                assets: 6_500 * SCALAR_7,
+                queued_shares: 0,
+                queued_value: 0,
+                shares: 6_500 * SCALAR_7,
+            }
+        );
+        assert_eq!(pool_data.valuation_valid_until, u64::MAX);
 
         let quote = backstop_client.quote_pool_activation(&pool, &false);
         assert_eq!(quote.eligible_value, ACTIVATION_ENTRY_THRESHOLD_USDC);

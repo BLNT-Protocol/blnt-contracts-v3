@@ -28,10 +28,9 @@ pub use withdrawal::{
 
 mod pool;
 #[cfg(test)]
-pub use pool::is_pool_above_threshold;
+pub use pool::{is_pool_above_threshold, load_legacy_pool_backstop_data};
 pub use pool::{
-    load_pool_backstop_data, require_compatible_pool, require_is_from_pool_factory,
-    require_registered_pool, PoolBackstopData, PoolBalance,
+    require_compatible_pool, require_is_from_pool_factory, require_registered_pool, PoolBalance,
 };
 
 mod user;
@@ -39,19 +38,19 @@ pub use user::{UserBalance, Q4W};
 
 mod tier;
 pub(crate) use tier::{
-    pool_state as load_pool_tier_state, preview_deposit, preview_withdrawal, token as tier_token,
-    update_totals as update_tier_totals, user_queued_shares, user_total_shares,
+    preview_deposit, preview_withdrawal, token as tier_token, update_totals as update_tier_totals,
+    user_queued_shares, user_total_shares,
 };
-pub use tier::{BackstopTier, PoolTierState, TierTotals};
+pub use tier::{BackstopTier, TierTotals};
 
 mod valuation;
 #[cfg(any(test, feature = "testutils"))]
 pub use valuation::set_test_valuation_override;
 pub(crate) use valuation::{
-    build_pool_valuation, quote_activation, quote_lp_amount, quote_status_set, quote_status_update,
-    validate_backstop_assets,
+    build_pool_data, build_pool_valuation, quote_activation, quote_lp_amount, quote_status_set,
+    quote_status_update, validate_backstop_assets,
 };
 pub use valuation::{
-    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolStatusQuote,
-    PoolValuation,
+    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolData,
+    PoolStatusQuote, PoolTierData,
 };

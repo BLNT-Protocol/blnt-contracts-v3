@@ -1,8 +1,4 @@
-use crate::{
-    constants::SCALAR_7,
-    dependencies::{BackstopClient, PoolBackstopData},
-    storage, PoolError,
-};
+use crate::{dependencies::BackstopClient, storage, PoolError};
 use soroban_sdk::{panic_with_error, Env};
 
 /// Update the pool status based on the backstop module
@@ -42,38 +38,6 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
     }
     pool_config.status = quote.status;
     storage::set_pool_config(e, &pool_config);
-}
-
-/// Calculate the threshold for the pool's backstop balance
-///
-/// Returns the threshold as a percentage^5 in SCALAR_7 points such that SCALAR_7 = 100%
-/// NOTE: The result is the percentage^5 to simplify the calculation of the pools product constant.
-///       Some useful results:
-///         - greater than 1 = 100+%
-///         - 1_0000000 = 100%
-///         - 0_0000100 = ~10%
-///         - 0_0000003 = ~5%
-///         - 0_0000000 = ~0-4%
-#[allow(dead_code)]
-pub fn calc_pool_backstop_threshold(pool_backstop_data: &PoolBackstopData) -> i128 {
-    // @dev: Calculation for pools product constant of underlying will often overflow i128
-    //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the
-    //       protocol does not need to differentiate between pools over the threshold product constant.
-    //       The calculation is:
-    //        - Threshold % = (bal_blnd^4 * bal_usdc) / PC^5 such that PC is 100k
-    let threshold_pc = 10_000_000_000_000_000_000_000_000i128; // 1e25 (100k^5)
-
-    // floor balances to nearest full unit and calculate saturated pool product constant
-    // and scale to SCALAR_7 to get final division result in SCALAR_7 points
-    let bal_blnd = pool_backstop_data.blnd / SCALAR_7;
-    let bal_usdc = pool_backstop_data.usdc / SCALAR_7;
-    let saturating_pool_pc = bal_blnd
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_usdc)
-        .saturating_mul(SCALAR_7); // 10^7 * 10^7
-    saturating_pool_pc / threshold_pc
 }
 
 #[cfg(test)]
@@ -1155,113 +1119,5 @@ mod tests {
             let new_pool_config = storage::get_pool_config(&e);
             assert_eq!(new_pool_config.status, 0);
         });
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 175_000_0000000,
-            q4w_pct: 0,
-            tokens: 20_000_0000000,
-            shares: 50_000_0000000,
-            usdc: 6_500_0000000,
-            token_spot_price: 0_5000000,
-        }; // ~90.5% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_6096289);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_too_small() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 5_000_0000000,
-            q4w_pct: 0,
-            tokens: 500_0000000,
-            shares: 1_000_0000000,
-            usdc: 1_000_0000000,
-            token_spot_price: 0_5000000,
-        }; // ~3.6% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_over() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200_000_0000000,
-            q4w_pct: 0,
-            tokens: 15_000_0000000,
-            shares: 1_000_0000000,
-            usdc: 6_250_0000000,
-            token_spot_price: 0_5000000,
-        }; // 100% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 1_0000000);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_saturates() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 50_000_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 999_999_0000000,
-            usdc: 10_000_000_0000000,
-            token_spot_price: 0_5000000,
-        }; // 362x threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 1701411_8346046);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_10_percent() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 20_000_0000000,
-            q4w_pct: 0,
-            tokens: 1_000_0000000,
-            shares: 1_000_0000000,
-            usdc: 625_0000000,
-            token_spot_price: 0_5000000,
-        }; // 10% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_0000100);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_5pct() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 10_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 999_999_0000000,
-            usdc: 312_5000000,
-            token_spot_price: 0_5000000,
-        }; // 5% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_0000003);
     }
 }

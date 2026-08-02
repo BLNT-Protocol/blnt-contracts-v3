@@ -13,15 +13,6 @@ pub enum BackstopTier {
     Usdc,
 }
 
-/// The complete accounting state for one pool and backstop tier.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct PoolTierState {
-    pub assets: i128,
-    pub queued_shares: i128,
-    pub shares: i128,
-}
-
 /// Aggregate accounting totals for one backstop tier.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[contracttype]
@@ -36,15 +27,6 @@ pub fn token(e: &Env, tier: BackstopTier) -> Address {
         BackstopTier::BlndUsdc => storage::get_blnd_usdc_token(e),
         BackstopTier::BlndXlm => storage::get_blnd_xlm_token(e),
         BackstopTier::Usdc => storage::get_usdc_token(e),
-    }
-}
-
-pub fn pool_state(e: &Env, tier: BackstopTier, pool: &Address) -> PoolTierState {
-    let balance = storage::get_pool_balance_for_tier(e, tier, pool);
-    PoolTierState {
-        assets: balance.tokens,
-        queued_shares: balance.q4w,
-        shares: balance.shares,
     }
 }
 
@@ -158,30 +140,16 @@ mod tests {
         assert_eq!(client.tier_token(&BackstopTier::BlndUsdc), blnd_usdc);
         assert_eq!(client.tier_token(&BackstopTier::BlndXlm), blnd_xlm);
         assert_eq!(client.tier_token(&BackstopTier::Usdc), usdc);
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::BlndUsdc, &pool),
-            PoolTierState {
-                assets: 100,
-                queued_shares: 0,
-                shares: 100,
-            }
-        );
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::BlndXlm, &pool),
-            PoolTierState {
-                assets: 200,
-                queued_shares: 0,
-                shares: 200,
-            }
-        );
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::Usdc, &pool),
-            PoolTierState {
-                assets: 300,
-                queued_shares: 0,
-                shares: 300,
-            }
-        );
+        let pool_data = client.pool_data(&pool);
+        assert_eq!(pool_data.blnd_usdc.assets, 100);
+        assert_eq!(pool_data.blnd_usdc.shares, 100);
+        assert_eq!(pool_data.blnd_usdc.queued_shares, 0);
+        assert_eq!(pool_data.blnd_xlm.assets, 200);
+        assert_eq!(pool_data.blnd_xlm.shares, 200);
+        assert_eq!(pool_data.blnd_xlm.queued_shares, 0);
+        assert_eq!(pool_data.usdc.assets, 300);
+        assert_eq!(pool_data.usdc.shares, 300);
+        assert_eq!(pool_data.usdc.queued_shares, 0);
         assert_eq!(
             client.tier_totals(&BackstopTier::BlndXlm),
             TierTotals {
@@ -304,14 +272,7 @@ mod tests {
             .try_deposit(&crate::BackstopTier::Usdc, &user, &incompatible_pool, &100)
             .is_err());
         assert_eq!(usdc_client.balance(&user), 200);
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::Usdc, &incompatible_pool),
-            PoolTierState {
-                assets: 0,
-                queued_shares: 0,
-                shares: 0,
-            }
-        );
+        assert_eq!(client.tier_totals(&BackstopTier::Usdc).assets, 0);
 
         factory.set_mock_pool(&compatible_pool);
         let pool_client = MockPoolClient::new(&e, &compatible_pool);

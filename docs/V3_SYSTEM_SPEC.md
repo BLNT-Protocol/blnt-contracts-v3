@@ -70,6 +70,10 @@ final redemption.
 
 Public deposit, queue, dequeue, and withdrawal operations select one of the
 three immutable assets through the `BackstopTier` discriminator.
+The public `pool_data` view returns all three tiers' accounting, active and
+queued valuation, active underlying BLND, and common valuation-validity bound
+in one snapshot. V3 exposes no separate pool-tier-state or pool-valuation
+view.
 
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless

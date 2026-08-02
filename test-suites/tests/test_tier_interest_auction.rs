@@ -135,16 +135,11 @@ fn exercise_tier_interest_auctions(wasm: bool) {
             .is_err(),
         "one active auction per tier must cap pool concurrency at three"
     );
+    let starting_data = fixture.backstop.pool_data(&pool_address);
     let starting_states = [
-        fixture
-            .backstop
-            .pool_tier_state(&BackstopTier::BlndUsdc, &pool_address),
-        fixture
-            .backstop
-            .pool_tier_state(&BackstopTier::BlndXlm, &pool_address),
-        fixture
-            .backstop
-            .pool_tier_state(&BackstopTier::Usdc, &pool_address),
+        starting_data.blnd_usdc,
+        starting_data.blnd_xlm,
+        starting_data.usdc,
     ];
 
     for (index, (tier, lot, bid)) in expected.iter().enumerate() {
@@ -258,7 +253,12 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     .iter()
     .enumerate()
     {
-        let ending = fixture.backstop.pool_tier_state(tier, &pool_address);
+        let ending_data = fixture.backstop.pool_data(&pool_address);
+        let ending = match tier {
+            BackstopTier::BlndUsdc => ending_data.blnd_usdc,
+            BackstopTier::BlndXlm => ending_data.blnd_xlm,
+            BackstopTier::Usdc => ending_data.usdc,
+        };
         assert_eq!(ending.shares, starting_states[index].shares);
         assert_eq!(
             ending.assets,

@@ -140,7 +140,8 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     let filler_lp_before = fixture.lp.balance(&filler);
     let tier_assets_before = fixture
         .backstop
-        .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address)
+        .pool_data(&pool_fixture.pool.address)
+        .blnd_usdc
         .assets;
 
     fixture
@@ -168,7 +169,8 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     assert_eq!(
         fixture
             .backstop
-            .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address,)
+            .pool_data(&pool_fixture.pool.address)
+            .blnd_usdc
             .assets,
         tier_assets_before - first.lot_amount
     );
@@ -301,7 +303,8 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     assert_eq!(
         fixture
             .backstop
-            .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address)
+            .pool_data(&pool_fixture.pool.address)
+            .blnd_usdc
             .assets,
         0
     );
@@ -350,7 +353,8 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     let reserve_before_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
     let tier_state = fixture
         .backstop
-        .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address);
+        .pool_data(&pool_fixture.pool.address)
+        .blnd_usdc;
     let tier_key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
     fixture.env.as_contract(&fixture.backstop.address, || {
         fixture.env.storage().persistent().set(
@@ -362,13 +366,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             },
         );
     });
-    assert_eq!(
-        fixture
-            .backstop
-            .pool_tier_state(&BackstopContractTier::BlndUsdc, &pool_fixture.pool.address)
-            .assets,
-        i128::MAX
-    );
     let auction_id = BytesN::from_array(&fixture.env, &[12; 32]);
     assert!(pool_fixture
         .pool

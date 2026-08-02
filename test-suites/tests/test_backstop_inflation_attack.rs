@@ -168,8 +168,9 @@ fn test_backstop_interest_auction_inflation_attack() {
     // -> check new backstop share value
     let backstop_data = fixture.backstop.pool_data(&pool_address);
     let shares_to_tokens = backstop_data
-        .tokens
-        .fixed_div_floor(backstop_data.shares, SCALAR_7)
+        .blnd_usdc
+        .assets
+        .fixed_div_floor(backstop_data.blnd_usdc.shares, SCALAR_7)
         .unwrap();
 
     // 4. Victim uses pool with inflated backstop share value

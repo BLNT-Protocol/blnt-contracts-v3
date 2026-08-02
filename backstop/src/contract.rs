@@ -1,11 +1,10 @@
 use crate::{
     backstop::{
-        self, build_pool_valuation, load_pool_backstop_data, load_pool_tier_state, preview_deposit,
-        preview_withdrawal, quote_activation, quote_status_set, quote_status_update, tier_token,
-        user_queued_shares, user_total_shares, validate_backstop_assets, ActivationQuote,
-        ActivationValues, BackstopTier, BadDebtLotQuote, BlndEmissionValues, InterestLotQuote,
-        PoolBackstopData, PoolStatusQuote, PoolTierState, PoolValuation, TakeRateQuote,
-        TakeRateValues, TierTotals, Q4W,
+        self, build_pool_data, build_pool_valuation, preview_deposit, preview_withdrawal,
+        quote_activation, quote_status_set, quote_status_update, tier_token, user_queued_shares,
+        user_total_shares, validate_backstop_assets, ActivationQuote, ActivationValues,
+        BackstopTier, BadDebtLotQuote, BlndEmissionValues, InterestLotQuote, PoolData,
+        PoolStatusQuote, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
     },
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
@@ -71,11 +70,11 @@ pub trait Backstop {
 
     /// Fetch the backstop data for the pool
     ///
-    /// Return a summary of the pool's backstop data
+    /// Return the pool's complete three-tier accounting and valuation.
     ///
     /// ### Arguments
     /// * `pool_address` - The address of the pool
-    fn pool_data(e: Env, pool: Address) -> PoolBackstopData;
+    fn pool_data(e: Env, pool: Address) -> PoolData;
 
     /// Fetch the token contract bound to one fixed backstop tier.
     fn tier_token(e: Env, tier: BackstopTier) -> Address;
@@ -91,9 +90,6 @@ pub trait Backstop {
 
     /// Fetch one user's bounded withdrawal queue in a tier.
     fn tier_withdrawal_queue(e: Env, tier: BackstopTier, user: Address, pool: Address) -> Vec<Q4W>;
-
-    /// Fetch a pool's complete state for one tier.
-    fn pool_tier_state(e: Env, tier: BackstopTier, pool: Address) -> PoolTierState;
 
     /// Fetch aggregate accounting totals for one tier.
     fn tier_totals(e: Env, tier: BackstopTier) -> TierTotals;
@@ -155,9 +151,6 @@ pub trait Backstop {
         values: ActivationValues,
         currently_active: bool,
     ) -> ActivationQuote;
-
-    /// Return one registered pool's canonical active and queued valuation.
-    fn pool_valuation(e: Env, pool: Address) -> PoolValuation;
 
     /// Quote activation from canonical pool accounting and valuation.
     fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote;
@@ -478,8 +471,8 @@ impl Backstop for BackstopContract {
         withdraw_tier(e, tier, from, pool_address, amount, to)
     }
 
-    fn pool_data(e: Env, pool: Address) -> PoolBackstopData {
-        load_pool_backstop_data(&e, &pool)
+    fn pool_data(e: Env, pool: Address) -> PoolData {
+        build_pool_data(&e, &pool)
     }
 
     fn tier_token(e: Env, tier: BackstopTier) -> Address {
@@ -502,10 +495,6 @@ impl Backstop for BackstopContract {
 
     fn tier_withdrawal_queue(e: Env, tier: BackstopTier, user: Address, pool: Address) -> Vec<Q4W> {
         storage::get_user_balance_for_tier(&e, tier, &pool, &user).q4w
-    }
-
-    fn pool_tier_state(e: Env, tier: BackstopTier, pool: Address) -> PoolTierState {
-        load_pool_tier_state(&e, tier, &pool)
     }
 
     fn tier_totals(e: Env, tier: BackstopTier) -> TierTotals {
@@ -620,10 +609,6 @@ impl Backstop for BackstopContract {
         currently_active: bool,
     ) -> ActivationQuote {
         quote_activation(&e, &values, currently_active)
-    }
-
-    fn pool_valuation(e: Env, pool: Address) -> PoolValuation {
-        build_pool_valuation(&e, &pool)
     }
 
     fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote {

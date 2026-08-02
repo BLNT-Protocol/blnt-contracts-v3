@@ -2,82 +2,56 @@ use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
 use crate::{
-    constants::SCALAR_7,
-    dependencies::{CometClient, PoolClient, PoolFactoryClient},
+    dependencies::{PoolClient, PoolFactoryClient},
     errors::BackstopError,
     storage,
 };
 
-/// The pool's backstop data
-#[derive(Clone)]
-#[contracttype]
-pub struct PoolBackstopData {
-    pub tokens: i128,  // the number of backstop tokens held in the pool's backstop
-    pub shares: i128,  // the number of shares the pool's backstop has issued
-    pub q4w_pct: i128, // the percentage of shares/tokens queued for withdrawal
-    pub blnd: i128,    // the amount of blnd held in the pool's backstop via backstop tokens
-    pub usdc: i128,    // the amount of usdc held in the pool's backstop via backstop tokens
-    pub token_spot_price: i128, // the spot price sans fees in USDC of the backstop token (7 decimals)
+#[cfg(test)]
+use crate::{constants::SCALAR_7, dependencies::CometClient};
+
+#[cfg(test)]
+pub struct LegacyPoolBackstopData {
+    pub blnd: i128,
+    pub tokens: i128,
+    pub usdc: i128,
 }
 
-pub fn load_pool_backstop_data(e: &Env, address: &Address) -> PoolBackstopData {
+/// Preserve the frozen v2 reward-zone test model without exposing its
+/// BLND:USDC-only view in the v3 contract ABI.
+#[cfg(test)]
+pub fn load_legacy_pool_backstop_data(e: &Env, address: &Address) -> LegacyPoolBackstopData {
     let pool_balance = storage::get_pool_balance(e, address);
-    let q4w_pct = if pool_balance.shares > 0 {
-        pool_balance
-            .q4w
-            .fixed_div_ceil(pool_balance.shares, SCALAR_7)
-            .unwrap_optimized()
-    } else {
-        0
-    };
-
-    let blnd_usdc_token = storage::get_blnd_usdc_token(e);
-    let blnd_token = storage::get_blnd_token(e);
-    let usdc_token = storage::get_usdc_token(e);
-    let comet_client = CometClient::new(e, &blnd_usdc_token);
-    let total_comet_shares = comet_client.get_total_supply();
-    let total_blnd = comet_client.get_balance(&blnd_token);
-    let total_usdc = comet_client.get_balance(&usdc_token);
-
-    // underlying per LP token
-    let blnd_per_tkn = total_blnd
-        .fixed_div_floor(total_comet_shares, SCALAR_7)
+    let comet = CometClient::new(e, &storage::get_blnd_usdc_token(e));
+    let total_supply = comet.get_total_supply();
+    let blnd_per_token = comet
+        .get_balance(&storage::get_blnd_token(e))
+        .fixed_div_floor(total_supply, SCALAR_7)
         .unwrap_optimized();
-    let usdc_per_tkn = total_usdc
-        .fixed_div_floor(total_comet_shares, SCALAR_7)
+    let usdc_per_token = comet
+        .get_balance(&storage::get_usdc_token(e))
+        .fixed_div_floor(total_supply, SCALAR_7)
         .unwrap_optimized();
 
-    // spot price of backstop token in USDC, exlcuding slippage/fees
-    // LP token is 20% USDC, so 5x is the spot price without slippage/fees
-    let tkn_spot_price_sans_fee = usdc_per_tkn * 5;
-
-    if pool_balance.tokens > 0 {
-        let blnd = pool_balance
+    LegacyPoolBackstopData {
+        blnd: pool_balance
             .tokens
-            .fixed_mul_floor(blnd_per_tkn, SCALAR_7)
-            .unwrap_optimized();
-        let usdc = pool_balance
+            .fixed_mul_floor(blnd_per_token, SCALAR_7)
+            .unwrap_optimized(),
+        tokens: pool_balance.tokens,
+        usdc: pool_balance
             .tokens
-            .fixed_mul_floor(usdc_per_tkn, SCALAR_7)
-            .unwrap_optimized();
-        PoolBackstopData {
-            tokens: pool_balance.tokens,
-            shares: pool_balance.shares,
-            q4w_pct,
-            blnd,
-            usdc,
-            token_spot_price: tkn_spot_price_sans_fee,
-        }
-    } else {
-        PoolBackstopData {
-            tokens: 0,
-            shares: pool_balance.shares,
-            q4w_pct,
-            blnd: 0,
-            usdc: 0,
-            token_spot_price: tkn_spot_price_sans_fee,
-        }
+            .fixed_mul_floor(usdc_per_token, SCALAR_7)
+            .unwrap_optimized(),
     }
+}
+
+#[cfg(test)]
+pub fn is_pool_above_threshold(pool_data: &LegacyPoolBackstopData) -> bool {
+    let threshold = 10_000_000_000_000_000_000_000_000i128;
+    let blnd = pool_data.blnd / SCALAR_7;
+    let usdc = pool_data.usdc / SCALAR_7;
+    blnd.saturating_pow(4).saturating_mul(usdc) >= threshold
 }
 
 /// Verify the pool address was deployed by the Pool Factory.
@@ -112,29 +86,6 @@ pub fn require_registered_pool(e: &Env, address: &Address) {
     if !pool_factory_client.is_pool(address) {
         panic_with_error!(e, BackstopError::NotPool);
     }
-}
-
-/// Calculate the threshold for the pool's backstop balance
-///
-/// Returns true if the pool's backstop balance is above the threshold
-#[cfg(test)]
-pub fn is_pool_above_threshold(pool_backstop_data: &PoolBackstopData) -> bool {
-    // @dev: Calculation for pools product constant of underlying will often overflow i128
-    //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the
-    //       protocol does not need to differentiate between pools over the threshold product constant.
-    //       The calculation is:
-    //        - Threshold % = (bal_blnd^4 * bal_usdc) / PC^5 such that PC is 100k
-    let threshold_pc = 10_000_000_000_000_000_000_000_000i128; // 1e25 (100k^5)
-
-    // floor balances to nearest full unit and calculate saturated pool product constant
-    let bal_blnd = pool_backstop_data.blnd / SCALAR_7;
-    let bal_usdc = pool_backstop_data.usdc / SCALAR_7;
-    let saturating_pool_pc = bal_blnd
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_usdc);
-    saturating_pool_pc >= threshold_pc
 }
 
 /// The pool's backstop balances
@@ -234,138 +185,9 @@ impl PoolBalance {
 mod tests {
     use soroban_sdk::testutils::Address as _;
 
-    use crate::testutils::{
-        create_backstop, create_blnd_token, create_comet_lp_pool_with_tokens_per_share,
-        create_mock_pool_factory, create_usdc_token,
-    };
+    use crate::testutils::{create_backstop, create_mock_pool_factory};
 
     use super::*;
-
-    #[test]
-    fn test_load_pool_data() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 150_0000000,
-                    tokens: 250_0000000,
-                    q4w: 50_0000000,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 250_0000000);
-            assert_eq!(pool_data.q4w_pct, 0_3333334); // rounds up
-            assert_eq!(pool_data.blnd, 1_250_0000000);
-            assert_eq!(pool_data.usdc, 12_5000000);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
-
-    #[test]
-    fn test_load_pool_data_no_shares() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 0,
-                    tokens: 250_0000000,
-                    q4w: 0,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 250_0000000);
-            assert_eq!(pool_data.q4w_pct, 0);
-            assert_eq!(pool_data.blnd, 1_250_0000000);
-            assert_eq!(pool_data.usdc, 12_5000000);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
-
-    #[test]
-    fn test_load_pool_data_no_tokens() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 100_0000000,
-                    tokens: 0,
-                    q4w: 0,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 0);
-            assert_eq!(pool_data.q4w_pct, 0);
-            assert_eq!(pool_data.blnd, 0);
-            assert_eq!(pool_data.usdc, 0);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
 
     /********** require_is_from_pool_factory **********/
 
@@ -416,80 +238,6 @@ mod tests {
             require_is_from_pool_factory(&e, &not_pool_address, 0);
             assert!(false);
         });
-    }
-
-    /********** require_pool_above_threshold **********/
-
-    #[test]
-    fn test_require_pool_above_threshold_under() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200000_0000000,
-            q4w_pct: 0,
-            tokens: 20_000_0000000,
-            shares: 15_000_0000000,
-            usdc: 6_249_0000000,
-            token_spot_price: 0_1000000,
-        }; // ~99% threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_zero() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 5_000_0000000,
-            q4w_pct: 0,
-            tokens: 500_0000000,
-            shares: 500_0000000,
-            usdc: 1_000_0000000,
-            token_spot_price: 0_1000000,
-        }; // ~3.6% threshold - rounds to zero in calc
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_over() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200001_0000000,
-            q4w_pct: 0,
-            tokens: 15_000_0000000,
-            shares: 14_000_0000000,
-            usdc: 6_250_0000000,
-            token_spot_price: 0_1000000,
-        }; // 100% threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_saturates() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 50_000_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 1_099_999_0000000,
-            usdc: 10_000_000_0000000,
-            token_spot_price: 0_1000000,
-        }; // 362x threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(result);
     }
 
     /********** Logic **********/

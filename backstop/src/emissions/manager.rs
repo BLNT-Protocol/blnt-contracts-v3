@@ -14,7 +14,7 @@ use super::distributor::update_emission_data;
 
 #[cfg(test)]
 use crate::{
-    backstop::{is_pool_above_threshold, load_pool_backstop_data},
+    backstop::{is_pool_above_threshold, load_legacy_pool_backstop_data},
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_RZ_SIZE},
     dependencies::EmitterClient,
 };
@@ -33,7 +33,7 @@ pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) 
 
     // ensure to_add has met the minimum backstop deposit threshold
     // NOTE: "to_add" can only carry a pool balance if it is a deployed pool from the factory
-    let pool_data = load_pool_backstop_data(e, &to_add);
+    let pool_data = load_legacy_pool_backstop_data(e, &to_add);
     if !is_pool_above_threshold(&pool_data) {
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
@@ -68,7 +68,7 @@ pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
     let mut reward_zone = storage::get_reward_zone(e);
 
     // ensure to_remove has not met the backstop threshold
-    let pool_data = load_pool_backstop_data(e, &to_remove);
+    let pool_data = load_legacy_pool_backstop_data(e, &to_remove);
     if is_pool_above_threshold(&pool_data) {
         panic_with_error!(e, BackstopError::BadRequest);
     } else {

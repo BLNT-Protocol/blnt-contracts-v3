@@ -2,7 +2,7 @@ mod actions;
 pub use actions::{FlashLoan, Request, RequestType};
 
 mod bad_debt;
-pub use bad_debt::{bad_debt, check_and_handle_backstop_bad_debt, check_and_handle_user_bad_debt};
+pub use bad_debt::{bad_debt, check_and_handle_user_bad_debt};
 
 mod config;
 pub use config::{
@@ -37,9 +37,7 @@ mod user;
 pub use user::{Positions, User};
 
 mod status;
-pub use status::{
-    calc_pool_backstop_threshold, execute_set_pool_status, execute_update_pool_status,
-};
+pub use status::{execute_set_pool_status, execute_update_pool_status};
 
 mod gulp;
 pub use gulp::execute_gulp;

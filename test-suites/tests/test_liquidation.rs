@@ -1166,7 +1166,7 @@ fn test_bad_debt() {
     fixture.env.as_contract(&fixture.backstop.address, || {
         let key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
         let new_balance = PoolBalance {
-            shares: cur_pool_data.shares,
+            shares: cur_pool_data.blnd_usdc.shares,
             tokens: 0,
             q4w: 0,
         };

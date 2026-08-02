@@ -327,7 +327,7 @@ mod tests {
     use soroban_sdk::{testutils::Address as _, Address, BytesN};
 
     use crate::{
-        backstop::{PoolBalance, PoolValuation, TierTotals},
+        backstop::{PoolBalance, TierTotals},
         storage,
         testutils::{
             create_backstop, create_mock_pool, create_mock_pool_factory, create_usdc_token,
@@ -404,33 +404,17 @@ mod tests {
             client.pool_tier_committed_assets(&BackstopTier::Usdc, &pool),
             240 * SCALAR_7
         );
-        assert_eq!(
-            client.pool_valuation(&pool),
-            PoolValuation {
-                active_blnd: super::super::BlndEmissionValues {
-                    blnd_usdc: 50 * SCALAR_7,
-                    blnd_xlm: blnd_xlm_below_minimum,
-                },
-                active_values: super::super::ActivationValues {
-                    blnd_usdc: 50 * SCALAR_7,
-                    blnd_xlm: blnd_xlm_below_minimum,
-                    usdc: 260 * SCALAR_7,
-                },
-                queued_values: super::super::ActivationValues {
-                    blnd_usdc: 0,
-                    blnd_xlm: 0,
-                    usdc: 0,
-                },
-                valid_until: u64::MAX,
-            }
-        );
+        let pool_data = client.pool_data(&pool);
+        assert_eq!(pool_data.blnd_usdc.active_blnd, 50 * SCALAR_7);
+        assert_eq!(pool_data.blnd_usdc.active_value, 50 * SCALAR_7);
+        assert_eq!(pool_data.blnd_xlm.active_blnd, blnd_xlm_below_minimum);
+        assert_eq!(pool_data.blnd_xlm.active_value, blnd_xlm_below_minimum);
+        assert_eq!(pool_data.usdc.active_value, 260 * SCALAR_7);
+        assert_eq!(pool_data.valuation_valid_until, u64::MAX);
 
         client.release_bad_debt_lot(&pool, &auction_id);
         assert_eq!(client.pool_bad_debt_commitment_count(&pool), 0);
-        assert_eq!(
-            client.pool_valuation(&pool).active_values.usdc,
-            500 * SCALAR_7
-        );
+        assert_eq!(client.pool_data(&pool).usdc.active_value, 500 * SCALAR_7);
     }
 
     #[test]
@@ -565,14 +549,7 @@ mod tests {
             })
         );
         assert_eq!(usdc.balance(&recipient), 60 * SCALAR_7);
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::Usdc, &pool),
-            super::super::PoolTierState {
-                assets: 440 * SCALAR_7,
-                queued_shares: 0,
-                shares: initial_assets,
-            }
-        );
+        assert_eq!(client.pool_data(&pool).usdc.assets, 440 * SCALAR_7);
         assert_eq!(
             client.tier_totals(&BackstopTier::Usdc).assets,
             440 * SCALAR_7
@@ -607,14 +584,7 @@ mod tests {
             None
         );
         assert_eq!(usdc.balance(&recipient), 180 * SCALAR_7);
-        assert_eq!(
-            client.pool_tier_state(&BackstopTier::Usdc, &pool),
-            super::super::PoolTierState {
-                assets: 320 * SCALAR_7,
-                queued_shares: 0,
-                shares: initial_assets,
-            }
-        );
+        assert_eq!(client.pool_data(&pool).usdc.assets, 320 * SCALAR_7);
         assert_eq!(client.pool_bad_debt_commitment_count(&pool), 0);
     }
 }
