@@ -10,8 +10,8 @@ use crate::{
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
     emissions::{
-        self, BlndEmissionQuote, OngoingBlndSplit, OngoingDistribution, OngoingEmissionState,
-        PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
+        self, BlndEmissionQuote, OngoingBlndSplit, OngoingEmissionState, PoolEmissionReservation,
+        PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
     },
     errors::BackstopError,
     events::BackstopEvents,
@@ -107,7 +107,7 @@ pub trait Backstop {
     /// Return the BLND:USDC token through the v2-compatible getter.
     fn backstop_token(e: Env) -> Address;
 
-    /// Return the candidate's legacy-emitter migration state.
+    /// Return the candidate's incumbent-emitter migration state.
     fn migration_status(e: Env) -> MigrationStatus;
 
     fn prefunding_start(e: Env) -> u64;
@@ -134,23 +134,8 @@ pub trait Backstop {
 
     fn funded_backfill(e: Env) -> Option<i128>;
 
-    /// Atomically queue the candidate in the legacy emitter and open its epoch.
-    fn begin_migration(e: Env) -> u64;
-
-    /// Record a correct queue created directly through the legacy emitter.
-    fn open_migration_epoch(e: Env) -> u64;
-
-    /// Verify the current queue during its final seven-day preparation window.
-    fn prepare_migration(e: Env) -> u64;
-
-    /// Atomically execute the legacy-emitter swap and activate v3 accounting.
-    fn finalize_migration(e: Env) -> u64;
-
-    /// Synchronize after another caller directly executes the prepared swap.
-    fn sync_migration(e: Env) -> u64;
-
-    /// Fund exactly the scheduled migration backfill through the emitter drop.
-    fn fund_backfill(e: Env) -> i128;
+    /// Fund the scheduled migration backfill through the emitter's v2 drop.
+    fn drop(e: Env);
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
@@ -305,7 +290,7 @@ pub trait Backstop {
     fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
-    fn distribute(e: Env) -> OngoingDistribution;
+    fn distribute(e: Env) -> i128;
 
     /// Return aggregate BLND obligations, allocations, claims, and carries.
     fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
@@ -606,34 +591,9 @@ impl Backstop for BackstopContract {
         migration::funded_backfill(&e)
     }
 
-    fn begin_migration(e: Env) -> u64 {
+    fn drop(e: Env) {
         storage::extend_instance(&e);
-        migration::begin_migration(&e)
-    }
-
-    fn open_migration_epoch(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::open_migration_epoch(&e)
-    }
-
-    fn prepare_migration(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::prepare_migration(&e)
-    }
-
-    fn finalize_migration(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::finalize_migration(&e)
-    }
-
-    fn sync_migration(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::sync_migration(&e)
-    }
-
-    fn fund_backfill(e: Env) -> i128 {
-        storage::extend_instance(&e);
-        migration::fund_backfill(&e)
+        migration::drop(&e)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
@@ -896,12 +856,12 @@ impl Backstop for BackstopContract {
         emissions::quote_ongoing_blnd_split(&e, distribution, prior_carry)
     }
 
-    fn distribute(e: Env) -> OngoingDistribution {
+    fn distribute(e: Env) -> i128 {
         storage::extend_instance(&e);
         let distribution = emissions::distribute(&e);
 
         BackstopEvents::distribute(&e, distribution.distributed);
-        distribution
+        distribution.distributed
     }
 
     fn ongoing_emission_state(e: Env) -> OngoingEmissionState {

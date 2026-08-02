@@ -377,43 +377,56 @@ value.
 
 ### 6.1 Migration lifecycle and backfill — **Added**
 
-The backstop exposes a permissionless `Pending`, `Open`, `Prepared`, and
-`Active` lifecycle around the incumbent emitter's 31-day backstop-swap queue.
-Construction starts prefunding and fixes a 138-day absolute deadline. The
-original queue must start within 31 days of construction. Preparation is
-limited to the queue's final seven days, requires the candidate to directly
-hold strictly more BLND:USDC LP than the incumbent, and permanently anchors
-the recovery horizon to the original unlock. At most two retry queues may be
-verified within the original unlock plus 76 days.
+The backstop retains v2's permissionless `distribute` and `drop` migration
+surface around the incumbent emitter's 31-day backstop-swap queue. Construction
+starts prefunding and fixes a 138-day absolute deadline. A caller queues and
+executes replacement through the emitter's existing `queue_swap_backstop` and
+`swap_backstop` functions. The original queue must start within 31 days of
+construction and every observed queue must designate this backstop and
+BLND:XLM LP.
 
-`begin_migration` creates the queue and opens its accounting epoch;
-`open_migration_epoch` records an already observable valid queue. Every queue
-must designate this backstop and BLND:XLM LP. `finalize_migration` rechecks the
-prepared queue and BLND:USDC majority, invokes the emitter's backstop swap,
-and atomically activates ongoing accounting. If another caller invokes that
-swap first, `sync_migration` may activate the prepared candidate only through
-seven days after the verified unlock. While such a candidate remains
+As in v2, public `distribute` returns the allocated BLND amount and public
+`drop` returns no value. Detailed split and lifecycle state remain available
+through read-only queries and events rather than a replacement mutating API.
+
+Before replacement, `distribute` observes the live queue, opens the original
+accounting epoch, and checkpoints backfill. During the queue's final seven
+days it also verifies the candidate's strictly greater direct BLND:USDC
+balance and records the prepared queue. The original unlock permanently
+anchors the recovery horizon, and at most two retry queues may be verified
+within the original unlock plus 76 days. Observing a queue before a
+BLND-bearing weight mutation opens the epoch and requires a current
+distribution checkpoint, preventing later weight from receiving retroactive
+credit. An unverified replacement queue cannot advance backfill beyond the
+original or most recently verified unlock; a valid replacement catches up only
+when it is prepared.
+
+After a caller executes the prepared emitter swap, the next `distribute`
+detects the registered candidate and activates ongoing accounting through the
+same bounded synchronization path. It returns zero for that transition call,
+matching v2's first post-swap reset. Synchronization is available only through
+seven days after the verified unlock. While the candidate remains
 unsynchronized, BLND-bearing weight mutations and reward-zone edits fail
 closed; plain-USDC operations remain available.
 
 The original queue opens the ordinary emission indexes at one BLND per eligible
-second, capped at 10 million BLND. Canonical finalization checkpoints through
-its transition timestamp; synchronization checkpoints only through the
-verified unlock. Backfill uses the same 70/30 split, reward zone, carries, and
-cumulative indexes specified in Sections 6.2 and 6.3, except that only active,
-nonqueued underlying BLND in BLND:USDC LP contributes to either pool-level or
-depositor-level weight. BLND:XLM LP and plain USDC receive no backfill.
-Queueing checkpoints accrued BLND and stops future weight; dequeueing resumes
-at the current index. Queueing or withdrawal never forfeits already accrued
-BLND.
+second, capped at 10 million BLND. Synchronization checkpoints backfill only
+through the verified unlock, so the interval before a later direct swap is
+conservatively omitted. Backfill uses the same 70/30 split, reward zone,
+carries, and cumulative indexes specified in Sections 6.2 and 6.3, except
+that only active, nonqueued underlying BLND in BLND:USDC LP contributes to
+either pool-level or depositor-level weight. BLND:XLM LP and plain USDC receive
+no backfill. Queueing checkpoints accrued BLND and stops future weight;
+dequeueing resumes at the current index. Queueing or withdrawal never
+forfeits already accrued BLND.
 
-Successful migration awards no discretionary BLND. If the positive schedule
-is nonzero, `fund_backfill` may be called once after activation and must request
-exactly that amount from the emitter for this backstop alone. An exact increase
-in the configured BLND balance is required. Backstop and pool claims remain
-disabled until the full positive schedule is funded. Backfill uses the ordinary
-claim paths: BLND:USDC claims compound into that tier and the 30% pool tranche
-uses its ordinary reservation and claim accounting.
+Successful migration awards no discretionary BLND. If the schedule is
+positive, `drop` may be called once after activation and must request exactly
+that amount from the emitter for this backstop alone. An exact increase in the
+configured BLND balance is required. Backstop and pool claims remain disabled
+until the full positive schedule is funded. Backfill uses the ordinary claim
+paths: BLND:USDC claims compound into that tier and the 30% pool tranche uses
+its ordinary reservation and claim accounting.
 
 ### 6.2 Ongoing backstop-depositor emissions — **Extended and safety fixed**
 

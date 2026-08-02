@@ -42,6 +42,11 @@ pub enum MigrationStatus {
     Active,
 }
 
+pub(crate) enum DistributionTransition {
+    Backfill(u64),
+    Activated(u64),
+}
+
 pub(crate) fn initialize(e: &Env) {
     let prefunding_start = e.ledger().timestamp();
     let absolute_deadline =
@@ -70,6 +75,12 @@ pub(crate) fn require_active(e: &Env) {
 pub(crate) fn require_weight_mutation_allowed(e: &Env) {
     if is_active(e) {
         return;
+    }
+    if original_unlock(e).is_none() {
+        if let Some(queued) = emitter(e).get_queued_swap() {
+            require_valid_queue(e, &queued);
+            open_epoch(e, queued.unlock_time);
+        }
     }
     let Some(verified_unlock) = verified_queue_unlock(e) else {
         return;
@@ -192,16 +203,43 @@ pub(crate) fn record_backfill_distribution(e: &Env, amount: i128) {
         .set(&MigrationDataKey::ScheduledBackfill, &next);
 }
 
-pub(crate) fn backfill_checkpoint(e: &Env) -> u64 {
+pub(crate) fn distribution_transition(e: &Env) -> DistributionTransition {
     require_not_active(e);
-    let queued = emitter(e)
+    let client = emitter(e);
+    let candidate = e.current_contract_address();
+    if client.get_backstop() == candidate {
+        return DistributionTransition::Activated(synchronize(e));
+    }
+
+    let queued = client
         .get_queued_swap()
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::SwapNotQueued));
     require_valid_queue(e, &queued);
-    e.ledger().timestamp().min(queued.unlock_time)
+    if original_unlock(e).is_none() {
+        open_epoch(e, queued.unlock_time);
+    }
+
+    let now = e.ledger().timestamp();
+    let original = original_unlock(e).unwrap();
+    let verified = verified_queue_unlock(e);
+    let mut checkpoint_unlock =
+        if queued.unlock_time == original || verified == Some(queued.unlock_time) {
+            queued.unlock_time
+        } else {
+            verified.unwrap_or(original)
+        };
+    let preparation_start = queued
+        .unlock_time
+        .saturating_sub(PREPARATION_WINDOW_SECONDS);
+    if now >= preparation_start && now <= queued.unlock_time {
+        prepare_queue(e, &client, &candidate, &queued);
+        checkpoint_unlock = queued.unlock_time;
+    }
+
+    DistributionTransition::Backfill(now.min(checkpoint_unlock))
 }
 
-pub(crate) fn fund_backfill(e: &Env) -> i128 {
+pub(crate) fn drop(e: &Env) {
     if storage::get_backfill_funded_amount(e).is_some() {
         panic_with_error!(e, BackstopError::BackfillAlreadyFunded);
     }
@@ -226,48 +264,10 @@ pub(crate) fn fund_backfill(e: &Env) -> i128 {
     }
     storage::set_blnd_binding_verified(e);
     BackstopEvents::backfill_funded(e, scheduled);
-    scheduled
 }
 
-pub(crate) fn open_migration_epoch(e: &Env) -> u64 {
-    require_not_active(e);
-    if let Some(epoch_start) = migration_epoch_start(e) {
-        return epoch_start;
-    }
-    let queued = emitter(e)
-        .get_queued_swap()
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::SwapNotQueued));
-    require_valid_queue(e, &queued);
-    open_epoch(e, queued.unlock_time)
-}
-
-pub(crate) fn begin_migration(e: &Env) -> u64 {
-    require_not_active(e);
-    if original_unlock(e).is_some() {
-        panic_with_error!(e, BackstopError::MigrationEpochAlreadyOpen);
-    }
-    let client = emitter(e);
-    let candidate = e.current_contract_address();
-    client.queue_swap_backstop(&candidate, &storage::get_blnd_xlm_token(e));
-    let queued = client
-        .get_queued_swap()
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::SwapNotQueued));
-    require_valid_queue(e, &queued);
-    open_epoch(e, queued.unlock_time)
-}
-
-pub(crate) fn prepare_migration(e: &Env) -> u64 {
-    require_not_active(e);
-    let client = emitter(e);
-    let candidate = e.current_contract_address();
-    if client.get_backstop() == candidate {
-        panic_with_error!(e, BackstopError::EmitterAlreadyMigrated);
-    }
-    let queued = client
-        .get_queued_swap()
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::SwapNotQueued));
-    require_valid_queue(e, &queued);
-    require_candidate_balance_majority(e, &client, &candidate);
+fn prepare_queue(e: &Env, client: &EmitterClient<'_>, candidate: &Address, queued: &Swap) -> u64 {
+    require_candidate_balance_majority(e, client, candidate);
 
     let now = e.ledger().timestamp();
     let preparation_start = queued
@@ -321,31 +321,7 @@ pub(crate) fn prepare_migration(e: &Env) -> u64 {
     original
 }
 
-pub(crate) fn finalize_migration(e: &Env) -> u64 {
-    require_not_active(e);
-    let original = require_prepared(e);
-    if e.ledger().timestamp() > recovery_end(e, original) {
-        panic_with_error!(e, BackstopError::RecoveryHorizonExceeded);
-    }
-    let client = emitter(e);
-    let candidate = e.current_contract_address();
-    if client.get_backstop() == candidate {
-        panic_with_error!(e, BackstopError::EmitterAlreadyMigrated);
-    }
-    let queued = client
-        .get_queued_swap()
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::SwapNotQueued));
-    require_valid_queue(e, &queued);
-    require_verified_queue(e, &queued);
-    require_candidate_balance_majority(e, &client, &candidate);
-    client.swap_backstop();
-    if client.get_backstop() != candidate {
-        panic_with_error!(e, BackstopError::EmitterDidNotMigrate);
-    }
-    activate(e, e.ledger().timestamp())
-}
-
-pub(crate) fn sync_migration(e: &Env) -> u64 {
+fn synchronize(e: &Env) -> u64 {
     require_not_active(e);
     require_prepared(e);
     let verified = verified_queue_unlock(e).unwrap();
@@ -383,7 +359,7 @@ fn activate(e: &Env, requested_backfill_end: u64) -> u64 {
         .instance()
         .set(&MigrationDataKey::BackfillEnd, &end);
     BackstopEvents::migration_activated(e, activated, end);
-    activated
+    last_distribution
 }
 
 fn emitter(e: &Env) -> EmitterClient<'_> {
@@ -416,12 +392,6 @@ fn require_valid_queue(e: &Env, queued: &Swap) {
         || queued.new_backstop_token != storage::get_blnd_xlm_token(e)
     {
         panic_with_error!(e, BackstopError::InvalidQueuedSwap);
-    }
-}
-
-fn require_verified_queue(e: &Env, queued: &Swap) {
-    if verified_queue_unlock(e) != Some(queued.unlock_time) {
-        panic_with_error!(e, BackstopError::QueueNotVerified);
     }
 }
 
@@ -620,34 +590,40 @@ mod tests {
             EmitterClient::new(&self.e, &self.emitter)
         }
 
+        fn queue(&self) -> u64 {
+            self.emitter()
+                .queue_swap_backstop(&self.backstop, &self.blnd_xlm);
+            assert_eq!(self.client().distribute(), 0);
+            self.client().migration_epoch_start().unwrap()
+        }
+
         fn prepare(&self) {
             self.e
                 .ledger()
                 .set_timestamp(self.unlock() - PREPARATION_WINDOW_SECONDS);
-            self.client().prepare_migration();
+            self.client().distribute();
         }
 
-        fn finalize(&self) {
+        fn swap_and_sync(&self) {
             self.e.ledger().set_timestamp(self.unlock());
-            self.client().finalize_migration();
+            self.emitter().swap_backstop();
+            assert_eq!(self.client().distribute(), 0);
         }
 
-        fn prepare_and_finalize(&self) {
+        fn prepare_swap_and_sync(&self) {
             self.prepare();
-            self.finalize();
+            self.swap_and_sync();
         }
     }
 
     #[test]
     fn backfill_uses_ordinary_indexes_and_exact_funding() {
         let fixture = Fixture::create();
-        assert_eq!(fixture.client().begin_migration(), 1_000);
+        assert_eq!(fixture.queue(), 1_000);
 
         fixture.e.ledger().set_timestamp(1_010);
         let first = fixture.client().distribute();
-        assert_eq!(first.distributed, 10 * SCALAR_7);
-        assert_eq!(first.backstop_allocated, 7 * SCALAR_7);
-        assert_eq!(first.pool_allocated, 3 * SCALAR_7);
+        assert_eq!(first, 10 * SCALAR_7);
         let pool_state = fixture.client().pool_ongoing_emissions(&fixture.pool);
         assert!(pool_state.blnd_usdc_index > 0);
         assert_eq!(pool_state.blnd_xlm_index, 0);
@@ -670,12 +646,12 @@ mod tests {
             .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
             .is_err());
 
-        fixture.prepare_and_finalize();
+        fixture.prepare_swap_and_sync();
         let scheduled = fixture.client().scheduled_backfill();
         assert_eq!(scheduled, QUEUE_SECONDS as i128 * SCALAR_7);
         assert_eq!(fixture.client().funded_backfill(), None);
         fixture.e.ledger().set_timestamp(fixture.unlock() + 10);
-        assert_eq!(fixture.client().distribute().distributed, 10 * SCALAR_7);
+        assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert!(
             fixture
                 .client()
@@ -688,14 +664,14 @@ mod tests {
             .try_claim_ongoing_blnd(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
             .is_err());
 
-        assert_eq!(fixture.client().fund_backfill(), scheduled);
+        fixture.client().drop();
         assert_eq!(fixture.client().funded_backfill(), Some(scheduled));
         assert!(fixture.client().blnd_binding_verified());
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             scheduled + 10 * SCALAR_7
         );
-        assert!(fixture.client().try_fund_backfill().is_err());
+        assert!(fixture.client().try_drop().is_err());
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
             20 * SCALAR_7
@@ -703,9 +679,46 @@ mod tests {
     }
 
     #[test]
+    fn observed_queue_requires_checkpoint_before_later_weight_enters() {
+        let fixture = Fixture::create();
+        fixture
+            .emitter()
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
+        fixture.e.ledger().set_timestamp(1_010);
+
+        assert!(fixture
+            .client()
+            .try_deposit(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7,
+            )
+            .is_err());
+
+        assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
+        assert_eq!(
+            fixture
+                .client()
+                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc)
+                .accrued,
+            7 * SCALAR_7
+        );
+        assert_eq!(
+            fixture.client().deposit(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7,
+            ),
+            SCALAR_7
+        );
+    }
+
+    #[test]
     fn withdrawal_stops_future_weight_without_forfeiting_accrued_backfill() {
         let fixture = Fixture::create();
-        fixture.client().begin_migration();
+        fixture.queue();
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
         let accrued_before_queue = fixture
@@ -745,9 +758,9 @@ mod tests {
             &(11 * SCALAR_7),
         );
 
-        fixture.prepare_and_finalize();
+        fixture.prepare_swap_and_sync();
         assert_eq!(fixture.client().scheduled_backfill(), 10 * SCALAR_7);
-        fixture.client().fund_backfill();
+        fixture.client().drop();
         assert_eq!(
             fixture
                 .client()
@@ -772,9 +785,9 @@ mod tests {
     }
 
     #[test]
-    fn direct_swap_fails_closed_until_permissionless_synchronization() {
+    fn direct_swap_fails_closed_until_distribute_synchronizes() {
         let fixture = Fixture::create();
-        fixture.client().begin_migration();
+        fixture.queue();
         fixture.prepare();
         let unlock = fixture.unlock();
         fixture.e.ledger().set_timestamp(unlock);
@@ -805,7 +818,7 @@ mod tests {
             SCALAR_7
         );
 
-        assert_eq!(fixture.client().sync_migration(), unlock);
+        assert_eq!(fixture.client().distribute(), 0);
         assert_eq!(fixture.client().migration_status(), MigrationStatus::Active);
         assert_eq!(fixture.client().backfill_end(), Some(unlock));
         assert_eq!(
@@ -820,9 +833,9 @@ mod tests {
     }
 
     #[test]
-    fn preparation_rechecks_the_strict_legacy_token_majority() {
+    fn preparation_rechecks_the_strict_incumbent_token_majority() {
         let fixture = Fixture::create();
-        fixture.client().begin_migration();
+        fixture.queue();
         fixture.client().queue_withdrawal(
             &BackstopTier::BlndUsdc,
             &fixture.user,
@@ -846,7 +859,7 @@ mod tests {
             .e
             .ledger()
             .set_timestamp(fixture.unlock() - PREPARATION_WINDOW_SECONDS);
-        assert!(fixture.client().try_prepare_migration().is_err());
+        assert!(fixture.client().try_distribute().is_err());
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.incumbent),
             10 * SCALAR_7
@@ -856,7 +869,7 @@ mod tests {
     #[test]
     fn two_replacement_queues_preserve_the_original_horizon() {
         let fixture = Fixture::create();
-        let epoch_start = fixture.client().begin_migration();
+        let epoch_start = fixture.queue();
         fixture.prepare();
         let original_unlock = fixture.unlock();
         let token = TokenClient::new(&fixture.e, &fixture.blnd_usdc);
@@ -874,7 +887,7 @@ mod tests {
             .e
             .ledger()
             .set_timestamp(first_replacement_unlock - PREPARATION_WINDOW_SECONDS);
-        fixture.client().prepare_migration();
+        fixture.client().distribute();
         assert_eq!(fixture.client().retry_count(), 1);
 
         fixture
@@ -896,7 +909,7 @@ mod tests {
             .e
             .ledger()
             .set_timestamp(second_replacement_unlock - PREPARATION_WINDOW_SECONDS);
-        fixture.client().prepare_migration();
+        fixture.client().distribute();
         assert_eq!(fixture.client().retry_count(), MAX_RETRY_QUEUES);
         assert_eq!(
             second_replacement_unlock,
@@ -907,15 +920,62 @@ mod tests {
             .e
             .ledger()
             .set_timestamp(original_unlock + RECOVERY_HORIZON_SECONDS);
-        fixture.client().finalize_migration();
-        assert_eq!(fixture.client().scheduled_backfill(), 9_244_800 * SCALAR_7);
+        fixture.emitter().swap_backstop();
+        assert_eq!(fixture.client().distribute(), 0);
+        assert_eq!(fixture.client().scheduled_backfill(), 8_640_000 * SCALAR_7);
         assert_eq!(
             fixture.client().backfill_end(),
-            Some(epoch_start + 107 * DAY_IN_SECONDS)
+            Some(epoch_start + 100 * DAY_IN_SECONDS)
         );
         assert_eq!(
             fixture.client().backfill_cap(),
             Some(original_unlock + RECOVERY_HORIZON_SECONDS)
+        );
+    }
+
+    #[test]
+    fn unverified_replacement_does_not_extend_backfill() {
+        let fixture = Fixture::create();
+        let epoch_start = fixture.queue();
+        let original_unlock = fixture.unlock();
+
+        fixture.e.ledger().set_timestamp(original_unlock);
+        let token = TokenClient::new(&fixture.e, &fixture.blnd_usdc);
+        let incumbent_top_up = token.balance(&fixture.backstop) - token.balance(&fixture.incumbent);
+        token.transfer(&fixture.admin, &fixture.incumbent, &incumbent_top_up);
+        fixture.emitter().cancel_swap_backstop();
+        token.transfer(&fixture.admin, &fixture.backstop, &1);
+        fixture
+            .emitter()
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
+        let replacement_unlock = fixture.emitter().get_queued_swap().unwrap().unlock_time;
+
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(original_unlock + 10 * DAY_IN_SECONDS);
+        assert_eq!(
+            fixture.client().distribute(),
+            QUEUE_SECONDS as i128 * SCALAR_7
+        );
+        assert_eq!(
+            fixture.client().scheduled_backfill(),
+            QUEUE_SECONDS as i128 * SCALAR_7
+        );
+        assert_eq!(fixture.client().retry_count(), 0);
+
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(replacement_unlock - PREPARATION_WINDOW_SECONDS);
+        assert_eq!(
+            fixture.client().distribute(),
+            24 * DAY_IN_SECONDS as i128 * SCALAR_7
+        );
+        assert_eq!(fixture.client().retry_count(), 1);
+        assert_eq!(
+            fixture.client().scheduled_backfill(),
+            (replacement_unlock - PREPARATION_WINDOW_SECONDS - epoch_start) as i128 * SCALAR_7
         );
     }
 }

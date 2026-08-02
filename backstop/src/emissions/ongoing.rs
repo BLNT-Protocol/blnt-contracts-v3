@@ -50,7 +50,15 @@ pub(crate) struct OngoingClaim {
 
 pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
     if !migration::is_active(e) {
-        return checkpoint_backfill(e, migration::backfill_checkpoint(e));
+        return match migration::distribution_transition(e) {
+            migration::DistributionTransition::Backfill(checkpoint) => {
+                checkpoint_backfill(e, checkpoint)
+            }
+            migration::DistributionTransition::Activated(checkpoint) => {
+                let mut state = get_ongoing_emission_state(e);
+                advance_without_distribution(e, &mut state, checkpoint)
+            }
+        };
     }
 
     let backstop = e.current_contract_address();
@@ -833,6 +841,11 @@ mod tests {
             BackstopClient::new(&self.e, &self.backstop)
         }
 
+        fn distribution(&self) -> OngoingDistribution {
+            self.e
+                .as_contract(&self.backstop, || super::distribute(&self.e))
+        }
+
         fn pool(&self, blnd_usdc: i128, blnd_xlm: i128) -> Address {
             let pool = Address::generate(&self.e);
             MockPoolFactoryClient::new(&self.e, &self.factory).set_mock_pool(&pool);
@@ -897,7 +910,7 @@ mod tests {
 
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(
-            fixture.client().distribute(),
+            fixture.distribution(),
             OngoingDistribution {
                 backstop_allocated: 7 * SCALAR_7,
                 backstop_carry: 0,
@@ -935,7 +948,7 @@ mod tests {
 
         MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
-        let second_distribution = fixture.client().distribute();
+        let second_distribution = fixture.distribution();
         assert_eq!(second_distribution.distributed, 5 * SCALAR_7 + 1);
         assert_eq!(second_distribution.split_carry, 1);
         assert_eq!(
@@ -962,7 +975,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_005);
 
         assert!(!fixture.client().blnd_binding_verified());
-        assert_eq!(fixture.client().distribute().distributed, 5 * SCALAR_7);
+        assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
         assert!(fixture.client().blnd_binding_verified());
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
@@ -1186,7 +1199,7 @@ mod tests {
         fixture.set_reward_zone(&pools);
         fixture.e.ledger().set_timestamp(1_005);
 
-        let distribution = fixture.client().distribute();
+        let distribution = fixture.distribution();
         assert_eq!(distribution.distributed, 5 * SCALAR_7);
         assert_eq!(distribution.eligible_blnd, 300 * SCALAR_7);
         for pool in pools.iter() {
@@ -1204,7 +1217,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_005);
 
         assert_eq!(
-            fixture.client().distribute(),
+            fixture.distribution(),
             OngoingDistribution {
                 backstop_allocated: 0,
                 backstop_carry: 35_000_000,
@@ -1233,7 +1246,7 @@ mod tests {
 
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(
-            fixture.client().distribute(),
+            fixture.distribution(),
             OngoingDistribution {
                 backstop_allocated: 7 * SCALAR_7,
                 backstop_carry: 0,

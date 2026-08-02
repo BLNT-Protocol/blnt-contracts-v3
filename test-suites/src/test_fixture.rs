@@ -120,18 +120,20 @@ impl TestFixture<'_> {
             &pool_factory_id,
         );
 
-        // Exercise the production legacy-emitter queue before using this
+        // Exercise the production incumbent-emitter queue before using this
         // fixture as an active v3 deployment. One unattributed LP base unit is
         // sufficient because the synthetic incumbent holds none.
         lp_client.transfer(&bombadil, &backstop_id, &1);
         let migration_start = e.ledger().timestamp();
-        backstop_client.begin_migration();
+        emitter_client.queue_swap_backstop(&backstop_id, &blnd_xlm_lp);
+        backstop_client.distribute();
         e.ledger()
             .set_timestamp(migration_start + 24 * 60 * 60 * 24);
-        backstop_client.prepare_migration();
+        backstop_client.distribute();
         e.ledger()
             .set_timestamp(migration_start + 31 * 60 * 60 * 24);
-        backstop_client.finalize_migration();
+        emitter_client.swap_backstop();
+        backstop_client.distribute();
 
         // Test users are funded explicitly; a successful v3 migration has no
         // discretionary BLND recipient list.

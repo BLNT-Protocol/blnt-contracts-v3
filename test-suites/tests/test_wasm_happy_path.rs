@@ -889,7 +889,7 @@ fn test_wasm_happy_path() {
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
         backstop_blnd_balance
     );
-    backstop_blnd_balance += fixture.backstop.distribute().distributed;
+    backstop_blnd_balance += fixture.backstop.distribute();
     let backstop_accrual = fixture
         .backstop
         .user_ongoing_emissions(
