@@ -3,8 +3,6 @@
   "deployed_v2": {
     "description": "Exact Blend v2 WASMs deployed on Stellar mainnet",
     "source_commit": "ba22b487b2c5057a4ecc28b05b5193c28e4bd117",
-    "artifact_repository": "git@github.com:levinson/blend-v3-migration.git",
-    "artifact_directory": "deployed-artifacts/mainnet",
     "contracts": {
       "backstop": {
         "bytes": 30772,

@@ -68,6 +68,5 @@ pub enum BackstopError {
     MigrationEpochAlreadyOpen = 1048,
     BackfillAlreadyFunded = 1049,
     BackfillNotFunded = 1050,
-    BackfillAlreadyClaimed = 1051,
     InvalidBackfillFunding = 1052,
 }

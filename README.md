@@ -11,10 +11,6 @@ The contract specification is composed by
 [docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional v3
 changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
 
-Migration compatibility, deployment runners, and network evidence live in the
-separate
-[blend-v3-migration repository](https://github.com/levinson/blend-v3-migration).
-
 ## Audit status
 
 The v3-specific contract changes have not yet undergone an independent

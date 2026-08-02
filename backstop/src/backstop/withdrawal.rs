@@ -1,6 +1,6 @@
 use crate::{
     constants::MAX_Q4W_SIZE, contract::require_nonnegative, dependencies::PoolClient, emissions,
-    migration, storage, BackstopError,
+    storage, BackstopError,
 };
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
@@ -107,10 +107,6 @@ pub fn execute_withdraw_for_tier(
     emissions::prepare_pool_weight_change(e, tier, pool_address);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     pool_balance.withdraw(e, to_return, amount);
-    if tier == BackstopTier::BlndUsdc {
-        migration::record_blnd_usdc_withdrawal(e, from, pool_address, amount);
-    }
-
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     update_tier_totals(e, tier, -to_return, -amount, -amount);

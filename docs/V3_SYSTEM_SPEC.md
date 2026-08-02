@@ -172,7 +172,7 @@ take-rate allocation, or auctions based on issuer authorization state.
 This valuation governs activation, status, reward-zone membership, take-rate
 allocation, auction sizing, and supplier-loss eligibility. Emission weight
 uses the same-invocation underlying-BLND composition defined separately in
-Section 6.1.
+Section 6.2.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -375,7 +375,47 @@ value.
 
 ## 6. BLND emissions — **Added and extended**
 
-### 6.1 Ongoing backstop-depositor emissions — **Extended and safety fixed**
+### 6.1 Migration lifecycle and backfill — **Added**
+
+The backstop exposes a permissionless `Pending`, `Open`, `Prepared`, and
+`Active` lifecycle around the incumbent emitter's 31-day backstop-swap queue.
+Construction starts prefunding and fixes a 138-day absolute deadline. The
+original queue must start within 31 days of construction. Preparation is
+limited to the queue's final seven days, requires the candidate to directly
+hold strictly more BLND:USDC LP than the incumbent, and permanently anchors
+the recovery horizon to the original unlock. At most two retry queues may be
+verified within the original unlock plus 76 days.
+
+`begin_migration` creates the queue and opens its accounting epoch;
+`open_migration_epoch` records an already observable valid queue. Every queue
+must designate this backstop and BLND:XLM LP. `finalize_migration` rechecks the
+prepared queue and BLND:USDC majority, invokes the emitter's backstop swap,
+and atomically activates ongoing accounting. If another caller invokes that
+swap first, `sync_migration` may activate the prepared candidate only through
+seven days after the verified unlock. While such a candidate remains
+unsynchronized, BLND-bearing weight mutations and reward-zone edits fail
+closed; plain-USDC operations remain available.
+
+The original queue opens the ordinary emission indexes at one BLND per eligible
+second, capped at 10 million BLND. Canonical finalization checkpoints through
+its transition timestamp; synchronization checkpoints only through the
+verified unlock. Backfill uses the same 70/30 split, reward zone, carries, and
+cumulative indexes specified in Sections 6.2 and 6.3, except that only active,
+nonqueued underlying BLND in BLND:USDC LP contributes to either pool-level or
+depositor-level weight. BLND:XLM LP and plain USDC receive no backfill.
+Queueing checkpoints accrued BLND and stops future weight; dequeueing resumes
+at the current index. Queueing or withdrawal never forfeits already accrued
+BLND.
+
+Successful migration awards no discretionary BLND. If the positive schedule
+is nonzero, `fund_backfill` may be called once after activation and must request
+exactly that amount from the emitter for this backstop alone. An exact increase
+in the configured BLND balance is required. Backstop and pool claims remain
+disabled until the full positive schedule is funded. Backfill uses the ordinary
+claim paths: BLND:USDC claims compound into that tier and the 30% pool tranche
+uses its ordinary reservation and claim accounting.
+
+### 6.2 Ongoing backstop-depositor emissions — **Extended and safety fixed**
 
 `V2-EMISSIONS-002` applies, but a successful checkpoint assigns the 70% tranche
 immediately through the tier indexes below instead of the
@@ -392,7 +432,7 @@ E_{\mathrm{total}} - E_{\mathrm{backstop}} - E_{\mathrm{pool}}
 
 The candidate retains \(C_{\mathrm{next}}\) for the next split. Both tranches
 use the same reward-zone pool weight; the pool tranche remains segregated
-under Section 6.2.
+under Section 6.3.
 
 The maximum-30-pool permissionless reward zone in `V2-BACKSTOP-005` applies
 with these changes:
@@ -525,11 +565,10 @@ counters by the BLND consumed and returns the LP amount received.
 BLND:USDC accrual compounds into BLND:USDC and BLND:XLM accrual compounds into
 BLND:XLM. Claims are separate so one impaired Comet cannot block the other.
 Compounded shares are active backstop capital, receive no retroactive emission
-credit, and do not count as migration prefunding or migration backfill capital.
-Plain USDC is ineligible. The operation cannot include the 30% pool tranche,
-redirect entitlement, or move a claim between tiers.
+credit. Plain USDC is ineligible. The operation cannot include the 30% pool
+tranche, redirect entitlement, or move a claim between tiers.
 
-### 6.2 Pool supply and borrow emissions — **Custody extension**
+### 6.3 Pool supply and borrow emissions — **Custody extension**
 
 `V2-EMISSIONS-003` applies with these extensions:
 

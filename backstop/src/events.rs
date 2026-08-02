@@ -62,12 +62,6 @@ single_value_event!(
     [],
     amount: i128
 );
-vec_event!(
-    BackfillClaimedEvent,
-    "backfill_claimed",
-    [user: Address, pool: Address],
-    [recipient: Address, amount: i128]
-);
 #[contractevent(topics = ["bad_debt_lot_committed"], data_format = "vec")]
 struct BadDebtLotCommittedEvent {
     #[topic]
@@ -226,22 +220,6 @@ impl BackstopEvents {
 
     pub fn backfill_funded(e: &Env, amount: i128) {
         BackfillFundedEvent { amount }.publish(e);
-    }
-
-    pub fn backfill_claimed(
-        e: &Env,
-        user: Address,
-        pool: Address,
-        recipient: Address,
-        amount: i128,
-    ) {
-        BackfillClaimedEvent {
-            user,
-            pool,
-            recipient,
-            amount,
-        }
-        .publish(e);
     }
 
     pub fn bad_debt_lot_committed(

@@ -32,9 +32,10 @@ silently create a new v3 policy.
 ## Repository boundary
 
 - This repository contains the production v3 contract source, compatibility
-  crates, test mocks, and contract specifications.
-- Migration orchestration, cross-version fixtures, deployment runners, and
-  network evidence belong in the separate `blend-v3-migration` repository.
+  crates, test mocks, and contract specifications, including candidate-side
+  migration entry points and backfill accounting.
+- Keep cross-version fixtures, deployment runners, and network evidence outside
+  this repository.
 - Test mocks and compatibility crates MUST NOT become privileged production
   dependencies or alternate protocol-control paths.
 - Do not describe this candidate as audited, production-ready, or official.
@@ -77,8 +78,8 @@ first:
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
 - Ongoing BLND weight only for active, nonqueued underlying BLND in the two
   BLND-bearing tiers.
-- Ongoing backstop BLND claims compound single-sided into their originating
-  BLND-bearing Comet tier and credit active shares to the same user and pool.
+- Backstop BLND claims compound into the originating BLND-bearing tier and
+  credit active shares to the same user and pool.
 - Backstop value is derived only from current 80:20 Comet reserves, with
   BLND:USDC as the USDC anchor; do not add a backstop price oracle.
 - No protocol-wide governance, multisig, administrator recovery, emergency

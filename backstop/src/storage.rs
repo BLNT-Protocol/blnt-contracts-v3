@@ -87,7 +87,7 @@ pub struct PoolEmissionReservation {
     pub last_gulp: Option<u64>,
 }
 
-/// Aggregate accounting for ongoing BLND held by the backstop.
+/// Aggregate accounting for migration-backfill and ongoing BLND obligations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct OngoingEmissionState {
@@ -99,7 +99,7 @@ pub struct OngoingEmissionState {
     pub pool_carry: i128,
     pub split_carry: i128,
     pub total_claimed: i128,
-    pub total_received: i128,
+    pub total_distributed: i128,
 }
 
 /********** Storage Key Types **********/
@@ -119,7 +119,6 @@ const BACKFILL_EMISSIONS_KEY: &str = "BackfillEmis";
 #[cfg(test)]
 const BACKFILL_STATUS_KEY: &str = "Backfill";
 const BACKFILL_FUNDED_AMOUNT_KEY: &str = "BFundAmt";
-const TOTAL_BACKFILL_CLAIMED_KEY: &str = "BFClaimed";
 const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
@@ -631,7 +630,7 @@ pub fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
             pool_carry: 0,
             split_carry: 0,
             total_claimed: 0,
-            total_received: 0,
+            total_distributed: 0,
         })
 }
 
@@ -775,17 +774,6 @@ pub fn set_backfill_emissions(e: &Env, emissions: &i128) {
     );
 }
 
-/// Return the funded migration-backfill reserve that remains protected from
-/// ongoing-emission accounting.
-pub fn get_remaining_backfill_reserve(e: &Env) -> i128 {
-    let funded = get_backfill_funded_amount(e).unwrap_or(0);
-    let claimed = get_total_backfill_claimed(e);
-    if funded < 0 || claimed < 0 || claimed > funded {
-        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
-    }
-    funded - claimed
-}
-
 /// Return the exact migration-backfill amount received from the emitter.
 pub fn get_backfill_funded_amount(e: &Env) -> Option<i128> {
     e.storage()
@@ -795,32 +783,12 @@ pub fn get_backfill_funded_amount(e: &Env) -> Option<i128> {
 
 /// Record the exact migration-backfill amount received from the emitter.
 pub fn set_backfill_funded_amount(e: &Env, funded: i128) {
-    let claimed = get_total_backfill_claimed(e);
-    if funded < 0 || claimed < 0 || claimed > funded {
+    if funded < 0 {
         panic_with_error!(e, BackstopError::InvalidOngoingBalance);
     }
     e.storage()
         .instance()
         .set(&Symbol::new(e, BACKFILL_FUNDED_AMOUNT_KEY), &funded);
-}
-
-/// Return aggregate successful migration-backfill claims.
-pub fn get_total_backfill_claimed(e: &Env) -> i128 {
-    e.storage()
-        .instance()
-        .get(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY))
-        .unwrap_or(0)
-}
-
-/// Record aggregate migration-backfill claims.
-pub fn set_total_backfill_claimed(e: &Env, claimed: i128) {
-    let funded = get_backfill_funded_amount(e).unwrap_or(0);
-    if claimed < 0 || funded < 0 || claimed > funded {
-        panic_with_error!(e, BackstopError::InvalidOngoingBalance);
-    }
-    e.storage()
-        .instance()
-        .set(&Symbol::new(e, TOTAL_BACKFILL_CLAIMED_KEY), &claimed);
 }
 
 /// Get the current total backfill status

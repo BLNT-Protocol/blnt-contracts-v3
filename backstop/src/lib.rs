@@ -28,5 +28,5 @@ pub use emissions::{
     PoolEmissionReservation, PoolOngoingEmissions, RewardZoneCheckpoint, UserOngoingEmissions,
 };
 pub use errors::BackstopError;
-pub use migration::{MigrationPosition, MigrationStatus};
+pub use migration::MigrationStatus;
 pub use storage::{BackstopDataKey, BackstopEmissionData, PoolUserKey, UserEmissionData};

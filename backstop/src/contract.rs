@@ -15,7 +15,7 @@ use crate::{
     },
     errors::BackstopError,
     events::BackstopEvents,
-    migration::{self, MigrationPosition, MigrationStatus},
+    migration::{self, MigrationStatus},
     storage,
 };
 use soroban_sdk::{
@@ -130,21 +130,9 @@ pub trait Backstop {
 
     fn sync_deadline(e: Env) -> Option<u64>;
 
-    fn migration_position(e: Env, user: Address, pool: Address) -> MigrationPosition;
-
-    fn migration_weight(e: Env, user: Address, pool: Address) -> i128;
-
-    fn total_migration_weight(e: Env) -> i128;
-
     fn scheduled_backfill(e: Env) -> i128;
 
     fn funded_backfill(e: Env) -> Option<i128>;
-
-    fn total_backfill_claimed(e: Env) -> i128;
-
-    fn remaining_backfill(e: Env) -> i128;
-
-    fn quote_backfill(e: Env, user: Address, pool: Address) -> i128;
 
     /// Atomically queue the candidate in the legacy emitter and open its epoch.
     fn begin_migration(e: Env) -> u64;
@@ -163,9 +151,6 @@ pub trait Backstop {
 
     /// Fund exactly the scheduled migration backfill through the emitter drop.
     fn fund_backfill(e: Env) -> i128;
-
-    /// Claim one surviving position's migration backfill.
-    fn claim_backfill(e: Env, user: Address, pool: Address, recipient: Address) -> i128;
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
@@ -319,10 +304,10 @@ pub trait Backstop {
     /// Quote the immutable 70% backstop / 30% pool split with carry.
     fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
-    /// Reconcile and allocate newly received BLND across the reward zone.
+    /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> OngoingDistribution;
 
-    /// Return aggregate ongoing BLND receipts, allocations, and carries.
+    /// Return aggregate BLND obligations, allocations, claims, and carries.
     fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
 
     /// Return one pool's ongoing BLND allocation and active tier amounts.
@@ -331,7 +316,7 @@ pub trait Backstop {
     /// Return whether emitter output has bound the configured BLND token.
     fn blnd_binding_verified(e: Env) -> bool;
 
-    /// Return one user's pending ongoing BLND for an eligible backstop tier.
+    /// Return one user's pending BLND, including migration backfill.
     fn user_ongoing_emissions(
         e: Env,
         user: Address,
@@ -339,7 +324,7 @@ pub trait Backstop {
         tier: BackstopTier,
     ) -> UserOngoingEmissions;
 
-    /// Compound one eligible tier's ongoing BLND into that tier's Comet LP.
+    /// Compound one eligible tier's accrued BLND into that tier's Comet LP.
     fn claim_ongoing_blnd(
         e: Env,
         tier: BackstopTier,
@@ -611,21 +596,6 @@ impl Backstop for BackstopContract {
         migration::sync_deadline(&e)
     }
 
-    fn migration_position(e: Env, user: Address, pool: Address) -> MigrationPosition {
-        storage::extend_instance(&e);
-        migration::position(&e, &user, &pool)
-    }
-
-    fn migration_weight(e: Env, user: Address, pool: Address) -> i128 {
-        storage::extend_instance(&e);
-        migration::position_weight_read(&e, &user, &pool)
-    }
-
-    fn total_migration_weight(e: Env) -> i128 {
-        storage::extend_instance(&e);
-        migration::total_migration_weight(&e)
-    }
-
     fn scheduled_backfill(e: Env) -> i128 {
         storage::extend_instance(&e);
         migration::scheduled_backfill(&e)
@@ -634,21 +604,6 @@ impl Backstop for BackstopContract {
     fn funded_backfill(e: Env) -> Option<i128> {
         storage::extend_instance(&e);
         migration::funded_backfill(&e)
-    }
-
-    fn total_backfill_claimed(e: Env) -> i128 {
-        storage::extend_instance(&e);
-        migration::total_backfill_claimed(&e)
-    }
-
-    fn remaining_backfill(e: Env) -> i128 {
-        storage::extend_instance(&e);
-        migration::remaining_backfill(&e)
-    }
-
-    fn quote_backfill(e: Env, user: Address, pool: Address) -> i128 {
-        storage::extend_instance(&e);
-        migration::quote_backfill(&e, &user, &pool)
     }
 
     fn begin_migration(e: Env) -> u64 {
@@ -679,11 +634,6 @@ impl Backstop for BackstopContract {
     fn fund_backfill(e: Env) -> i128 {
         storage::extend_instance(&e);
         migration::fund_backfill(&e)
-    }
-
-    fn claim_backfill(e: Env, user: Address, pool: Address, recipient: Address) -> i128 {
-        storage::extend_instance(&e);
-        migration::claim_backfill(&e, &user, &pool, &recipient)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
@@ -950,7 +900,7 @@ impl Backstop for BackstopContract {
         storage::extend_instance(&e);
         let distribution = emissions::distribute(&e);
 
-        BackstopEvents::distribute(&e, distribution.received);
+        BackstopEvents::distribute(&e, distribution.distributed);
         distribution
     }
 

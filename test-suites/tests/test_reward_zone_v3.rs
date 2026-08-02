@@ -56,12 +56,12 @@ fn exercise_reward_zone(wasm: bool) {
     }
 
     fixture.backstop.add_reward(&first, &None);
+    fixture.backstop.distribute();
     fixture.backstop.add_reward(&second, &None);
     assert_eq!(fixture.backstop.reward_zone().len(), 2);
     assert!(fixture.backstop.reward_zone().contains(&first));
     assert!(fixture.backstop.reward_zone().contains(&second));
 
-    fixture.backstop.distribute();
     assert_eq!(
         fixture.backstop.reward_zone_checkpoint().unwrap().timestamp,
         e.ledger().timestamp()

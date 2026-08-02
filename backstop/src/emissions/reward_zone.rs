@@ -48,11 +48,11 @@ pub(crate) fn add_to_reward_zone(
     if !quote_activation(e, &valuation.active_values, false).meets_threshold {
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
-    let entrant_weight = eligible_blnd(e, &pool_spot_blnd_emission_values(e, to_add));
+    let entrant_weight = pool_weight(e, to_add);
     if entrant_weight <= 0 {
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
-    if !reward_zone.is_empty() {
+    if !reward_zone.is_empty() || !migration::is_active(e) {
         require_recent_distribution_checkpoint(e);
     }
 
@@ -64,7 +64,7 @@ pub(crate) fn add_to_reward_zone(
         let remove_index = reward_zone
             .first_index_of(to_remove.clone())
             .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidRewardZoneEntry));
-        let removed_weight = eligible_blnd(e, &pool_spot_blnd_emission_values(e, to_remove));
+        let removed_weight = pool_weight(e, to_remove);
         if entrant_weight <= removed_weight {
             panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
         }
@@ -84,7 +84,7 @@ pub(crate) fn remove_from_reward_zone(e: &Env, to_remove: &Address) {
     let remove_index = reward_zone
         .first_index_of(to_remove.clone())
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidRewardZoneEntry));
-    let removed_weight = eligible_blnd(e, &pool_spot_blnd_emission_values(e, to_remove));
+    let removed_weight = pool_weight(e, to_remove);
     if removed_weight > 0 {
         let valuation = build_pool_valuation(e, to_remove);
         if quote_activation(e, &valuation.active_values, true).meets_threshold {
@@ -102,6 +102,15 @@ fn set_reward_zone(e: &Env, reward_zone: &Vec<Address>) {
         panic_with_error!(e, BackstopError::RewardZoneFull);
     }
     storage::set_reward_zone(e, reward_zone);
+}
+
+fn pool_weight(e: &Env, pool: &Address) -> i128 {
+    let values = pool_spot_blnd_emission_values(e, pool);
+    if migration::is_active(e) {
+        eligible_blnd(e, &values)
+    } else {
+        values.blnd_usdc
+    }
 }
 
 fn require_recent_distribution_checkpoint(e: &Env) {
@@ -329,6 +338,20 @@ mod tests {
             0,
         );
         assert!(client.try_remove_reward(&first).is_err());
+    }
+
+    #[test]
+    fn first_pre_activation_member_cannot_receive_prior_distribution_time() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        fixture.mark_distribution_started(
+            fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
+        );
+
+        assert!(client.try_add_reward(&first, &None).is_err());
+        fixture.checkpoint(fixture.e.ledger().timestamp());
+        client.add_reward(&first, &None);
     }
 
     #[test]
