@@ -2,9 +2,7 @@ use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{
-    interest_tier_locked, require_compatible_pool, tier_token, update_tier_totals, BackstopTier,
-};
+use super::{interest_tier_locked, require_compatible_pool, tier_token, BackstopTier};
 
 /// Credit tier tokens already held by the backstop and mint user shares.
 pub(crate) fn credit_tier_shares(
@@ -25,7 +23,6 @@ pub(crate) fn credit_tier_shares(
 
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     storage::set_user_balance_for_tier(e, tier, pool_address, user, &user_balance);
-    update_tier_totals(e, tier, amount, to_mint, 0);
     to_mint
 }
 

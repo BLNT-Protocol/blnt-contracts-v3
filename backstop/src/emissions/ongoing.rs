@@ -779,7 +779,7 @@ mod tests {
     };
 
     use crate::{
-        backstop::{update_tier_totals, BackstopTier, PoolBalance, UserBalance},
+        backstop::{BackstopTier, PoolBalance, UserBalance},
         constants::{MAX_RZ_SIZE, SCALAR_7},
         migration, storage,
         testutils::{
@@ -870,8 +870,6 @@ mod tests {
                         tokens: blnd_xlm,
                     },
                 );
-                update_tier_totals(&self.e, BackstopTier::BlndUsdc, blnd_usdc, blnd_usdc, 0);
-                update_tier_totals(&self.e, BackstopTier::BlndXlm, blnd_xlm, blnd_xlm, 0);
             });
             pool
         }
@@ -1085,7 +1083,8 @@ mod tests {
         let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
         let shares_before = fixture
             .client()
-            .tier_shares(&BackstopTier::BlndUsdc, &user, &pool);
+            .user_balance(&BackstopTier::BlndUsdc, &pool, &user)
+            .shares;
 
         assert!(fixture
             .client()
@@ -1105,7 +1104,8 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .tier_shares(&BackstopTier::BlndUsdc, &user, &pool),
+                .user_balance(&BackstopTier::BlndUsdc, &pool, &user)
+                .shares,
             shares_before
         );
         assert_eq!(

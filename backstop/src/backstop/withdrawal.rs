@@ -5,10 +5,7 @@ use crate::{
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
-use super::{
-    interest_tier_locked, pool_bad_debt_commitment_count, tier_token, update_tier_totals,
-    BackstopTier, Q4W,
-};
+use super::{interest_tier_locked, pool_bad_debt_commitment_count, tier_token, BackstopTier, Q4W};
 
 /// Perform a queue for withdrawal from one fixed backstop tier.
 pub fn execute_queue_withdrawal_for_tier(
@@ -38,7 +35,6 @@ pub fn execute_queue_withdrawal_for_tier(
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    update_tier_totals(e, tier, 0, 0, amount);
     emissions::finish_pool_weight_change(e, tier, pool_address);
 
     user_balance.q4w.last().unwrap_optimized()
@@ -72,7 +68,6 @@ pub fn execute_dequeue_withdrawal_for_tier(
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    update_tier_totals(e, tier, 0, 0, -amount);
     emissions::finish_pool_weight_change(e, tier, pool_address);
 }
 
@@ -109,7 +104,6 @@ pub fn execute_withdraw_for_tier(
     pool_balance.withdraw(e, to_return, amount);
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    update_tier_totals(e, tier, -to_return, -amount, -amount);
     emissions::finish_pool_weight_change(e, tier, pool_address);
 
     if to_return > 0 {
@@ -883,10 +877,6 @@ mod tests {
             assert_eq!(pool.tokens, 0);
             assert_eq!(pool.shares, 1_0000001);
             assert_eq!(pool.q4w, 0);
-            let totals = storage::get_tier_totals(&e, BackstopTier::BlndUsdc);
-            assert_eq!(totals.assets, 0);
-            assert_eq!(totals.shares, 1_0000001);
-            assert_eq!(totals.queued_shares, 0);
         });
     }
 

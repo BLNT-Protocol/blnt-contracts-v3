@@ -1,10 +1,10 @@
 use crate::{
     backstop::{
         self, build_pool_data, build_pool_valuation, preview_deposit, preview_withdrawal,
-        quote_activation, quote_status_set, quote_status_update, tier_token, user_queued_shares,
-        user_total_shares, validate_backstop_assets, ActivationQuote, ActivationValues,
-        BackstopTier, BadDebtLotQuote, BlndEmissionValues, InterestLotQuote, PoolData,
-        PoolStatusQuote, TakeRateQuote, TakeRateValues, TierTotals, Q4W,
+        quote_activation, quote_status_set, quote_status_update, tier_token,
+        validate_backstop_assets, ActivationQuote, ActivationValues, BackstopTier, BadDebtLotQuote,
+        BlndEmissionValues, InterestLotQuote, PoolData, PoolStatusQuote, TakeRateQuote,
+        TakeRateValues, UserBalance, Q4W,
     },
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
@@ -79,20 +79,8 @@ pub trait Backstop {
     /// Fetch the token contract bound to one fixed backstop tier.
     fn tier_token(e: Env, tier: BackstopTier) -> Address;
 
-    /// Fetch one user's total active and queued shares in a tier.
-    fn tier_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128;
-
-    /// Fetch one user's queued shares in a tier.
-    fn tier_queued_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128;
-
-    /// Fetch one user's currently active shares in a tier.
-    fn tier_active_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128;
-
-    /// Fetch one user's bounded withdrawal queue in a tier.
-    fn tier_withdrawal_queue(e: Env, tier: BackstopTier, user: Address, pool: Address) -> Vec<Q4W>;
-
-    /// Fetch aggregate accounting totals for one tier.
-    fn tier_totals(e: Env, tier: BackstopTier) -> TierTotals;
+    /// Fetch one user's active shares and bounded withdrawal queue in a tier.
+    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
 
     /// Preview shares minted by a tier deposit.
     fn preview_tier_deposit(e: Env, tier: BackstopTier, pool: Address, amount: i128) -> i128;
@@ -479,26 +467,8 @@ impl Backstop for BackstopContract {
         tier_token(&e, tier)
     }
 
-    fn tier_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
-        let balance = storage::get_user_balance_for_tier(&e, tier, &pool, &user);
-        user_total_shares(&balance)
-    }
-
-    fn tier_queued_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
-        let balance = storage::get_user_balance_for_tier(&e, tier, &pool, &user);
-        user_queued_shares(&balance)
-    }
-
-    fn tier_active_shares(e: Env, tier: BackstopTier, user: Address, pool: Address) -> i128 {
-        storage::get_user_balance_for_tier(&e, tier, &pool, &user).shares
-    }
-
-    fn tier_withdrawal_queue(e: Env, tier: BackstopTier, user: Address, pool: Address) -> Vec<Q4W> {
-        storage::get_user_balance_for_tier(&e, tier, &pool, &user).q4w
-    }
-
-    fn tier_totals(e: Env, tier: BackstopTier) -> TierTotals {
-        storage::get_tier_totals(&e, tier)
+    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance {
+        storage::get_user_balance_for_tier(&e, tier, &pool, &user)
     }
 
     fn preview_tier_deposit(e: Env, tier: BackstopTier, pool: Address, amount: i128) -> i128 {

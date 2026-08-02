@@ -1,9 +1,6 @@
 use crate::{
-    backstop::{update_tier_totals, BackstopTier},
-    dependencies::CometClient,
-    errors::BackstopError,
-    events::BackstopEvents,
-    storage,
+    backstop::BackstopTier, dependencies::CometClient, errors::BackstopError,
+    events::BackstopEvents, storage,
 };
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
@@ -85,7 +82,6 @@ pub fn execute_claim(
 
                 storage::set_pool_balance(e, &pool_id, &pool_balance);
                 storage::set_user_balance(e, &pool_id, from, &user_balance);
-                update_tier_totals(e, BackstopTier::BlndUsdc, deposit_amount, to_mint, 0);
 
                 BackstopEvents::tier_deposit(
                     e,

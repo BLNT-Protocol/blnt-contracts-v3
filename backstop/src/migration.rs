@@ -746,7 +746,8 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .tier_shares(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool,),
+                .user_balance(&BackstopTier::BlndUsdc, &fixture.pool, &fixture.user)
+                .shares,
             0
         );
 
@@ -779,7 +780,8 @@ mod tests {
         assert!(
             fixture
                 .client()
-                .tier_shares(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool,)
+                .user_balance(&BackstopTier::BlndUsdc, &fixture.pool, &fixture.user)
+                .shares
                 > 0
         );
     }

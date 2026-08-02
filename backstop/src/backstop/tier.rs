@@ -1,8 +1,8 @@
-use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use soroban_sdk::{contracttype, Address, Env};
 
-use crate::{errors::BackstopError, storage};
+use crate::storage;
 
-use super::{PoolBalance, UserBalance};
+use super::PoolBalance;
 
 /// The fixed v3 backstop asset identifiers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,15 +13,6 @@ pub enum BackstopTier {
     Usdc,
 }
 
-/// Aggregate accounting totals for one backstop tier.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[contracttype]
-pub struct TierTotals {
-    pub assets: i128,
-    pub queued_shares: i128,
-    pub shares: i128,
-}
-
 pub fn token(e: &Env, tier: BackstopTier) -> Address {
     match tier {
         BackstopTier::BlndUsdc => storage::get_blnd_usdc_token(e),
@@ -30,58 +21,12 @@ pub fn token(e: &Env, tier: BackstopTier) -> Address {
     }
 }
 
-pub fn user_total_shares(balance: &UserBalance) -> i128 {
-    let mut total = balance.shares;
-    for entry in balance.q4w.iter() {
-        total += entry.amount;
-    }
-    total
-}
-
-pub fn user_queued_shares(balance: &UserBalance) -> i128 {
-    let mut total = 0;
-    for entry in balance.q4w.iter() {
-        total += entry.amount;
-    }
-    total
-}
-
 pub fn preview_deposit(pool_balance: &PoolBalance, assets: i128) -> i128 {
     pool_balance.convert_to_shares(assets)
 }
 
 pub fn preview_withdrawal(pool_balance: &PoolBalance, shares: i128) -> i128 {
     pool_balance.convert_to_tokens(shares)
-}
-
-pub fn update_totals(
-    e: &Env,
-    tier: BackstopTier,
-    asset_delta: i128,
-    share_delta: i128,
-    queued_share_delta: i128,
-) {
-    let mut totals = storage::get_tier_totals(e, tier);
-    totals.assets = totals
-        .assets
-        .checked_add(asset_delta)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    totals.shares = totals
-        .shares
-        .checked_add(share_delta)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    totals.queued_shares = totals
-        .queued_shares
-        .checked_add(queued_share_delta)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    if totals.assets < 0
-        || totals.shares < 0
-        || totals.queued_shares < 0
-        || totals.queued_shares > totals.shares
-    {
-        panic_with_error!(e, BackstopError::InternalError);
-    }
-    storage::set_tier_totals(e, tier, &totals);
 }
 
 #[cfg(test)]
@@ -150,23 +95,9 @@ mod tests {
         assert_eq!(pool_data.usdc.assets, 300);
         assert_eq!(pool_data.usdc.shares, 300);
         assert_eq!(pool_data.usdc.queued_shares, 0);
-        assert_eq!(
-            client.tier_totals(&BackstopTier::BlndXlm),
-            TierTotals {
-                assets: 200,
-                queued_shares: 0,
-                shares: 200,
-            }
-        );
-        assert_eq!(client.tier_shares(&BackstopTier::Usdc, &user, &pool), 300);
-        assert_eq!(
-            client.tier_active_shares(&BackstopTier::Usdc, &user, &pool),
-            300
-        );
-        assert_eq!(
-            client.tier_queued_shares(&BackstopTier::Usdc, &user, &pool),
-            0
-        );
+        let user_balance = client.user_balance(&BackstopTier::Usdc, &pool, &user);
+        assert_eq!(user_balance.shares, 300);
+        assert!(user_balance.q4w.is_empty());
     }
 
     #[test]
@@ -212,13 +143,16 @@ mod tests {
         }
         assert_eq!(
             client
-                .tier_withdrawal_queue(&BackstopTier::BlndUsdc, &user, &pool)
+                .user_balance(&BackstopTier::BlndUsdc, &pool, &user)
+                .q4w
                 .len()
                 + client
-                    .tier_withdrawal_queue(&BackstopTier::BlndXlm, &user, &pool)
+                    .user_balance(&BackstopTier::BlndXlm, &pool, &user)
+                    .q4w
                     .len()
                 + client
-                    .tier_withdrawal_queue(&BackstopTier::Usdc, &user, &pool)
+                    .user_balance(&BackstopTier::Usdc, &pool, &user)
+                    .q4w
                     .len(),
             MAX_Q4W_SIZE
         );
@@ -234,22 +168,9 @@ mod tests {
             6
         );
         assert_eq!(blnd_xlm_client.balance(&recipient), 6);
-        assert_eq!(
-            client.tier_active_shares(&BackstopTier::BlndXlm, &user, &pool),
-            94
-        );
-        assert_eq!(
-            client.tier_queued_shares(&BackstopTier::BlndXlm, &user, &pool),
-            0
-        );
-        assert_eq!(
-            client.tier_totals(&BackstopTier::BlndXlm),
-            TierTotals {
-                assets: 94,
-                queued_shares: 0,
-                shares: 94,
-            }
-        );
+        let user_balance = client.user_balance(&BackstopTier::BlndXlm, &pool, &user);
+        assert_eq!(user_balance.shares, 94);
+        assert!(user_balance.q4w.is_empty());
     }
 
     #[test]
@@ -272,7 +193,6 @@ mod tests {
             .try_deposit(&crate::BackstopTier::Usdc, &user, &incompatible_pool, &100)
             .is_err());
         assert_eq!(usdc_client.balance(&user), 200);
-        assert_eq!(client.tier_totals(&BackstopTier::Usdc).assets, 0);
 
         factory.set_mock_pool(&compatible_pool);
         let pool_client = MockPoolClient::new(&e, &compatible_pool);

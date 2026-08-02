@@ -3,7 +3,7 @@ use soroban_sdk::{
     TryFromVal, Val, Vec,
 };
 
-use crate::backstop::{BackstopTier, PoolBalance, TierTotals, UserBalance};
+use crate::backstop::{BackstopTier, PoolBalance, UserBalance};
 use crate::BackstopError;
 
 /********** Ledger Thresholds **********/
@@ -153,7 +153,6 @@ pub enum BackstopDataKey {
     PoolBalance(Address),
     TierUserBalance(PoolUserTierKey),
     TierPoolBalance(PoolTierKey),
-    TierTotals(BackstopTier),
     PoolUSDC(Address),
     RzEmis(Address),
     BEmisData(Address),
@@ -482,29 +481,6 @@ pub fn set_pool_balance_for_tier(
     e.storage()
         .persistent()
         .set::<BackstopDataKey, PoolBalance>(&key, balance);
-    e.storage()
-        .persistent()
-        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
-}
-
-/// Fetch aggregate accounting totals for one fixed backstop tier.
-pub fn get_tier_totals(e: &Env, tier: BackstopTier) -> TierTotals {
-    let key = BackstopDataKey::TierTotals(tier);
-    get_persistent_default(
-        e,
-        &key,
-        TierTotals::default,
-        LEDGER_THRESHOLD_SHARED,
-        LEDGER_BUMP_SHARED,
-    )
-}
-
-/// Set aggregate accounting totals for one fixed backstop tier.
-pub fn set_tier_totals(e: &Env, tier: BackstopTier, totals: &TierTotals) {
-    let key = BackstopDataKey::TierTotals(tier);
-    e.storage()
-        .persistent()
-        .set::<BackstopDataKey, TierTotals>(&key, totals);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);

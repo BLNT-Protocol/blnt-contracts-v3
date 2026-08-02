@@ -479,7 +479,8 @@ fn test_backstop() {
     let sam_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
     let sam_shares = fixture
         .backstop
-        .tier_shares(&BackstopTier::BlndUsdc, &sam, &pool.address);
+        .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
+        .shares;
     let lp_compounded =
         fixture
             .backstop
@@ -520,7 +521,8 @@ fn test_backstop() {
         bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let shares_minted = fixture
         .backstop
-        .tier_shares(&BackstopTier::BlndUsdc, &sam, &pool.address)
+        .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
+        .shares
         - sam_shares;
     assert_eq!(
         event,

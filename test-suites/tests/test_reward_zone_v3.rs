@@ -95,7 +95,8 @@ fn exercise_reward_zone(wasm: bool) {
     assert_eq!(
         fixture
             .backstop
-            .tier_active_shares(&BackstopTier::BlndUsdc, &depositor, &second),
+            .user_balance(&BackstopTier::BlndUsdc, &second, &depositor)
+            .shares,
         0
     );
 }

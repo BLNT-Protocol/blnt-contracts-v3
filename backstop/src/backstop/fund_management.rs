@@ -2,7 +2,7 @@ use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{require_is_from_pool_factory, update_tier_totals, BackstopTier};
+use super::{require_is_from_pool_factory, BackstopTier};
 
 /// Perform a draw from a pool's backstop
 ///
@@ -15,7 +15,6 @@ pub fn execute_draw(e: &Env, pool_address: &Address, amount: i128, to: &Address)
 
     pool_balance.withdraw(e, amount, 0);
     storage::set_pool_balance(e, pool_address, &pool_balance);
-    update_tier_totals(e, BackstopTier::BlndUsdc, -amount, 0, 0);
     emissions::finish_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
 
     let blnd_usdc_token = TokenClient::new(e, &storage::get_blnd_usdc_token(e));
@@ -43,7 +42,6 @@ pub fn execute_donate(e: &Env, from: &Address, pool_address: &Address, amount: i
 
     pool_balance.deposit(amount, 0);
     storage::set_pool_balance(e, pool_address, &pool_balance);
-    update_tier_totals(e, BackstopTier::BlndUsdc, amount, 0, 0);
     emissions::finish_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
 }
 

@@ -3,9 +3,7 @@ use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, I25
 
 use crate::{constants::SCALAR_7, emissions, errors::BackstopError, storage};
 
-use super::{
-    quote_lp_amount, require_registered_pool, tier_token, update_tier_totals, BackstopTier,
-};
+use super::{quote_lp_amount, require_registered_pool, tier_token, BackstopTier};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -309,7 +307,6 @@ fn apply_pool_tier_gain(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     }
     balance.tokens = checked_add(e, balance.tokens, assets);
     storage::set_pool_balance_for_tier(e, tier, pool, &balance);
-    update_tier_totals(e, tier, assets, 0, 0);
     emissions::finish_pool_weight_change(e, tier, pool);
 }
 

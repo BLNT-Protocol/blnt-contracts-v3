@@ -3,10 +3,7 @@ use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, I256};
 
 use crate::{constants::SCALAR_7, emissions, storage, BackstopError};
 
-use super::{
-    quote_lp_amount, require_registered_pool, tier_token, update_tier_totals, AssetValuation,
-    BackstopTier,
-};
+use super::{quote_lp_amount, require_registered_pool, tier_token, AssetValuation, BackstopTier};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -293,7 +290,6 @@ fn apply_pool_tier_loss(e: &Env, tier: BackstopTier, pool: &Address, assets: i12
     let mut balance = storage::get_pool_balance_for_tier(e, tier, pool);
     balance.withdraw(e, assets, 0);
     storage::set_pool_balance_for_tier(e, tier, pool, &balance);
-    update_tier_totals(e, tier, -assets, 0, 0);
     emissions::finish_pool_weight_change(e, tier, pool);
 }
 
@@ -327,7 +323,7 @@ mod tests {
     use soroban_sdk::{testutils::Address as _, Address, BytesN};
 
     use crate::{
-        backstop::{PoolBalance, TierTotals},
+        backstop::PoolBalance,
         storage,
         testutils::{
             create_backstop, create_mock_pool, create_mock_pool_factory, create_usdc_token,
@@ -513,17 +509,6 @@ mod tests {
         let initial_assets = 500 * SCALAR_7;
         usdc.mint(&backstop, &initial_assets);
         set_tier_balance(&e, &backstop, &pool, BackstopTier::Usdc, initial_assets);
-        e.as_contract(&backstop, || {
-            storage::set_tier_totals(
-                &e,
-                BackstopTier::Usdc,
-                &TierTotals {
-                    assets: initial_assets,
-                    queued_shares: 0,
-                    shares: initial_assets,
-                },
-            );
-        });
 
         let client = BackstopClient::new(&e, &backstop);
         let auction_id = BytesN::from_array(&e, &[8; 32]);
@@ -550,10 +535,6 @@ mod tests {
         );
         assert_eq!(usdc.balance(&recipient), 60 * SCALAR_7);
         assert_eq!(client.pool_data(&pool).usdc.assets, 440 * SCALAR_7);
-        assert_eq!(
-            client.tier_totals(&BackstopTier::Usdc).assets,
-            440 * SCALAR_7
-        );
 
         assert!(client
             .try_settle_bad_debt_lot(

@@ -61,12 +61,11 @@ factory registration without calling back into the pool. Every
 factory-deployed pool MUST preserve this withdrawal interface.
 
 Each pool-tier independently applies `V2-BACKSTOP-002`. Checked `assets`,
-`shares`, and `queued_shares` are isolated per pool and tier; global per-tier
-totals provide only a bounded conservation check and grant no cross-pool
-claim. Raw transfers create no shares or protocol role. Active and queued
-partitions share one exchange rate, absorb gains and losses proportionally,
-convert independently with floor rounding, and leave partition dust until
-final redemption.
+`shares`, and `queued_shares` are isolated per pool and tier and grant no
+cross-pool claim. Raw transfers create no shares or protocol role. Active and
+queued partitions share one exchange rate, absorb gains and losses
+proportionally, convert independently with floor rounding, and leave partition
+dust until final redemption.
 
 Public deposit, queue, dequeue, and withdrawal operations select one of the
 three immutable assets through the `BackstopTier` discriminator.
