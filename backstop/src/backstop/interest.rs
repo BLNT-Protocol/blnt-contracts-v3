@@ -225,21 +225,6 @@ pub(crate) fn settle_interest_lot(
     }
 }
 
-pub(crate) fn interest_commitment(
-    e: &Env,
-    pool: &Address,
-    tier: BackstopTier,
-    auction_id: &BytesN<32>,
-) -> Option<InterestLotQuote> {
-    get_interest_commitment(e, pool, tier).and_then(|commitment| {
-        if commitment.auction_id == *auction_id {
-            Some(commitment.quote)
-        } else {
-            None
-        }
-    })
-}
-
 pub(crate) fn interest_tier_locked(e: &Env, tier: BackstopTier, pool: &Address) -> bool {
     get_interest_commitment(e, pool, tier).is_some()
 }

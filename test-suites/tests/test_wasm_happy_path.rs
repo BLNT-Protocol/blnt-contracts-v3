@@ -64,12 +64,6 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
     assert_eq!(auction.lot_quote.tier, BackstopTier::BlndUsdc);
     assert!(auction.lot_quote.lot_amount > 0);
     assert_eq!(
-        fixture
-            .backstop
-            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
-        1
-    );
-    assert_eq!(
         pool_fixture.pool.backstop_loss_state(),
         BackstopLossState {
             committed_loss_entries: 1,
@@ -84,12 +78,6 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         .set_sequence_number(auction.block + 500);
     pool_fixture.pool.delete_stale_bad_debt_auction();
     assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
-    assert_eq!(
-        fixture
-            .backstop
-            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
-        0
-    );
     assert_eq!(
         pool_fixture.pool.backstop_loss_state(),
         BackstopLossState {
@@ -197,10 +185,10 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         )
     );
     assert_eq!(
-        fixture
-            .backstop
-            .bad_debt_commitment(&pool_fixture.pool.address, &auction_id)
-            .unwrap()
+        pool_fixture
+            .pool
+            .get_bad_debt_auction()
+            .lot_quote
             .lot_amount,
         auction.lot_quote.lot_amount - first.base_lot_amount
     );
@@ -216,12 +204,6 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         filler_lp_before + first.lot_amount + second.lot_amount
     );
     assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
-    assert_eq!(
-        fixture
-            .backstop
-            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
-        0
-    );
     let remaining_debt = pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)

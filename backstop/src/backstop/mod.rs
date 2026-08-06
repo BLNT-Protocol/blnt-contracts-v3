@@ -9,16 +9,15 @@ mod bad_debt;
 pub use bad_debt::BadDebtLotQuote;
 pub(crate) use bad_debt::{
     available_pool_tier_assets, bad_debt_commitment, commit_bad_debt_lot,
-    pool_bad_debt_commitment_count, pool_tier_committed_assets, quote_bad_debt_lot,
-    release_bad_debt_lot, settle_bad_debt_lot,
+    pool_bad_debt_commitment_count, quote_bad_debt_lot, release_bad_debt_lot, settle_bad_debt_lot,
 };
 
 mod interest;
 pub(crate) use interest::{
-    commit_interest_lot, interest_commitment, interest_tier_locked, quote_pool_take_rate_batch,
-    quote_take_rate, release_interest_lot, settle_interest_lot,
+    commit_interest_lot, interest_tier_locked, quote_pool_take_rate_batch, release_interest_lot,
+    settle_interest_lot,
 };
-pub use interest::{InterestLotQuote, TakeRateQuote, TakeRateValues};
+pub use interest::{InterestLotQuote, TakeRateQuote};
 
 mod withdrawal;
 pub use withdrawal::{

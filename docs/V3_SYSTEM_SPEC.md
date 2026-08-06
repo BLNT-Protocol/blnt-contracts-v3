@@ -74,6 +74,10 @@ queued valuation, active underlying BLND, and common valuation-validity bound
 in one snapshot. V3 exposes no separate pool-tier-state or pool-valuation
 view.
 
+The public backstop surface is limited to user operations, pool callbacks,
+and consolidated operational views. Pure calculations used only by the
+contracts are not separate entry points.
+
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
 shares exist and may initialize a fresh one-to-one exchange rate only after all
@@ -389,8 +393,9 @@ construction and every observed queue must designate this backstop and
 BLND:XLM LP.
 
 As in v2, public `distribute` returns the allocated BLND amount and public
-`drop` returns no value. Detailed split and lifecycle state remain available
-through read-only queries and events rather than a replacement mutating API.
+`drop` returns no value. One read-only `migration_state` snapshot exposes the
+complete lifecycle state; accounting views and events expose the detailed
+split without adding replacement mutating APIs.
 
 Before replacement, `distribute` observes the live queue, opens the original
 accounting epoch, and checkpoints backfill. During the queue's final seven

@@ -720,7 +720,10 @@ mod tests {
         );
         assert_eq!(pool_data.valuation_valid_until, u64::MAX);
 
-        let quote = backstop_client.quote_pool_activation(&pool, &false);
+        let quote = e.as_contract(&backstop, || {
+            let valuation = build_pool_valuation(&e, &pool);
+            quote_activation(&e, &valuation.active_values, false)
+        });
         assert_eq!(quote.eligible_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
         assert!(quote.meets_threshold);
     }

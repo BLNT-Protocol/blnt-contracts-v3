@@ -655,10 +655,6 @@ mod tests {
         assert_eq!(auction.lot_quote.tier, crate::BackstopTier::BlndUsdc);
         assert_eq!(auction.lot_quote.lot_amount, 60 * SCALAR_7);
         assert_eq!(
-            backstop_client.pool_bad_debt_commitment_count(&pool_address),
-            1
-        );
-        assert_eq!(
             pool_client.backstop_loss_state(),
             crate::BackstopLossState {
                 committed_loss_entries: 1,
@@ -680,10 +676,6 @@ mod tests {
         assert_eq!(
             pool_client.get_bad_debt_auction(),
             auction_before_failed_fill
-        );
-        assert_eq!(
-            backstop_client.pool_bad_debt_commitment_count(&pool_address),
-            1
         );
         assert!(pool_client
             .get_positions(&unhealthy_filler)
@@ -736,13 +728,6 @@ mod tests {
             }
         );
         assert_eq!(
-            backstop_client
-                .bad_debt_commitment(&pool_address, &auction_id)
-                .unwrap()
-                .lot_amount,
-            30 * SCALAR_7
-        );
-        assert_eq!(
             pool_client.backstop_loss_state(),
             crate::BackstopLossState {
                 committed_loss_entries: 1,
@@ -754,10 +739,6 @@ mod tests {
         e.ledger().set_sequence_number(auction.block + 500);
         pool_client.delete_stale_bad_debt_auction();
         assert!(!e.as_contract(&pool_address, || has_prepared_bad_debt_auction(&e)));
-        assert_eq!(
-            backstop_client.pool_bad_debt_commitment_count(&pool_address),
-            0
-        );
         assert_eq!(pool_client.backstop_loss_state().committed_loss_entries, 0);
 
         let discounted_auction_id = BytesN::from_array(&e, &[9; 32]);
@@ -1077,9 +1058,5 @@ mod tests {
             .try_continue_bad_debt_resolution(&BytesN::from_array(&e, &[15; 32]))
             .is_err());
         assert!(pool_client.try_get_bad_debt_auction().is_err());
-        assert_eq!(
-            backstop_client.pool_bad_debt_commitment_count(&pool_address),
-            0
-        );
     }
 }

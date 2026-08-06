@@ -532,13 +532,6 @@ fn test_liquidations() {
         bad_debt_auction_data.lot_quote.lot_amount - first_fill.base_lot_amount
     );
     assert_eq!(new_auction.block, bad_debt_auction_data.block);
-    assert_eq!(
-        fixture
-            .backstop
-            .pool_bad_debt_commitment_count(&pool_fixture.pool.address),
-        1
-    );
-
     // validate that frodo cannot withdraw backstop during bad debt auction
     let withdraw_result = fixture.backstop.try_withdraw(
         &backstop::BackstopTier::BlndUsdc,

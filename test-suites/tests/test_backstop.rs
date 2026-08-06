@@ -634,12 +634,10 @@ fn test_backstop_constructor() {
         backstop_client.backstop_token(&BackstopTier::BlndUsdc),
         backstop_token
     );
-    assert_eq!(backstop_client.migration_status(), MigrationStatus::Pending);
-    assert_eq!(backstop_client.prefunding_start(), 0);
-    assert_eq!(
-        backstop_client.absolute_migration_deadline(),
-        138 * 24 * 60 * 60
-    );
+    let migration = backstop_client.migration_state();
+    assert_eq!(migration.status, MigrationStatus::Pending);
+    assert_eq!(migration.prefunding_start, 0);
+    assert_eq!(migration.absolute_migration_deadline, 138 * 24 * 60 * 60);
 }
 
 #[test]

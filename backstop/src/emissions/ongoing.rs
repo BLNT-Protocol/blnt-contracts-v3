@@ -895,7 +895,7 @@ mod tests {
                 }
             );
         }
-        assert!(fixture.client().blnd_binding_verified());
+        assert!(fixture.client().migration_state().blnd_binding_verified);
 
         MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
@@ -924,9 +924,9 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, pool]);
         fixture.e.ledger().set_timestamp(1_005);
 
-        assert!(!fixture.client().blnd_binding_verified());
+        assert!(!fixture.client().migration_state().blnd_binding_verified);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
-        assert!(fixture.client().blnd_binding_verified());
+        assert!(fixture.client().migration_state().blnd_binding_verified);
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             5 * SCALAR_7
@@ -947,7 +947,7 @@ mod tests {
         assert_eq!(emitter.distribute(), 5 * SCALAR_7);
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
-        assert!(fixture.client().blnd_binding_verified());
+        assert!(fixture.client().migration_state().blnd_binding_verified);
 
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
@@ -1136,7 +1136,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_005);
 
         assert!(fixture.client().try_distribute().is_err());
-        assert!(!fixture.client().blnd_binding_verified());
+        assert!(!fixture.client().migration_state().blnd_binding_verified);
         assert_eq!(
             fixture.client().ongoing_emission_state(),
             OngoingEmissionState {

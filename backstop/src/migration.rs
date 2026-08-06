@@ -42,6 +42,26 @@ pub enum MigrationStatus {
     Active,
 }
 
+/// Complete observable state for the incumbent-emitter migration lifecycle.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MigrationState {
+    pub absolute_migration_deadline: u64,
+    pub activated_at: Option<u64>,
+    pub backfill_cap: Option<u64>,
+    pub backfill_end: Option<u64>,
+    pub blnd_binding_verified: bool,
+    pub funded_backfill: Option<i128>,
+    pub migration_epoch_start: Option<u64>,
+    pub original_unlock: Option<u64>,
+    pub prefunding_start: u64,
+    pub retry_count: u32,
+    pub scheduled_backfill: i128,
+    pub status: MigrationStatus,
+    pub sync_deadline: Option<u64>,
+    pub verified_queue_unlock: Option<u64>,
+}
+
 pub(crate) enum DistributionTransition {
     Backfill(u64),
     Activated(u64),
@@ -110,6 +130,25 @@ pub(crate) fn status(e: &Env) -> MigrationStatus {
         MigrationStatus::Open
     } else {
         MigrationStatus::Pending
+    }
+}
+
+pub(crate) fn state(e: &Env) -> MigrationState {
+    MigrationState {
+        absolute_migration_deadline: absolute_migration_deadline(e),
+        activated_at: activated_at(e),
+        backfill_cap: backfill_cap(e),
+        backfill_end: backfill_end(e),
+        blnd_binding_verified: storage::get_blnd_binding_verified(e),
+        funded_backfill: funded_backfill(e),
+        migration_epoch_start: migration_epoch_start(e),
+        original_unlock: original_unlock(e),
+        prefunding_start: prefunding_start(e),
+        retry_count: retry_count(e),
+        scheduled_backfill: scheduled_backfill(e),
+        status: status(e),
+        sync_deadline: sync_deadline(e),
+        verified_queue_unlock: verified_queue_unlock(e),
     }
 }
 
@@ -572,7 +611,7 @@ mod tests {
         }
 
         fn unlock(&self) -> u64 {
-            self.client().original_unlock().unwrap()
+            self.client().migration_state().original_unlock.unwrap()
         }
 
         fn emitter(&self) -> EmitterClient<'_> {
@@ -583,7 +622,10 @@ mod tests {
             self.emitter()
                 .queue_swap_backstop(&self.backstop, &self.blnd_xlm);
             assert_eq!(self.client().distribute(), 0);
-            self.client().migration_epoch_start().unwrap()
+            self.client()
+                .migration_state()
+                .migration_epoch_start
+                .unwrap()
         }
 
         fn prepare(&self) {
@@ -636,9 +678,9 @@ mod tests {
             .is_err());
 
         fixture.prepare_swap_and_sync();
-        let scheduled = fixture.client().scheduled_backfill();
+        let scheduled = fixture.client().migration_state().scheduled_backfill;
         assert_eq!(scheduled, QUEUE_SECONDS as i128 * SCALAR_7);
-        assert_eq!(fixture.client().funded_backfill(), None);
+        assert_eq!(fixture.client().migration_state().funded_backfill, None);
         fixture.e.ledger().set_timestamp(fixture.unlock() + 10);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert!(
@@ -655,8 +697,11 @@ mod tests {
         assert!(fixture.client().try_gulp_emissions(&fixture.pool).is_err());
 
         fixture.client().drop();
-        assert_eq!(fixture.client().funded_backfill(), Some(scheduled));
-        assert!(fixture.client().blnd_binding_verified());
+        assert_eq!(
+            fixture.client().migration_state().funded_backfill,
+            Some(scheduled)
+        );
+        assert!(fixture.client().migration_state().blnd_binding_verified);
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             scheduled + 10 * SCALAR_7
@@ -751,7 +796,10 @@ mod tests {
         );
 
         fixture.prepare_swap_and_sync();
-        assert_eq!(fixture.client().scheduled_backfill(), 10 * SCALAR_7);
+        assert_eq!(
+            fixture.client().migration_state().scheduled_backfill,
+            10 * SCALAR_7
+        );
         fixture.client().drop();
         assert_eq!(
             fixture
@@ -810,8 +858,14 @@ mod tests {
         );
 
         assert_eq!(fixture.client().distribute(), 0);
-        assert_eq!(fixture.client().migration_status(), MigrationStatus::Active);
-        assert_eq!(fixture.client().backfill_end(), Some(unlock));
+        assert_eq!(
+            fixture.client().migration_state().status,
+            MigrationStatus::Active
+        );
+        assert_eq!(
+            fixture.client().migration_state().backfill_end,
+            Some(unlock)
+        );
         assert_eq!(
             fixture.client().deposit(
                 &BackstopTier::BlndXlm,
@@ -879,7 +933,7 @@ mod tests {
             .ledger()
             .set_timestamp(first_replacement_unlock - PREPARATION_WINDOW_SECONDS);
         fixture.client().distribute();
-        assert_eq!(fixture.client().retry_count(), 1);
+        assert_eq!(fixture.client().migration_state().retry_count, 1);
 
         fixture
             .e
@@ -901,7 +955,10 @@ mod tests {
             .ledger()
             .set_timestamp(second_replacement_unlock - PREPARATION_WINDOW_SECONDS);
         fixture.client().distribute();
-        assert_eq!(fixture.client().retry_count(), MAX_RETRY_QUEUES);
+        assert_eq!(
+            fixture.client().migration_state().retry_count,
+            MAX_RETRY_QUEUES
+        );
         assert_eq!(
             second_replacement_unlock,
             original_unlock + RECOVERY_HORIZON_SECONDS - SYNC_GRACE_SECONDS
@@ -913,13 +970,16 @@ mod tests {
             .set_timestamp(original_unlock + RECOVERY_HORIZON_SECONDS);
         fixture.emitter().swap_backstop();
         assert_eq!(fixture.client().distribute(), 0);
-        assert_eq!(fixture.client().scheduled_backfill(), 8_640_000 * SCALAR_7);
         assert_eq!(
-            fixture.client().backfill_end(),
+            fixture.client().migration_state().scheduled_backfill,
+            8_640_000 * SCALAR_7
+        );
+        assert_eq!(
+            fixture.client().migration_state().backfill_end,
             Some(epoch_start + 100 * DAY_IN_SECONDS)
         );
         assert_eq!(
-            fixture.client().backfill_cap(),
+            fixture.client().migration_state().backfill_cap,
             Some(original_unlock + RECOVERY_HORIZON_SECONDS)
         );
     }
@@ -950,10 +1010,10 @@ mod tests {
             QUEUE_SECONDS as i128 * SCALAR_7
         );
         assert_eq!(
-            fixture.client().scheduled_backfill(),
+            fixture.client().migration_state().scheduled_backfill,
             QUEUE_SECONDS as i128 * SCALAR_7
         );
-        assert_eq!(fixture.client().retry_count(), 0);
+        assert_eq!(fixture.client().migration_state().retry_count, 0);
 
         fixture
             .e
@@ -963,9 +1023,9 @@ mod tests {
             fixture.client().distribute(),
             24 * DAY_IN_SECONDS as i128 * SCALAR_7
         );
-        assert_eq!(fixture.client().retry_count(), 1);
+        assert_eq!(fixture.client().migration_state().retry_count, 1);
         assert_eq!(
-            fixture.client().scheduled_backfill(),
+            fixture.client().migration_state().scheduled_backfill,
             (replacement_unlock - PREPARATION_WINDOW_SECONDS - epoch_start) as i128 * SCALAR_7
         );
     }

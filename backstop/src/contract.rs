@@ -1,20 +1,19 @@
 use crate::{
     backstop::{
         self, build_pool_data, build_pool_valuation, preview_deposit, preview_withdrawal,
-        quote_activation, quote_status_set, quote_status_update, tier_token,
-        validate_backstop_assets, ActivationQuote, ActivationValues, BackstopTier, BadDebtLotQuote,
-        BlndEmissionValues, InterestLotQuote, PoolData, PoolStatusQuote, TakeRateQuote,
-        TakeRateValues, UserBalance, Q4W,
+        quote_status_set, quote_status_update, tier_token, validate_backstop_assets, BackstopTier,
+        BadDebtLotQuote, InterestLotQuote, PoolData, PoolStatusQuote, TakeRateQuote, UserBalance,
+        Q4W,
     },
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
     emissions::{
-        self, BlndEmissionQuote, OngoingBlndSplit, OngoingEmissionState, PoolOngoingEmissions,
-        RewardZoneCheckpoint, UserOngoingEmissions,
+        self, OngoingEmissionState, PoolOngoingEmissions, RewardZoneCheckpoint,
+        UserOngoingEmissions,
     },
     errors::BackstopError,
     events::BackstopEvents,
-    migration::{self, MigrationStatus},
+    migration::{self, MigrationState},
     storage,
 };
 use soroban_sdk::{
@@ -88,32 +87,8 @@ pub trait Backstop {
     /// Preview tokens returned by a tier withdrawal.
     fn preview_tier_withdrawal(e: Env, tier: BackstopTier, pool: Address, shares: i128) -> i128;
 
-    /// Return the candidate's incumbent-emitter migration state.
-    fn migration_status(e: Env) -> MigrationStatus;
-
-    fn prefunding_start(e: Env) -> u64;
-
-    fn absolute_migration_deadline(e: Env) -> u64;
-
-    fn migration_epoch_start(e: Env) -> Option<u64>;
-
-    fn original_unlock(e: Env) -> Option<u64>;
-
-    fn verified_queue_unlock(e: Env) -> Option<u64>;
-
-    fn retry_count(e: Env) -> u32;
-
-    fn activated_at(e: Env) -> Option<u64>;
-
-    fn backfill_cap(e: Env) -> Option<u64>;
-
-    fn backfill_end(e: Env) -> Option<u64>;
-
-    fn sync_deadline(e: Env) -> Option<u64>;
-
-    fn scheduled_backfill(e: Env) -> i128;
-
-    fn funded_backfill(e: Env) -> Option<i128>;
+    /// Return the complete incumbent-emitter migration state.
+    fn migration_state(e: Env) -> MigrationState;
 
     /// Fund the scheduled migration backfill through the emitter's v2 drop.
     fn drop(e: Env);
@@ -129,16 +104,6 @@ pub trait Backstop {
 
     /// Return the verified USDC maintenance threshold for active pools.
     fn activation_maintenance_threshold(e: Env) -> i128;
-
-    /// Quote activation policy arithmetic for verified tier values.
-    fn quote_activation(
-        e: Env,
-        values: ActivationValues,
-        currently_active: bool,
-    ) -> ActivationQuote;
-
-    /// Quote activation from canonical pool accounting and valuation.
-    fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote;
 
     /// Quote a permissionless pool-status refresh.
     fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote;
@@ -175,22 +140,6 @@ pub trait Backstop {
         to: Address,
     ) -> Option<BadDebtLotQuote>;
 
-    /// Return token units reserved by a pool in one tier.
-    fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128;
-
-    /// Return the bounded number of active commitments for a pool.
-    fn pool_bad_debt_commitment_count(e: Env, pool: Address) -> u32;
-
-    /// Return one matching commitment quote.
-    fn bad_debt_commitment(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-    ) -> Option<BadDebtLotQuote>;
-
-    /// Quote one reserve-credit allocation from verified tier values.
-    fn quote_take_rate(e: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote;
-
     /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
     fn quote_pool_take_rate_batch(
         e: Env,
@@ -221,51 +170,7 @@ pub trait Backstop {
         from: Address,
     ) -> Option<InterestLotQuote>;
 
-    /// Return one matching interest commitment quote.
-    fn interest_commitment(
-        e: Env,
-        pool: Address,
-        tier: BackstopTier,
-        auction_id: BytesN<32>,
-    ) -> Option<InterestLotQuote>;
-
     /********** Emissions **********/
-
-    /// Quote a reward-zone pool's share of the backstop-depositor BLND tranche.
-    ///
-    /// Production accrual derives the values from canonical active tier shares
-    /// and current Comet composition.
-    fn quote_pool_blnd_emissions(
-        e: Env,
-        distribution: i128,
-        values: BlndEmissionValues,
-        total_reward_zone_blnd: i128,
-        reward_zone_member: bool,
-    ) -> BlndEmissionQuote;
-
-    /// Quote one user's share of a reward-zone pool's BLND allocation.
-    ///
-    /// Production accrual derives the values from canonical active tier shares
-    /// and current Comet composition.
-    fn quote_user_blnd_emissions(
-        e: Env,
-        pool_distribution: i128,
-        values: BlndEmissionValues,
-        pool_eligible_blnd: i128,
-    ) -> BlndEmissionQuote;
-
-    /// Convert LP amounts to underlying BLND using current Comet composition.
-    fn spot_blnd_emission_values(
-        e: Env,
-        blnd_usdc_lp: i128,
-        blnd_xlm_lp: i128,
-    ) -> BlndEmissionValues;
-
-    /// Return one registered pool's current active BLND-emission weight.
-    fn pool_spot_blnd_emission_values(e: Env, pool: Address) -> BlndEmissionValues;
-
-    /// Quote the immutable 70% backstop / 30% pool split with carry.
-    fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit;
 
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
@@ -275,9 +180,6 @@ pub trait Backstop {
 
     /// Return one pool's ongoing BLND allocation and active tier amounts.
     fn pool_ongoing_emissions(e: Env, pool: Address) -> PoolOngoingEmissions;
-
-    /// Return whether emitter output has bound the configured BLND token.
-    fn blnd_binding_verified(e: Env) -> bool;
 
     /// Return one user's pending BLND, including migration backfill.
     fn user_ongoing_emissions(
@@ -472,69 +374,9 @@ impl Backstop for BackstopContract {
         preview_withdrawal(&storage::get_pool_balance_for_tier(&e, tier, &pool), shares)
     }
 
-    fn migration_status(e: Env) -> MigrationStatus {
+    fn migration_state(e: Env) -> MigrationState {
         storage::extend_instance(&e);
-        migration::status(&e)
-    }
-
-    fn prefunding_start(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::prefunding_start(&e)
-    }
-
-    fn absolute_migration_deadline(e: Env) -> u64 {
-        storage::extend_instance(&e);
-        migration::absolute_migration_deadline(&e)
-    }
-
-    fn migration_epoch_start(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::migration_epoch_start(&e)
-    }
-
-    fn original_unlock(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::original_unlock(&e)
-    }
-
-    fn verified_queue_unlock(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::verified_queue_unlock(&e)
-    }
-
-    fn retry_count(e: Env) -> u32 {
-        storage::extend_instance(&e);
-        migration::retry_count(&e)
-    }
-
-    fn activated_at(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::activated_at(&e)
-    }
-
-    fn backfill_cap(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::backfill_cap(&e)
-    }
-
-    fn backfill_end(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::backfill_end(&e)
-    }
-
-    fn sync_deadline(e: Env) -> Option<u64> {
-        storage::extend_instance(&e);
-        migration::sync_deadline(&e)
-    }
-
-    fn scheduled_backfill(e: Env) -> i128 {
-        storage::extend_instance(&e);
-        migration::scheduled_backfill(&e)
-    }
-
-    fn funded_backfill(e: Env) -> Option<i128> {
-        storage::extend_instance(&e);
-        migration::funded_backfill(&e)
+        migration::state(&e)
     }
 
     fn drop(e: Env) {
@@ -558,19 +400,6 @@ impl Backstop for BackstopContract {
 
     fn activation_maintenance_threshold(_e: Env) -> i128 {
         ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-    }
-
-    fn quote_activation(
-        e: Env,
-        values: ActivationValues,
-        currently_active: bool,
-    ) -> ActivationQuote {
-        quote_activation(&e, &values, currently_active)
-    }
-
-    fn quote_pool_activation(e: Env, pool: Address, currently_active: bool) -> ActivationQuote {
-        let valuation = build_pool_valuation(&e, &pool);
-        quote_activation(&e, &valuation.active_values, currently_active)
     }
 
     fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote {
@@ -652,30 +481,6 @@ impl Backstop for BackstopContract {
         remaining
     }
 
-    fn pool_tier_committed_assets(e: Env, tier: BackstopTier, pool: Address) -> i128 {
-        storage::extend_instance(&e);
-        backstop::pool_tier_committed_assets(&e, tier, &pool)
-    }
-
-    fn pool_bad_debt_commitment_count(e: Env, pool: Address) -> u32 {
-        storage::extend_instance(&e);
-        backstop::pool_bad_debt_commitment_count(&e, &pool)
-    }
-
-    fn bad_debt_commitment(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-    ) -> Option<BadDebtLotQuote> {
-        storage::extend_instance(&e);
-        backstop::bad_debt_commitment(&e, &pool, &auction_id)
-    }
-
-    fn quote_take_rate(e: Env, distribution: i128, values: TakeRateValues) -> TakeRateQuote {
-        storage::extend_instance(&e);
-        backstop::quote_take_rate(&e, distribution, &values)
-    }
-
     fn quote_pool_take_rate_batch(
         e: Env,
         pool: Address,
@@ -739,64 +544,7 @@ impl Backstop for BackstopContract {
         remaining
     }
 
-    fn interest_commitment(
-        e: Env,
-        pool: Address,
-        tier: BackstopTier,
-        auction_id: BytesN<32>,
-    ) -> Option<InterestLotQuote> {
-        storage::extend_instance(&e);
-        backstop::interest_commitment(&e, &pool, tier, &auction_id)
-    }
-
     /********** Emissions **********/
-
-    fn quote_pool_blnd_emissions(
-        e: Env,
-        distribution: i128,
-        values: BlndEmissionValues,
-        total_reward_zone_blnd: i128,
-        reward_zone_member: bool,
-    ) -> BlndEmissionQuote {
-        storage::extend_instance(&e);
-        emissions::quote_pool_blnd_emissions(
-            &e,
-            distribution,
-            &values,
-            total_reward_zone_blnd,
-            reward_zone_member,
-        )
-    }
-
-    fn quote_user_blnd_emissions(
-        e: Env,
-        pool_distribution: i128,
-        values: BlndEmissionValues,
-        pool_eligible_blnd: i128,
-    ) -> BlndEmissionQuote {
-        storage::extend_instance(&e);
-        emissions::quote_user_blnd_emissions(&e, pool_distribution, &values, pool_eligible_blnd)
-    }
-
-    fn spot_blnd_emission_values(
-        e: Env,
-        blnd_usdc_lp: i128,
-        blnd_xlm_lp: i128,
-    ) -> BlndEmissionValues {
-        storage::extend_instance(&e);
-        emissions::spot_blnd_emission_values(&e, blnd_usdc_lp, blnd_xlm_lp)
-    }
-
-    fn pool_spot_blnd_emission_values(e: Env, pool: Address) -> BlndEmissionValues {
-        storage::extend_instance(&e);
-        backstop::require_registered_pool(&e, &pool);
-        emissions::pool_spot_blnd_emission_values(&e, &pool)
-    }
-
-    fn quote_ongoing_blnd_split(e: Env, distribution: i128, prior_carry: i128) -> OngoingBlndSplit {
-        storage::extend_instance(&e);
-        emissions::quote_ongoing_blnd_split(&e, distribution, prior_carry)
-    }
 
     fn distribute(e: Env) -> i128 {
         storage::extend_instance(&e);
@@ -815,11 +563,6 @@ impl Backstop for BackstopContract {
         storage::extend_instance(&e);
         backstop::require_registered_pool(&e, &pool);
         emissions::get_pool_ongoing_emissions(&e, &pool)
-    }
-
-    fn blnd_binding_verified(e: Env) -> bool {
-        storage::extend_instance(&e);
-        storage::get_blnd_binding_verified(&e)
     }
 
     fn user_ongoing_emissions(

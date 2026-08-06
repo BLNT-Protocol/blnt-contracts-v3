@@ -314,10 +314,6 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .set_sequence_number(stale.auction.block.saturating_add(500));
     pool.delete_stale_interest_auction(&stale.tier);
     assert!(pool.try_get_interest_auction(&stale.tier).is_err());
-    assert!(fixture
-        .backstop
-        .interest_commitment(&pool_address, &BackstopTier::BlndUsdc, &stale_id)
-        .is_none());
     let pending_after_stale =
         pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(pending_after_stale, pending_before_stale);

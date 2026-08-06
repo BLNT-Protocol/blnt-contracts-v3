@@ -395,11 +395,13 @@ mod tests {
             client.commit_bad_debt_lot(&pool, &auction_id, &debt_value),
             expected
         );
-        assert_eq!(client.pool_bad_debt_commitment_count(&pool), 1);
-        assert_eq!(
-            client.pool_tier_committed_assets(&BackstopTier::Usdc, &pool),
-            240 * SCALAR_7
-        );
+        e.as_contract(&backstop, || {
+            assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 1);
+            assert_eq!(
+                pool_tier_committed_assets(&e, BackstopTier::Usdc, &pool),
+                240 * SCALAR_7
+            );
+        });
         let pool_data = client.pool_data(&pool);
         assert_eq!(pool_data.blnd_usdc.active_blnd, 50 * SCALAR_7);
         assert_eq!(pool_data.blnd_usdc.active_value, 50 * SCALAR_7);
@@ -409,7 +411,9 @@ mod tests {
         assert_eq!(pool_data.valuation_valid_until, u64::MAX);
 
         client.release_bad_debt_lot(&pool, &auction_id);
-        assert_eq!(client.pool_bad_debt_commitment_count(&pool), 0);
+        e.as_contract(&backstop, || {
+            assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 0);
+        });
         assert_eq!(client.pool_data(&pool).usdc.active_value, 500 * SCALAR_7);
     }
 
@@ -546,13 +550,14 @@ mod tests {
             )
             .is_err());
         assert_eq!(usdc.balance(&recipient), 60 * SCALAR_7);
-        assert_eq!(
-            client
-                .bad_debt_commitment(&pool, &auction_id)
-                .unwrap()
-                .lot_amount,
-            120 * SCALAR_7
-        );
+        e.as_contract(&backstop, || {
+            assert_eq!(
+                bad_debt_commitment(&e, &pool, &auction_id)
+                    .unwrap()
+                    .lot_amount,
+                120 * SCALAR_7
+            );
+        });
 
         assert_eq!(
             client.settle_bad_debt_lot(
@@ -566,6 +571,8 @@ mod tests {
         );
         assert_eq!(usdc.balance(&recipient), 180 * SCALAR_7);
         assert_eq!(client.pool_data(&pool).usdc.assets, 320 * SCALAR_7);
-        assert_eq!(client.pool_bad_debt_commitment_count(&pool), 0);
+        e.as_contract(&backstop, || {
+            assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 0);
+        });
     }
 }

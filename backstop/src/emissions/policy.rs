@@ -12,6 +12,7 @@ const POOL_EMISSION_NUMERATOR: i128 = 3;
 const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
 
 /// Arithmetic-only allocation quote for one BLND-emission scope.
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BlndEmissionQuote {
@@ -31,7 +32,8 @@ pub struct OngoingBlndSplit {
     pub total: i128,
 }
 
-pub(crate) fn quote_pool_blnd_emissions(
+#[cfg(test)]
+fn quote_pool_blnd_emissions(
     e: &Env,
     distribution: i128,
     values: &BlndEmissionValues,
@@ -62,7 +64,8 @@ pub(crate) fn quote_pool_blnd_emissions(
     }
 }
 
-pub(crate) fn quote_user_blnd_emissions(
+#[cfg(test)]
+fn quote_user_blnd_emissions(
     e: &Env,
     pool_distribution: i128,
     values: &BlndEmissionValues,
@@ -83,17 +86,6 @@ pub(crate) fn quote_user_blnd_emissions(
     BlndEmissionQuote {
         allocation,
         eligible_blnd: user_blnd,
-    }
-}
-
-pub(crate) fn spot_blnd_emission_values(
-    e: &Env,
-    blnd_usdc_lp: i128,
-    blnd_xlm_lp: i128,
-) -> BlndEmissionValues {
-    BlndEmissionValues {
-        blnd_usdc: spot_underlying_blnd(e, BackstopTier::BlndUsdc, blnd_usdc_lp),
-        blnd_xlm: spot_underlying_blnd(e, BackstopTier::BlndXlm, blnd_xlm_lp),
     }
 }
 
