@@ -44,30 +44,19 @@ enum BadDebtDataKey {
     Commitment(Address),
 }
 
-/// Quote the first qualifying tier in the immutable loss waterfall.
-pub(crate) fn quote_bad_debt_lot(
-    e: &Env,
-    pool: &Address,
-    debt_value: i128,
-) -> Option<BadDebtLotQuote> {
-    require_registered_pool(e, pool);
-    build_bad_debt_lot_quote(e, pool, debt_value)
-}
-
-/// Reserve one pool-authorized single-tier lot without moving assets.
+/// Select and reserve the first qualifying pool-authorized single-tier lot.
 pub(crate) fn commit_bad_debt_lot(
     e: &Env,
     pool: &Address,
     auction_id: &BytesN<32>,
     debt_value: i128,
-) -> BadDebtLotQuote {
+) -> Option<BadDebtLotQuote> {
     require_registered_pool(e, pool);
     if get_bad_debt_commitment(e, pool).is_some() {
         panic_with_error!(e, BackstopError::BadDebtCommitmentExists);
     }
 
-    let quote = build_bad_debt_lot_quote(e, pool, debt_value)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::NoBadDebtLossCapacity));
+    let quote = build_bad_debt_lot_quote(e, pool, debt_value)?;
     set_bad_debt_commitment(
         e,
         pool,
@@ -76,7 +65,7 @@ pub(crate) fn commit_bad_debt_lot(
             quote: quote.clone(),
         },
     );
-    quote
+    Some(quote)
 }
 
 /// Release a pool-authorized commitment without changing tier accounting.
@@ -385,15 +374,10 @@ mod tests {
             target_value: 240 * SCALAR_7,
             valid_until: u64::MAX,
         };
-        assert_eq!(
-            client.quote_bad_debt_lot(&pool, &debt_value),
-            Some(expected.clone())
-        );
-
         let auction_id = BytesN::from_array(&e, &[7; 32]);
         assert_eq!(
             client.commit_bad_debt_lot(&pool, &auction_id, &debt_value),
-            expected
+            Some(expected)
         );
         e.as_contract(&backstop, || {
             assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 1);
@@ -420,6 +404,7 @@ mod tests {
     #[test]
     fn blnd_xlm_is_first_loss_when_both_lp_tiers_qualify() {
         let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
         let backstop = create_backstop(&e);
         let (pool, _) = create_mock_pool(&e, &backstop);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
@@ -440,9 +425,10 @@ mod tests {
             BAD_DEBT_TIER_MINIMUM_VALUE_USDC,
         );
 
+        let auction_id = BytesN::from_array(&e, &[1; 32]);
         assert_eq!(
             BackstopClient::new(&e, &backstop)
-                .quote_bad_debt_lot(&pool, &SCALAR_7)
+                .commit_bad_debt_lot(&pool, &auction_id, &SCALAR_7)
                 .unwrap()
                 .tier,
             BackstopTier::BlndXlm
@@ -452,6 +438,7 @@ mod tests {
     #[test]
     fn skips_every_tier_below_the_operational_minimum() {
         let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
         let backstop = create_backstop(&e);
         let (pool, _) = create_mock_pool(&e, &backstop);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
@@ -470,10 +457,15 @@ mod tests {
                 BAD_DEBT_TIER_MINIMUM_VALUE_USDC - 1,
             );
         }
+        let client = BackstopClient::new(&e, &backstop);
+        let auction_id = BytesN::from_array(&e, &[2; 32]);
         assert_eq!(
-            BackstopClient::new(&e, &backstop).quote_bad_debt_lot(&pool, &SCALAR_7),
+            client.commit_bad_debt_lot(&pool, &auction_id, &SCALAR_7),
             None
         );
+        e.as_contract(&backstop, || {
+            assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 0);
+        });
 
         set_tier_balance(
             &e,
@@ -483,8 +475,8 @@ mod tests {
             BAD_DEBT_TIER_MINIMUM_VALUE_USDC,
         );
         assert_eq!(
-            BackstopClient::new(&e, &backstop)
-                .quote_bad_debt_lot(&pool, &SCALAR_7)
+            client
+                .commit_bad_debt_lot(&pool, &auction_id, &SCALAR_7)
                 .unwrap()
                 .tier,
             BackstopTier::BlndUsdc
@@ -516,7 +508,9 @@ mod tests {
 
         let client = BackstopClient::new(&e, &backstop);
         let auction_id = BytesN::from_array(&e, &[8; 32]);
-        let quote = client.commit_bad_debt_lot(&pool, &auction_id, &(200 * SCALAR_7));
+        let quote = client
+            .commit_bad_debt_lot(&pool, &auction_id, &(200 * SCALAR_7))
+            .unwrap();
         assert_eq!(quote.lot_amount, 240 * SCALAR_7);
 
         assert_eq!(

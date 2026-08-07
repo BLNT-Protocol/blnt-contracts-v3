@@ -106,7 +106,8 @@ pub fn create_prepared_bad_debt_auction(
     require_unique_bid_assets(e, bid);
 
     let (bid_amounts, debt_value_usdc) = build_bad_debt_bid(e, &mut pool, bid);
-    commit_prepared_bad_debt_auction(e, auction_id, &bid_amounts, debt_value_usdc, None)
+    commit_prepared_bad_debt_auction(e, auction_id, &bid_amounts, debt_value_usdc)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot))
 }
 
 /// Continue the strict single-tier waterfall without caller authorization.
@@ -121,19 +122,7 @@ pub fn continue_bad_debt_resolution(e: &Env, auction_id: &BytesN<32>) -> BadDebt
     let mut pool = Pool::load(e);
     let bid = canonical_bad_debt_bid(e, &pool);
     let (bid_amounts, debt_value_usdc) = build_bad_debt_bid(e, &mut pool, &bid);
-    let pool_address = e.current_contract_address();
-    let quoted =
-        BackstopClient::new(e, &backstop).quote_bad_debt_lot(&pool_address, &debt_value_usdc);
-
-    if let Some(quote) = quoted {
-        let expected_quote = convert_backstop_quote(quote);
-        commit_prepared_bad_debt_auction(
-            e,
-            auction_id,
-            &bid_amounts,
-            debt_value_usdc,
-            Some(&expected_quote),
-        );
+    if commit_prepared_bad_debt_auction(e, auction_id, &bid_amounts, debt_value_usdc).is_some() {
         BadDebtContinuation {
             auction_created: true,
             defaulted: Map::new(e),
@@ -193,15 +182,14 @@ fn commit_prepared_bad_debt_auction(
     auction_id: &BytesN<32>,
     bid_amounts: &Map<Address, i128>,
     debt_value_usdc: i128,
-    expected_quote: Option<&BadDebtLotQuote>,
-) -> BadDebtAuctionData {
+) -> Option<BadDebtAuctionData> {
     let backstop = storage::get_backstop(e);
     let pool_address = e.current_contract_address();
     let backstop_quote = BackstopClient::new(e, &backstop).commit_bad_debt_lot(
         &pool_address,
         auction_id,
         &debt_value_usdc,
-    );
+    )?;
     let lot_quote = convert_backstop_quote(backstop_quote);
     if lot_quote.debt_value != debt_value_usdc
         || lot_quote.committed_value <= 0
@@ -210,10 +198,6 @@ fn commit_prepared_bad_debt_auction(
     {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    if expected_quote.is_some_and(|quote| quote != &lot_quote) {
-        panic_with_error!(e, PoolError::InvalidLot);
-    }
-
     let block = e
         .ledger()
         .sequence()
@@ -226,7 +210,7 @@ fn commit_prepared_bad_debt_auction(
         lot_quote,
     };
     set_prepared_bad_debt_auction(e, &auction);
-    auction
+    Some(auction)
 }
 
 fn canonical_bad_debt_bid(e: &Env, pool: &Pool) -> Vec<Address> {

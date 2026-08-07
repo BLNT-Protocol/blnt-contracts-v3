@@ -4,7 +4,6 @@ use crate::{
         validate_backstop_assets, BackstopTier, BadDebtLotQuote, InterestLotQuote, PoolData,
         TakeRateQuote, UserBalance, Q4W,
     },
-    constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
     emissions::{
         self, OngoingEmissionState, PoolOngoingEmissions, RewardZoneCheckpoint,
@@ -98,22 +97,13 @@ pub trait Backstop {
     /// Return the most recent completed distribution checkpoint, if any.
     fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint>;
 
-    /// Return the verified USDC entry threshold for inactive pools.
-    fn activation_entry_threshold(e: Env) -> i128;
-
-    /// Return the verified USDC maintenance threshold for active pools.
-    fn activation_maintenance_threshold(e: Env) -> i128;
-
-    /// Quote the first qualifying single-tier bad-debt lot.
-    fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote>;
-
-    /// Reserve one pool-authorized single-tier bad-debt lot.
+    /// Select and reserve the first qualifying single-tier bad-debt lot.
     fn commit_bad_debt_lot(
         e: Env,
         pool: Address,
         auction_id: BytesN<32>,
         debt_value: i128,
-    ) -> BadDebtLotQuote;
+    ) -> Option<BadDebtLotQuote>;
 
     /// Release a pool-authorized bad-debt commitment.
     fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>);
@@ -382,29 +372,18 @@ impl Backstop for BackstopContract {
         emissions::get_reward_zone_checkpoint(&e)
     }
 
-    fn activation_entry_threshold(_e: Env) -> i128 {
-        ACTIVATION_ENTRY_THRESHOLD_USDC
-    }
-
-    fn activation_maintenance_threshold(_e: Env) -> i128 {
-        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-    }
-
-    fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote> {
-        storage::extend_instance(&e);
-        backstop::quote_bad_debt_lot(&e, &pool, debt_value)
-    }
-
     fn commit_bad_debt_lot(
         e: Env,
         pool: Address,
         auction_id: BytesN<32>,
         debt_value: i128,
-    ) -> BadDebtLotQuote {
+    ) -> Option<BadDebtLotQuote> {
         storage::extend_instance(&e);
         pool.require_auth();
         let quote = backstop::commit_bad_debt_lot(&e, &pool, &auction_id, debt_value);
-        BackstopEvents::bad_debt_lot_committed(&e, pool, auction_id, quote.clone());
+        if let Some(quote) = &quote {
+            BackstopEvents::bad_debt_lot_committed(&e, pool, auction_id, quote.clone());
+        }
         quote
     }
 

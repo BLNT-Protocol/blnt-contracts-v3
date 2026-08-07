@@ -317,8 +317,9 @@ When no bad-debt auction is active, permissionless
 reserve-keyed backstop liability and fails on unknown, missing, negative, or
 inconsistent records. The next batch follows immutable reserve order and
 contains at most `min(max_positions - 1, 4)` reserves. The pool and backstop
-MUST use the same quote to select and commit the first qualifying tier, and
-each continuation restarts the strict tier search.
+MUST use one atomic backstop call to select and commit the first qualifying
+tier, and each continuation restarts the strict tier search. A result with no
+commitment proves that all three tiers are below the operational minimum.
 
 Only a successful no-tier result may default all remaining liabilities to
 suppliers. The transaction accrues each affected reserve, applies
