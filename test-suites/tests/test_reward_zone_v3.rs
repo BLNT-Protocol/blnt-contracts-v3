@@ -65,8 +65,8 @@ fn exercise_reward_zone(wasm: bool) {
     assert!(fixture.backstop.reward_zone().contains(&second));
 
     assert_eq!(
-        fixture.backstop.reward_zone_checkpoint().unwrap().timestamp,
-        e.ledger().timestamp()
+        fixture.backstop.ongoing_emission_state().last_distribution,
+        Some(e.ledger().timestamp())
     );
     let third_data = fixture.backstop.pool_data(&third);
     assert!(

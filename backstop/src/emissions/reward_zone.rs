@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, Vec};
+use soroban_sdk::{panic_with_error, Address, Env, Vec};
 
 use crate::{
     backstop::{build_pool_valuation, quote_activation},
@@ -14,23 +14,12 @@ use super::{
 
 const CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
-/// Most recent completed distribution checkpoint used to guard membership edits.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct RewardZoneCheckpoint {
-    pub timestamp: u64,
-}
-
 pub(crate) fn get_reward_zone(e: &Env) -> Vec<Address> {
     let reward_zone = storage::get_reward_zone(e);
     if reward_zone.len() > MAX_RZ_SIZE {
         panic_with_error!(e, BackstopError::OverflowError);
     }
     reward_zone
-}
-
-pub(crate) fn get_reward_zone_checkpoint(e: &Env) -> Option<RewardZoneCheckpoint> {
-    storage::get_reward_zone_checkpoint(e).map(|timestamp| RewardZoneCheckpoint { timestamp })
 }
 
 pub(crate) fn add_to_reward_zone(
@@ -118,9 +107,8 @@ fn require_recent_distribution_checkpoint(e: &Env) {
         return;
     }
     let now = e.ledger().timestamp();
-    let checkpoint = get_reward_zone_checkpoint(e)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::DistributionCheckpointRequired))
-        .timestamp;
+    let checkpoint = storage::get_reward_zone_checkpoint(e)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::DistributionCheckpointRequired));
     if checkpoint > now
         || now
             .checked_sub(checkpoint)

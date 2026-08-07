@@ -24,7 +24,7 @@ pub use contract::*;
 pub use dependencies::EmitterClient;
 pub use emissions::{
     OngoingBlndSplit, OngoingDistribution, OngoingEmissionState, PoolOngoingEmissions,
-    RewardZoneCheckpoint, UserOngoingEmissions,
+    UserOngoingEmissions,
 };
 pub use errors::BackstopError;
 pub use migration::{MigrationState, MigrationStatus};

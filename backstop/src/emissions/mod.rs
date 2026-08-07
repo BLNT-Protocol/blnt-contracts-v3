@@ -23,7 +23,4 @@ mod policy;
 pub use policy::OngoingBlndSplit;
 
 mod reward_zone;
-pub use reward_zone::RewardZoneCheckpoint;
-pub(crate) use reward_zone::{
-    add_to_reward_zone, get_reward_zone, get_reward_zone_checkpoint, remove_from_reward_zone,
-};
+pub(crate) use reward_zone::{add_to_reward_zone, get_reward_zone, remove_from_reward_zone};

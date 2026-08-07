@@ -4,10 +4,7 @@ use crate::{
         InterestLotQuote, PoolData, TakeRateQuote, UserBalance, Q4W,
     },
     dependencies::PoolFactoryClient,
-    emissions::{
-        self, OngoingEmissionState, PoolOngoingEmissions, RewardZoneCheckpoint,
-        UserOngoingEmissions,
-    },
+    emissions::{self, OngoingEmissionState, PoolOngoingEmissions, UserOngoingEmissions},
     errors::BackstopError,
     events::BackstopEvents,
     migration::{self, MigrationState},
@@ -86,9 +83,6 @@ pub trait Backstop {
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
-
-    /// Return the most recent completed distribution checkpoint, if any.
-    fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint>;
 
     /// Select and reserve the first qualifying single-tier bad-debt lot.
     fn commit_bad_debt_lot(
@@ -348,11 +342,6 @@ impl Backstop for BackstopContract {
     fn reward_zone(e: Env) -> Vec<Address> {
         storage::extend_instance(&e);
         emissions::get_reward_zone(&e)
-    }
-
-    fn reward_zone_checkpoint(e: Env) -> Option<RewardZoneCheckpoint> {
-        storage::extend_instance(&e);
-        emissions::get_reward_zone_checkpoint(&e)
     }
 
     fn commit_bad_debt_lot(
