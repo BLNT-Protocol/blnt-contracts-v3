@@ -36,8 +36,8 @@ mod user;
 pub use user::{UserBalance, Q4W};
 
 mod tier;
+pub(crate) use tier::token as tier_token;
 pub use tier::BackstopTier;
-pub(crate) use tier::{preview_deposit, preview_withdrawal, token as tier_token};
 
 mod valuation;
 #[cfg(any(test, feature = "testutils"))]

@@ -2,8 +2,6 @@ use soroban_sdk::{contracttype, Address, Env};
 
 use crate::storage;
 
-use super::PoolBalance;
-
 /// The fixed v3 backstop asset identifiers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -19,14 +17,6 @@ pub fn token(e: &Env, tier: BackstopTier) -> Address {
         BackstopTier::BlndXlm => storage::get_blnd_xlm_token(e),
         BackstopTier::Usdc => storage::get_usdc_token(e),
     }
-}
-
-pub fn preview_deposit(pool_balance: &PoolBalance, assets: i128) -> i128 {
-    pool_balance.convert_to_shares(assets)
-}
-
-pub fn preview_withdrawal(pool_balance: &PoolBalance, shares: i128) -> i128 {
-    pool_balance.convert_to_tokens(shares)
 }
 
 #[cfg(test)]

@@ -1,8 +1,7 @@
 use crate::{
     backstop::{
-        self, build_pool_data, preview_deposit, preview_withdrawal, tier_token,
-        validate_backstop_assets, BackstopTier, BadDebtLotQuote, InterestLotQuote, PoolData,
-        TakeRateQuote, UserBalance, Q4W,
+        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier, BadDebtLotQuote,
+        InterestLotQuote, PoolData, TakeRateQuote, UserBalance, Q4W,
     },
     dependencies::PoolFactoryClient,
     emissions::{
@@ -78,12 +77,6 @@ pub trait Backstop {
 
     /// Fetch one user's active shares and bounded withdrawal queue in a tier.
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
-
-    /// Preview shares minted by a tier deposit.
-    fn preview_tier_deposit(e: Env, tier: BackstopTier, pool: Address, amount: i128) -> i128;
-
-    /// Preview tokens returned by a tier withdrawal.
-    fn preview_tier_withdrawal(e: Env, tier: BackstopTier, pool: Address, shares: i128) -> i128;
 
     /// Return the complete incumbent-emitter migration state.
     fn migration_state(e: Env) -> MigrationState;
@@ -340,16 +333,6 @@ impl Backstop for BackstopContract {
 
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance {
         storage::get_user_balance_for_tier(&e, tier, &pool, &user)
-    }
-
-    fn preview_tier_deposit(e: Env, tier: BackstopTier, pool: Address, amount: i128) -> i128 {
-        require_nonnegative(&e, amount);
-        preview_deposit(&storage::get_pool_balance_for_tier(&e, tier, &pool), amount)
-    }
-
-    fn preview_tier_withdrawal(e: Env, tier: BackstopTier, pool: Address, shares: i128) -> i128 {
-        require_nonnegative(&e, shares);
-        preview_withdrawal(&storage::get_pool_balance_for_tier(&e, tier, &pool), shares)
     }
 
     fn migration_state(e: Env) -> MigrationState {
