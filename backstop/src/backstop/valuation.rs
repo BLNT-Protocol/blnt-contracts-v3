@@ -10,18 +10,6 @@ use crate::{
 
 use super::{available_pool_tier_assets, require_registered_pool, BackstopTier, PoolBalance};
 
-const STATUS_ADMIN_ACTIVE: u32 = 0;
-const STATUS_ACTIVE: u32 = 1;
-const STATUS_ADMIN_ON_ICE: u32 = 2;
-const STATUS_ON_ICE: u32 = 3;
-const STATUS_ADMIN_FROZEN: u32 = 4;
-const STATUS_FROZEN: u32 = 5;
-const STATUS_SETUP: u32 = 6;
-
-const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
-const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
-const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
-const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
 const BLND_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
 const PAIR_VALUE_MULTIPLIER: i128 = 5;
@@ -91,20 +79,11 @@ pub struct PoolTierData {
 pub struct PoolData {
     pub blnd_usdc: PoolTierData,
     pub blnd_xlm: PoolTierData,
+    /// Queued value divided by total active-plus-queued value, rounded up.
+    pub q4w_percentage: i128,
     pub usdc: PoolTierData,
     /// Earliest expiry shared by the tier valuations in this snapshot.
     pub valuation_valid_until: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct PoolStatusQuote {
-    pub eligible_value: i128,
-    pub meets_activation_threshold: bool,
-    pub q4w_percentage: i128,
-    pub required_value: i128,
-    pub status: u32,
-    pub transition_allowed: bool,
 }
 
 pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolData {
@@ -131,6 +110,11 @@ pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolData {
             0,
             valuation.active_values.usdc,
             valuation.queued_values.usdc,
+        ),
+        q4w_percentage: calculate_q4w_percentage(
+            e,
+            &valuation.active_values,
+            &valuation.queued_values,
         ),
         valuation_valid_until: valuation.valid_until,
     }
@@ -205,89 +189,6 @@ pub fn quote_activation(
         eligible_value,
         meets_threshold: eligible_value >= required_value,
         required_value,
-    }
-}
-
-pub fn quote_status_update(
-    e: &Env,
-    current_status: u32,
-    active_values: &ActivationValues,
-    queued_values: &ActivationValues,
-) -> PoolStatusQuote {
-    require_valid_pool_status(e, current_status);
-    let currently_active = current_status == STATUS_ADMIN_ACTIVE || current_status == STATUS_ACTIVE;
-    let activation = quote_activation(e, active_values, currently_active);
-    let q4w_percentage = calculate_q4w_percentage(e, active_values, queued_values);
-
-    let (status, transition_allowed) = match current_status {
-        STATUS_SETUP | STATUS_ADMIN_FROZEN => (current_status, false),
-        STATUS_ADMIN_ON_ICE => {
-            if q4w_percentage >= Q4W_ADMIN_ON_ICE_LIMIT {
-                (STATUS_FROZEN, true)
-            } else {
-                (STATUS_ADMIN_ON_ICE, true)
-            }
-        }
-        STATUS_ADMIN_ACTIVE => {
-            if !activation.meets_threshold || q4w_percentage >= Q4W_ADMIN_ACTIVE_LIMIT {
-                (STATUS_ON_ICE, true)
-            } else {
-                (STATUS_ADMIN_ACTIVE, true)
-            }
-        }
-        STATUS_ACTIVE | STATUS_ON_ICE | STATUS_FROZEN => {
-            if q4w_percentage >= Q4W_FROZEN_THRESHOLD {
-                (STATUS_FROZEN, true)
-            } else if !activation.meets_threshold || q4w_percentage >= Q4W_ON_ICE_THRESHOLD {
-                (STATUS_ON_ICE, true)
-            } else {
-                (STATUS_ACTIVE, true)
-            }
-        }
-        _ => panic_with_error!(e, BackstopError::InvalidPoolStatus),
-    };
-
-    PoolStatusQuote {
-        eligible_value: activation.eligible_value,
-        meets_activation_threshold: activation.meets_threshold,
-        q4w_percentage,
-        required_value: activation.required_value,
-        status,
-        transition_allowed,
-    }
-}
-
-pub fn quote_status_set(
-    e: &Env,
-    current_status: u32,
-    requested_status: u32,
-    active_values: &ActivationValues,
-    queued_values: &ActivationValues,
-) -> PoolStatusQuote {
-    require_valid_pool_status(e, current_status);
-    let currently_active = current_status == STATUS_ADMIN_ACTIVE || current_status == STATUS_ACTIVE;
-    let activation = quote_activation(e, active_values, currently_active);
-    let q4w_percentage = calculate_q4w_percentage(e, active_values, queued_values);
-    let transition_allowed = match requested_status {
-        STATUS_ADMIN_ACTIVE => {
-            activation.meets_threshold && q4w_percentage < Q4W_ADMIN_ACTIVE_LIMIT
-        }
-        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => q4w_percentage < Q4W_ADMIN_ON_ICE_LIMIT,
-        STATUS_ADMIN_FROZEN => true,
-        _ => panic_with_error!(e, BackstopError::InvalidPoolStatus),
-    };
-
-    PoolStatusQuote {
-        eligible_value: activation.eligible_value,
-        meets_activation_threshold: activation.meets_threshold,
-        q4w_percentage,
-        required_value: activation.required_value,
-        status: if transition_allowed {
-            requested_status
-        } else {
-            current_status
-        },
-        transition_allowed,
     }
 }
 
@@ -513,12 +414,6 @@ fn calculate_q4w_percentage(
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
 }
 
-fn require_valid_pool_status(e: &Env, status: u32) {
-    if status > STATUS_SETUP {
-        panic_with_error!(e, BackstopError::InvalidPoolStatus);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use soroban_sdk::{testutils::Address as _, Address};
@@ -596,42 +491,15 @@ mod tests {
     }
 
     #[test]
-    fn status_refresh_uses_maintenance_only_while_active() {
-        let e = Env::default();
-        let none_queued = values(0, 0, 0);
-        let maintenance = values(0, 0, ACTIVATION_MAINTENANCE_THRESHOLD_USDC);
-
-        let active = quote_status_update(&e, STATUS_ACTIVE, &maintenance, &none_queued);
-        assert_eq!(active.status, STATUS_ACTIVE);
-        assert_eq!(active.required_value, ACTIVATION_MAINTENANCE_THRESHOLD_USDC);
-
-        let inactive = quote_status_update(&e, STATUS_ON_ICE, &maintenance, &none_queued);
-        assert_eq!(inactive.status, STATUS_ON_ICE);
-        assert_eq!(inactive.required_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
-
-        let entry = values(0, 0, ACTIVATION_ENTRY_THRESHOLD_USDC);
-        assert_eq!(
-            quote_status_update(&e, STATUS_ON_ICE, &entry, &none_queued).status,
-            STATUS_ACTIVE
-        );
-    }
-
-    #[test]
-    fn q4w_status_uses_value_across_tiers_and_rounds_up() {
+    fn q4w_percentage_uses_value_across_tiers_and_rounds_up() {
         let e = Env::default();
         let active = values(4_000 * SCALAR_7, 3_000 * SCALAR_7, 0);
         let queued = values(0, 0, 3_000 * SCALAR_7);
-        let quote = quote_status_update(&e, STATUS_ACTIVE, &active, &queued);
-        assert_eq!(quote.q4w_percentage, Q4W_ON_ICE_THRESHOLD);
-        assert_eq!(quote.status, STATUS_ON_ICE);
+        assert_eq!(calculate_q4w_percentage(&e, &active, &queued), 3_000_000);
 
-        let rounded = quote_status_update(
-            &e,
-            STATUS_ACTIVE,
-            &values(0, 0, 2 * SCALAR_7),
-            &values(0, 0, SCALAR_7),
-        );
-        assert_eq!(rounded.q4w_percentage, 3_333_334);
+        let rounded =
+            calculate_q4w_percentage(&e, &values(0, 0, 2 * SCALAR_7), &values(0, 0, SCALAR_7));
+        assert_eq!(rounded, 3_333_334);
     }
 
     #[test]
@@ -718,6 +586,7 @@ mod tests {
                 shares: 6_500 * SCALAR_7,
             }
         );
+        assert_eq!(pool_data.q4w_percentage, 1_935_484);
         assert_eq!(pool_data.valuation_valid_until, u64::MAX);
 
         let quote = e.as_contract(&backstop, || {

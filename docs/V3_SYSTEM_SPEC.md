@@ -70,9 +70,9 @@ dust until final redemption.
 Public deposit, queue, dequeue, and withdrawal operations select one of the
 three immutable assets through the `BackstopTier` discriminator.
 The public `pool_data` view returns all three tiers' accounting, active and
-queued valuation, active underlying BLND, and common valuation-validity bound
-in one snapshot. V3 exposes no separate pool-tier-state or pool-valuation
-view.
+queued valuation, active underlying BLND, aggregate value-weighted Q4W, and
+the common valuation-validity bound in one snapshot. V3 exposes no separate
+pool-tier-state or pool-valuation view.
 
 The public backstop surface is limited to user operations, pool callbacks,
 and consolidated operational views. Pure calculations used only by the
@@ -206,8 +206,10 @@ entry threshold before returning to an active status. Statuses 4 and 6
 continue to reject permissionless refresh.
 
 Queueing does not change stored status. Refresh and admin requests use
-canonical valuation. Stored status does not separately gate the reward zone;
-bad-debt and tier-interest entry points remain available under every status.
+the canonical `pool_data` snapshot, and the pool applies the inherited status
+matrix locally as in v2. Stored status does not separately gate the reward
+zone; bad-debt and tier-interest entry points remain available under every
+status.
 
 ### 4.2 Pool integration — **Safety extensions**
 

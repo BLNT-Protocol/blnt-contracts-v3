@@ -1,9 +1,8 @@
 use crate::{
     backstop::{
-        self, build_pool_data, build_pool_valuation, preview_deposit, preview_withdrawal,
-        quote_status_set, quote_status_update, tier_token, validate_backstop_assets, BackstopTier,
-        BadDebtLotQuote, InterestLotQuote, PoolData, PoolStatusQuote, TakeRateQuote, UserBalance,
-        Q4W,
+        self, build_pool_data, preview_deposit, preview_withdrawal, tier_token,
+        validate_backstop_assets, BackstopTier, BadDebtLotQuote, InterestLotQuote, PoolData,
+        TakeRateQuote, UserBalance, Q4W,
     },
     constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC},
     dependencies::PoolFactoryClient,
@@ -104,17 +103,6 @@ pub trait Backstop {
 
     /// Return the verified USDC maintenance threshold for active pools.
     fn activation_maintenance_threshold(e: Env) -> i128;
-
-    /// Quote a permissionless pool-status refresh.
-    fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote;
-
-    /// Quote a pool-admin status request.
-    fn quote_pool_status_set(
-        e: Env,
-        pool: Address,
-        current_status: u32,
-        requested_status: u32,
-    ) -> PoolStatusQuote;
 
     /// Quote the first qualifying single-tier bad-debt lot.
     fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote>;
@@ -400,32 +388,6 @@ impl Backstop for BackstopContract {
 
     fn activation_maintenance_threshold(_e: Env) -> i128 {
         ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-    }
-
-    fn quote_pool_status_update(e: Env, pool: Address, current_status: u32) -> PoolStatusQuote {
-        let valuation = build_pool_valuation(&e, &pool);
-        quote_status_update(
-            &e,
-            current_status,
-            &valuation.active_values,
-            &valuation.queued_values,
-        )
-    }
-
-    fn quote_pool_status_set(
-        e: Env,
-        pool: Address,
-        current_status: u32,
-        requested_status: u32,
-    ) -> PoolStatusQuote {
-        let valuation = build_pool_valuation(&e, &pool);
-        quote_status_set(
-            &e,
-            current_status,
-            requested_status,
-            &valuation.active_values,
-            &valuation.queued_values,
-        )
     }
 
     fn quote_bad_debt_lot(e: Env, pool: Address, debt_value: i128) -> Option<BadDebtLotQuote> {
