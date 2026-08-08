@@ -29,19 +29,24 @@ pub fn execute_draw(
     TokenClient::new(e, &tier_token(e, tier)).transfer(&e.current_contract_address(), to, &amount);
 }
 
-/// Perform a donation to a pool's backstop
-pub fn execute_donate(e: &Env, from: &Address, pool_address: &Address, amount: i128) {
+/// Perform a donation to one tier of a pool's backstop.
+pub fn execute_donate(
+    e: &Env,
+    tier: BackstopTier,
+    from: &Address,
+    pool_address: &Address,
+    amount: i128,
+) {
     require_nonnegative(e, amount);
     if from == pool_address || from == &e.current_contract_address() {
         panic_with_error!(e, &BackstopError::BadRequest)
     }
-    emissions::prepare_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
 
-    let mut pool_balance = storage::get_pool_balance(e, pool_address);
+    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     require_is_from_pool_factory(e, pool_address, pool_balance.shares);
 
-    let blnd_usdc_token = TokenClient::new(e, &storage::get_blnd_usdc_token(e));
-    blnd_usdc_token.transfer_from(
+    TokenClient::new(e, &tier_token(e, tier)).transfer_from(
         &e.current_contract_address(),
         from,
         &e.current_contract_address(),
@@ -49,8 +54,8 @@ pub fn execute_donate(e: &Env, from: &Address, pool_address: &Address, amount: i
     );
 
     pool_balance.deposit(amount, 0);
-    storage::set_pool_balance(e, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
+    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 }
 
 #[cfg(test)]
@@ -59,7 +64,9 @@ mod tests {
 
     use crate::{
         backstop::{execute_deposit_for_tier, BackstopTier},
-        testutils::{create_backstop, create_backstop_token, create_mock_pool_factory},
+        testutils::{
+            create_backstop, create_backstop_token, create_blnd_xlm_token, create_mock_pool_factory,
+        },
     };
 
     use super::*;
@@ -76,7 +83,7 @@ mod tests {
         let samwise = Address::generate(&e);
         let frodo = Address::generate(&e);
 
-        let (_, backstop_token_client) = create_backstop_token(&e, &backstop_id, &bombadil);
+        let (_, backstop_token_client) = create_blnd_xlm_token(&e, &backstop_id, &bombadil);
         backstop_token_client.mint(&samwise, &100_0000000);
         backstop_token_client.mint(&frodo, &100_0000000);
 
@@ -85,14 +92,15 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit_for_tier(&e, BackstopTier::BlndXlm, &frodo, &pool_0_id, 25_0000000);
         });
 
         backstop_token_client.approve(&samwise, &backstop_id, &30_0000000, &e.ledger().sequence());
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, &samwise, &pool_0_id, 30_0000000);
+            execute_donate(&e, BackstopTier::BlndXlm, &samwise, &pool_0_id, 30_0000000);
 
-            let new_pool_balance = storage::get_pool_balance(&e, &pool_0_id);
+            let new_pool_balance =
+                storage::get_pool_balance_for_tier(&e, BackstopTier::BlndXlm, &pool_0_id);
             assert_eq!(new_pool_balance.shares, 25_0000000);
             assert_eq!(new_pool_balance.tokens, 55_0000000);
         });
@@ -124,7 +132,13 @@ mod tests {
         });
 
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, &samwise, &pool_0_id, -30_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &samwise,
+                &pool_0_id,
+                -30_0000000,
+            );
         });
     }
 
@@ -154,7 +168,13 @@ mod tests {
         });
 
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, &pool_0_id, &pool_0_id, 10_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &pool_0_id,
+                &pool_0_id,
+                10_0000000,
+            );
         });
     }
 
@@ -184,7 +204,13 @@ mod tests {
         });
 
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, &backstop_id, &pool_0_id, 10_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &backstop_id,
+                &pool_0_id,
+                10_0000000,
+            );
         });
     }
 
@@ -208,7 +234,7 @@ mod tests {
         create_mock_pool_factory(&e, &backstop_id);
 
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, &samwise, &pool_0_id, 30_0000000);
+            execute_donate(&e, BackstopTier::BlndUsdc, &samwise, &pool_0_id, 30_0000000);
         });
     }
 

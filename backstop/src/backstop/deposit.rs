@@ -104,7 +104,7 @@ mod tests {
         // initialize pool 0 with funds + some profit
         e.as_contract(&backstop_address, || {
             execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
-            execute_donate(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_donate(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_address, || {
@@ -303,7 +303,13 @@ mod tests {
         // initialize pool 0 with funds + some profit
         e.as_contract(&backstop_address, || {
             execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, SCALAR_7);
-            execute_donate(&e, &frodo, &pool_0_id, 10_000_000 * SCALAR_7);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &frodo,
+                &pool_0_id,
+                10_000_000 * SCALAR_7,
+            );
         });
 
         e.as_contract(&backstop_address, || {

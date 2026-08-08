@@ -69,6 +69,8 @@ dust until final redemption.
 
 Public deposit, queue, dequeue, and withdrawal operations select one of the
 three immutable assets through the `BackstopTier` discriminator.
+Pool-authorized donation selects a tier and adds its token to that pool-tier
+without minting shares, appreciating its active and queued positions.
 The public `pool_data` view returns all three tiers' accounting, active and
 queued valuation, active underlying BLND, aggregate value-weighted Q4W, and
 the common valuation-validity bound in one snapshot. V3 exposes no separate

@@ -174,7 +174,9 @@ fn test_backstop() {
         &amount,
         &fixture.env.ledger().sequence(),
     );
-    fixture.backstop.donate(&frodo, &pool.address, &amount);
+    fixture
+        .backstop
+        .donate(&BackstopTier::BlndUsdc, &frodo, &pool.address, &amount);
     frodo_bstop_token_balance -= amount;
     bstop_bstop_token_balance += amount;
     assert_eq!(
@@ -187,6 +189,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "donate"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         frodo.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -206,6 +209,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "donate"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         frodo.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -224,6 +228,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "donate"),
+                    BackstopTier::BlndUsdc,
                     pool.address.clone(),
                     frodo.clone()
                 )

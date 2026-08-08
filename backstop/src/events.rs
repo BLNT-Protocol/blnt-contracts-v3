@@ -153,7 +153,7 @@ vec_event!(
 single_value_event!(
     DonateEvent,
     "donate",
-    [pool_address: Address, from: Address],
+    [tier: BackstopTier, pool_address: Address, from: Address],
     amount: i128
 );
 
@@ -400,15 +400,17 @@ impl BackstopEvents {
 
     /// Emitted when tokens are donated to the backstop
     ///
-    /// - topics - `["donate", pool_address: Address, from: Address]`
+    /// - topics - `["donate", tier: BackstopTier, pool_address: Address, from: Address]`
     /// - data - `[amount: i128]`
     ///
     /// ### Arguments
+    /// * `tier` - The tier whose token is donated
     /// * `pool_address` - The address of the pool
     /// * `from` - The address of the donor
     /// * `amount` - The amount of tokens donated
-    pub fn donate(e: &Env, pool_address: Address, from: Address, amount: i128) {
+    pub fn donate(e: &Env, tier: BackstopTier, pool_address: Address, from: Address, amount: i128) {
         DonateEvent {
+            tier,
             pool_address,
             from,
             amount,

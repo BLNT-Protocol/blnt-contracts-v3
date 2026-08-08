@@ -501,7 +501,13 @@ mod tests {
                 &pool_address,
                 42_0000000,
             );
-            execute_donate(&e, &samwise, &pool_address, 50_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &samwise,
+                &pool_address,
+                50_0000000,
+            );
         });
 
         e.ledger().set(LedgerInfo {
@@ -594,7 +600,13 @@ mod tests {
                 &pool_address,
                 42_0000000,
             );
-            execute_donate(&e, &samwise, &pool_address, 50_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &samwise,
+                &pool_address,
+                50_0000000,
+            );
         });
 
         e.ledger().set(LedgerInfo {
@@ -754,7 +766,13 @@ mod tests {
                 &pool_address,
                 42_0000000,
             );
-            execute_donate(&e, &samwise, &pool_address, 50_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &samwise,
+                &pool_address,
+                50_0000000,
+            );
         });
 
         e.ledger().set(LedgerInfo {
@@ -931,7 +949,13 @@ mod tests {
                 &pool_address,
                 deposit_amount,
             );
-            execute_donate(&e, &samwise, &pool_address, donate_amount);
+            execute_donate(
+                &e,
+                BackstopTier::BlndUsdc,
+                &samwise,
+                &pool_address,
+                donate_amount,
+            );
         });
 
         e.ledger().set(LedgerInfo {

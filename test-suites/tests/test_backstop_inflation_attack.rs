@@ -73,9 +73,12 @@ fn test_backstop_inflation_attack() {
         &inflation_amount,
         &fixture.env.ledger().sequence(),
     );
-    fixture
-        .backstop
-        .donate(&sauron, &pool_address, &inflation_amount);
+    fixture.backstop.donate(
+        &backstop::BackstopTier::BlndUsdc,
+        &sauron,
+        &pool_address,
+        &inflation_amount,
+    );
 
     // contracts stop any zero share deposits
     let bad_deposit_result = fixture.backstop.try_deposit(

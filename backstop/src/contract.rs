@@ -185,19 +185,20 @@ pub trait Backstop {
     /// not authorize the call
     fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address);
 
-    /// (Only Pool) Sends backstop tokens from `from` to a pools backstop
+    /// (Only Pool) Sends one tier token from `from` to a pool's backstop
     ///
     /// NOTE: This is not a deposit, and `from` will permanently lose access to the funds
     ///
     /// ### Arguments
-    /// * `from` - The address of the pool donating tokens to the backstop
+    /// * `tier` - The tier whose token is donated
+    /// * `from` - The address donating tokens to the backstop
     /// * `pool_address` - The address of the pool
-    /// * `amount` - The amount of BLND to add
+    /// * `amount` - The amount of tier tokens to add
     ///
     /// ### Errors
     /// If the `pool_address` is not valid, backstop does not have sufficient allowance from `from`, or if the pool does not
     /// authorize the call
-    fn donate(e: Env, from: Address, pool_address: Address, amount: i128);
+    fn donate(e: Env, tier: BackstopTier, from: Address, pool_address: Address, amount: i128);
 }
 
 #[contractimpl]
@@ -471,14 +472,14 @@ impl Backstop for BackstopContract {
         BackstopEvents::draw(&e, tier, pool_address, to, amount);
     }
 
-    fn donate(e: Env, from: Address, pool_address: Address, amount: i128) {
+    fn donate(e: Env, tier: BackstopTier, from: Address, pool_address: Address, amount: i128) {
         storage::extend_instance(&e);
         from.require_auth();
         pool_address.require_auth();
 
-        backstop::execute_donate(&e, &from, &pool_address, amount);
+        backstop::execute_donate(&e, tier, &from, &pool_address, amount);
 
-        BackstopEvents::donate(&e, pool_address, from, amount);
+        BackstopEvents::donate(&e, tier, pool_address, from, amount);
     }
 }
 
