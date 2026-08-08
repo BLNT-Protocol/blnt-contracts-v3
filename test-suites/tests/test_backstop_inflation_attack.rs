@@ -165,6 +165,9 @@ fn test_backstop_interest_auction_inflation_attack() {
             fixture.tokens[TokenIndex::XLM].address.clone(),
         ],
     );
+    fixture
+        .lp
+        .approve(&sauron, &fixture.backstop.address, &i128::MAX, &10_000);
     fixture.jump_with_sequence(201 * 5);
     pool_client.fill_interest_auction(&interest_auction.tier, &sauron, &100);
 

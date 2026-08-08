@@ -83,6 +83,25 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &pool_address,
         &usdc_tier_principal,
     );
+    let allowance_expiration = e.ledger().sequence().saturating_add(10_000);
+    fixture.lp.approve(
+        &operator,
+        &fixture.backstop.address,
+        &i128::MAX,
+        &allowance_expiration,
+    );
+    blnd_xlm.approve(
+        &operator,
+        &fixture.backstop.address,
+        &i128::MAX,
+        &allowance_expiration,
+    );
+    fixture.tokens[TokenIndex::USDC].approve(
+        &operator,
+        &fixture.backstop.address,
+        &i128::MAX,
+        &allowance_expiration,
+    );
     pool.set_status(&0);
 
     let credit = 450 * SCALAR_7;
@@ -105,15 +124,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
     let first_id = BytesN::from_array(&e, &[1; 32]);
     let first = pool.new_interest_auction(&first_id, &lot_assets);
-    assert!(fixture
-        .backstop
-        .try_deposit(
+    assert!(
+        fixture.backstop.deposit(
             &backstop::BackstopTier::BlndUsdc,
             &operator,
             &pool_address,
-            &SCALAR_7
-        )
-        .is_err());
+            &SCALAR_7,
+        ) > 0
+    );
     fixture.backstop.deposit(
         &backstop::BackstopTier::Usdc,
         &operator,
@@ -286,17 +304,16 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     assert_eq!(stale.lot_value, pending_before_stale.blnd_usdc);
     assert!(stale.lot_value >= 100 * SCALAR_7);
 
-    // The committed tier blocks share-changing deposits, while queue/dequeue
-    // remain available because they do not change total shares.
-    assert!(fixture
-        .backstop
-        .try_deposit(
+    // Like v2, the pool owns the auction lifecycle, so an active auction does
+    // not lock ordinary backstop share operations.
+    assert!(
+        fixture.backstop.deposit(
             &backstop::BackstopTier::BlndUsdc,
             &operator,
             &pool_address,
-            &SCALAR_7
-        )
-        .is_err());
+            &SCALAR_7,
+        ) > 0
+    );
     fixture.backstop.queue_withdrawal(
         &backstop::BackstopTier::BlndUsdc,
         &operator,

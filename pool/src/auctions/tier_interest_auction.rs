@@ -1,8 +1,7 @@
 use crate::{
     constants::SCALAR_7,
     dependencies::{
-        BackstopClient, BackstopContractInterestLotQuote, BackstopContractTakeRateQuote,
-        BackstopContractTier,
+        BackstopClient, BackstopContractTakeRateQuote, BackstopContractTier, BackstopPoolData,
     },
     errors::PoolError,
     pool::Pool,
@@ -10,7 +9,7 @@ use crate::{
 };
 use sep_41_token::TokenClient;
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{contracttype, panic_with_error, Address, BytesN, Env, Map, Vec, I256};
 
 use super::AuctionData;
 
@@ -22,18 +21,6 @@ const MAX_INTEREST_LOT_ASSETS: u32 = 4;
 const INTEREST_TIER_MINIMUM_VALUE_USDC: i128 = 100 * SCALAR_7;
 const INTEREST_STATE_TTL_THRESHOLD: u32 = 179 * ONE_DAY_LEDGERS;
 const INTEREST_STATE_TTL_BUMP: u32 = 180 * ONE_DAY_LEDGERS;
-
-/// Canonical tier-token bid returned by the configured backstop.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct InterestLotQuote {
-    pub bid_token: Address,
-    pub bid_amount: i128,
-    pub lot_value: i128,
-    pub tier: super::BackstopTier,
-    pub target_value: i128,
-    pub valid_until: u64,
-}
 
 /// Pending reserve credit apportioned to each tier for one reserve asset.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,8 +148,8 @@ pub fn create_interest_auction(
 
     let backstop = storage::get_backstop(e);
     let pool_address = e.current_contract_address();
-    let quotes =
-        BackstopClient::new(e, &backstop).quote_pool_take_rate_batch(&pool_address, &distributions);
+    let backstop_client = BackstopClient::new(e, &backstop);
+    let quotes = backstop_client.quote_pool_take_rate_batch(&pool_address, &distributions);
     if quotes.len() != distributions.len() {
         panic_with_error!(e, PoolError::InvalidLot);
     }
@@ -218,23 +205,13 @@ pub fn create_interest_auction(
         panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
     }
 
-    let quote = BackstopClient::new(e, &backstop).commit_interest_lot(
-        &pool_address,
-        auction_id,
-        &to_backstop_tier(tier),
-        &lot_value,
-    );
-    let quote = convert_interest_quote(quote);
-    let expected_target_value = proportional_ceil(e, lot_value, 6, 5);
-    if quote.tier != tier
-        || quote.lot_value != lot_value
-        || quote.bid_amount <= 0
-        || quote.target_value != expected_target_value
-        || quote.valid_until < e.ledger().timestamp()
-    {
+    let pool_data = backstop_client.pool_data(&pool_address);
+    let (bid_token, bid_amount, target_value, bid_valid_until) =
+        build_interest_bid(e, &backstop, &pool_data, tier, lot_value);
+    if bid_valid_until < e.ledger().timestamp() {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    valid_until = valid_until.min(quote.valid_until);
+    valid_until = valid_until.min(bid_valid_until);
     let block = e
         .ledger()
         .sequence()
@@ -243,13 +220,13 @@ pub fn create_interest_auction(
     let auction = InterestAuctionData {
         auction_id: auction_id.clone(),
         auction: AuctionData {
-            bid: soroban_sdk::map![e, (quote.bid_token.clone(), quote.bid_amount)],
+            bid: soroban_sdk::map![e, (bid_token, bid_amount)],
             lot,
             block,
         },
-        bid_valid_until: quote.valid_until,
+        bid_valid_until,
         lot_value,
-        target_value: quote.target_value,
+        target_value,
         tier,
         valid_until,
     };
@@ -300,23 +277,20 @@ pub fn fill_interest_auction(
     }
     consume_pending_interest_lot(e, auction.tier, &fill.lot);
 
-    let remaining = BackstopClient::new(e, &backstop).settle_interest_lot(
-        &pool_address,
-        &to_backstop_tier(tier),
-        &auction.auction_id,
-        &fill.base_bid_amount,
-        &fill.bid_amount,
-        filler,
-    );
-    if fill.complete != remaining.is_none() {
-        panic_with_error!(e, PoolError::InvalidLot);
+    if fill.bid_amount > 0 {
+        BackstopClient::new(e, &backstop).donate(
+            &to_backstop_tier(tier),
+            filler,
+            &pool_address,
+            &fill.bid_amount,
+        );
     }
-    if let Some(remaining) = remaining {
-        validate_and_store_remaining(e, &auction, &fill, remaining);
-    } else {
+    if fill.complete {
         e.storage()
             .temporary()
             .remove(&InterestAuctionDataKey::InterestAuction(tier));
+    } else {
+        store_remaining_interest_auction(e, &auction, &fill);
     }
     pool.store_cached_reserves(e);
     fill
@@ -332,11 +306,6 @@ pub fn delete_stale_interest_auction(e: &Env, tier: super::BackstopTier) -> Byte
     if e.ledger().sequence() < stale_at {
         panic_with_error!(e, PoolError::BadRequest);
     }
-    BackstopClient::new(e, &storage::get_backstop(e)).release_interest_lot(
-        &e.current_contract_address(),
-        &to_backstop_tier(tier),
-        &auction.auction_id,
-    );
     e.storage()
         .temporary()
         .remove(&InterestAuctionDataKey::InterestAuction(tier));
@@ -448,6 +417,51 @@ fn apply_take_rate_quote(
     states.set(asset.clone(), state);
 }
 
+fn build_interest_bid(
+    e: &Env,
+    backstop: &Address,
+    pool_data: &BackstopPoolData,
+    tier: super::BackstopTier,
+    lot_value: i128,
+) -> (Address, i128, i128, u64) {
+    let (assets, shares, total_value) = match tier {
+        super::BackstopTier::BlndUsdc => (
+            pool_data.blnd_usdc.assets,
+            pool_data.blnd_usdc.shares,
+            pool_data.blnd_usdc.total_value,
+        ),
+        super::BackstopTier::BlndXlm => (
+            pool_data.blnd_xlm.assets,
+            pool_data.blnd_xlm.shares,
+            pool_data.blnd_xlm.total_value,
+        ),
+        super::BackstopTier::Usdc => (
+            pool_data.usdc.assets,
+            pool_data.usdc.shares,
+            pool_data.usdc.total_value,
+        ),
+    };
+    if lot_value <= 0 || assets <= 0 || shares <= 0 || total_value <= 0 {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+
+    let bid_token = BackstopClient::new(e, backstop).backstop_token(&to_backstop_tier(tier));
+    if TokenClient::new(e, &bid_token).decimals() != 7 {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+    let target_value = proportional_ceil(e, lot_value, 6, 5);
+    let bid_amount = proportional_ceil(e, target_value, assets, total_value);
+    if bid_amount <= 0 {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+    let valid_until = if tier == super::BackstopTier::Usdc {
+        u64::MAX
+    } else {
+        pool_data.valuation_valid_until
+    };
+    (bid_token, bid_amount, target_value, valid_until)
+}
+
 fn value_reserve_amount(
     e: &Env,
     price: i128,
@@ -462,28 +476,20 @@ fn value_reserve_amount(
     oracle_value.fixed_mul_floor(e, &SCALAR_7, &oracle_scalar)
 }
 
-fn validate_and_store_remaining(
+fn store_remaining_interest_auction(
     e: &Env,
     auction: &InterestAuctionData,
     fill: &InterestAuctionFill,
-    remaining: BackstopContractInterestLotQuote,
 ) {
-    let remaining = convert_interest_quote(remaining);
     let bid_token = auction.auction.bid.keys().get(0).unwrap();
     let previous_bid = auction.auction.bid.get(bid_token.clone()).unwrap();
     let remaining_bid = checked_sub(e, previous_bid, fill.base_bid_amount);
-    let expected_lot_value = auction
-        .lot_value
-        .fixed_mul_floor(e, &remaining_bid, &previous_bid);
-    if remaining.bid_token != bid_token
-        || remaining.bid_amount != remaining_bid
-        || remaining.lot_value != expected_lot_value
-        || remaining.tier != auction.tier
-        || remaining.target_value != auction.target_value
-        || remaining.valid_until != auction.bid_valid_until
-    {
+    if remaining_bid <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
+    let remaining_lot_value = auction
+        .lot_value
+        .fixed_mul_floor(e, &remaining_bid, &previous_bid);
     let mut remaining_lot = Map::new(e);
     for (asset, amount) in auction.auction.lot.iter() {
         let remainder = checked_sub(e, amount, fill.base_lot.get(asset.clone()).unwrap_or(0));
@@ -496,12 +502,12 @@ fn validate_and_store_remaining(
         &InterestAuctionData {
             auction_id: auction.auction_id.clone(),
             auction: AuctionData {
-                bid: soroban_sdk::map![e, (remaining.bid_token, remaining.bid_amount)],
+                bid: soroban_sdk::map![e, (bid_token, remaining_bid)],
                 lot: remaining_lot,
                 block: auction.auction.block,
             },
             bid_valid_until: auction.bid_valid_until,
-            lot_value: remaining.lot_value,
+            lot_value: remaining_lot_value,
             target_value: auction.target_value,
             tier: auction.tier,
             valid_until: auction.valid_until,
@@ -628,21 +634,6 @@ fn to_backstop_tier(tier: super::BackstopTier) -> BackstopContractTier {
     }
 }
 
-fn convert_interest_quote(quote: BackstopContractInterestLotQuote) -> InterestLotQuote {
-    InterestLotQuote {
-        bid_token: quote.bid_token,
-        bid_amount: quote.bid_amount,
-        lot_value: quote.lot_value,
-        tier: match quote.tier {
-            BackstopContractTier::BlndUsdc => super::BackstopTier::BlndUsdc,
-            BackstopContractTier::BlndXlm => super::BackstopTier::BlndXlm,
-            BackstopContractTier::Usdc => super::BackstopTier::Usdc,
-        },
-        target_value: quote.target_value,
-        valid_until: quote.valid_until,
-    }
-}
-
 fn require_unique_assets(e: &Env, assets: &Vec<Address>) {
     let mut seen = Map::<Address, bool>::new(e);
     for asset in assets {
@@ -665,7 +656,17 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
 }
 
 fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    value.fixed_mul_ceil(e, &numerator, &denominator)
+    if value < 0 || numerator < 0 || denominator <= 0 {
+        panic_with_error!(e, PoolError::OverflowError);
+    }
+    let denominator = I256::from_i128(e, denominator);
+    I256::from_i128(e, value)
+        .mul(&I256::from_i128(e, numerator))
+        .add(&denominator)
+        .sub(&I256::from_i32(e, 1))
+        .div(&denominator)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
 }
 
 #[cfg(test)]

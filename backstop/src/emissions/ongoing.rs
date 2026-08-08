@@ -6,8 +6,7 @@ use soroban_sdk::{
 
 use crate::{
     backstop::{
-        credit_tier_shares, interest_tier_locked, require_registered_pool, tier_token,
-        BackstopTier, BlndEmissionValues,
+        credit_tier_shares, require_registered_pool, tier_token, BackstopTier, BlndEmissionValues,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_14, SCALAR_7},
     dependencies::{CometClient, EmitterClient},
@@ -352,9 +351,6 @@ pub(crate) fn claim_user_ongoing_blnd(
     require_emission_tier(e, tier);
     if min_lp_tokens_out < 0 {
         panic_with_error!(e, BackstopError::NegativeAmountError);
-    }
-    if interest_tier_locked(e, tier, pool) {
-        panic_with_error!(e, BackstopError::InterestTierLocked);
     }
     prepare_pool_weight_change(e, tier, pool);
 

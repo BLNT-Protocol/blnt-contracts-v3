@@ -84,8 +84,7 @@ pub fn create_auction(
         AuctionType::UserLiquidation => create_user_liq_auction_data(e, user, bid, lot, percent),
         // V3 bad debt requires the pool-owned single-tier lifecycle.
         AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
-        // V3 interest auctions require synchronized pool/backstop commitments
-        // and must use the dedicated tier-specific lifecycle.
+        // V3 interest auctions use a dedicated pool-owned tier lifecycle.
         AuctionType::InterestAuction => panic_with_error!(e, PoolError::BadRequest),
     };
     storage::set_auction(e, &auction_type, user, &auction_data);

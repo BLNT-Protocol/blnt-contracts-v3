@@ -105,18 +105,13 @@ Capital state has these canonical policy effects:
 User, pool, and global shares decrease only when an expired withdrawal
 transfers custody out.
 
-An interest-auction commitment blocks deposits and actual withdrawals only in
-its selected tier. Each pool may hold at most one such commitment per tier and
-three total. Queueing and dequeueing remain available. Permissionless deletion
-releases the selected tier's lock at the inherited 500-ledger stale boundary.
-
 Every withdrawal calls
 `backstop_withdrawal_allowed(backstop)` on the attributed pool. The callback
 MUST identify the immutable backstop and find no liability, prepared bad-debt
 auction, or unresolved bad debt. Amounts remain reserve-keyed and are never
 summed across asset units. A missing, failed, negative, nonzero, or inconsistent
 record fails closed. Pool actions update liability records and bad-debt auction
-state atomically. Interest commitments use the selected-tier lock instead.
+state atomically.
 
 ## 4. Pool activation — **Replaced**
 
@@ -263,10 +258,9 @@ inherited.
 ### 5.1 Tier-auction lifecycle
 
 Each pool may have one active bad-debt auction. It may also have one active
-interest auction per backstop tier. The bad-debt auction is stored by the pool;
-each interest auction has matching pool and backstop records. Records bind one
+interest auction per backstop tier. The pool stores every auction, binding one
 identifier, selected tier, and base amounts with a 46-day temporary lifetime.
-Reads do not renew them.
+Reads do not renew auction state.
 
 Bad-debt eligibility requires at least 100 USDC of accounted tier capital;
 interest-auction creation requires at least 100 USDC in the selected tier's
@@ -274,12 +268,12 @@ pending lot. Equality qualifies. A successfully valued smaller amount is
 ineligible, while unavailable or invalid valuation fails closed.
 
 A partial fill removes selected base amounts and applies the inherited time
-modifier only to actual transfers. Interest fills synchronize both records;
-bad-debt fills update the pool record and draw the realized loss atomically.
-Records use a 45-day renewal threshold and 46-day bump. Completion deletes the
-applicable records. At the inherited 500-ledger stale boundary, permissionless
-deletion releases the selection without changing liabilities, pending credit,
-balances, or tier assets.
+modifier only to actual transfers. An interest fill atomically donates the
+realized bid to its tier; a bad-debt fill atomically draws the realized loss.
+Pool records use a 45-day renewal threshold and 46-day bump. Completion deletes
+the record. At the inherited 500-ledger stale boundary, permissionless deletion
+releases the selection without changing liabilities, pending credit, balances,
+or tier assets.
 
 ### 5.2 Bad-debt waterfall
 
@@ -362,29 +356,32 @@ configured reserves. Creation atomically:
 4. Starting at the pool's stored cyclic tier cursor, select the first
    qualifying tier without an active auction whose pending lot meets the shared
    minimum.
-5. Reserve the selected pending amounts in a next-ledger auction and advance
+5. Store the selected pending amounts in a next-ledger auction and advance
    the cursor to the next tier.
 
 Omitted reserves remain pending or uncheckpointed. Selection is cyclic among
-qualifying unlocked tiers. Each pool may have one active auction per tier and
+qualifying available tiers. Each pool may have one active auction per tier and
 three total; active identifiers must be unique within the pool. Get, fill, and
-stale-delete operations identify the tier. The reserved lot remains in
+stale-delete operations identify the tier. Ordinary backstop share operations
+remain available while an auction is active. The selected lot remains in
 persistent pending accounting so expiry cannot lose or reweight it.
 
-The selected seven-decimal tier token is the bid. Its verified base value MUST
-equal 120% of the reserve lot, rounded up in token units.
+The selected seven-decimal tier token is the bid. The pool derives its amount
+from canonical `pool_data`; its base value MUST equal 120% of the reserve lot,
+rounded up in token units.
 
 A partial interest fill releases any base-lot discount from the reservation.
 Only reserve assets actually transferred from the pool are subtracted from
 both the persistent pending tier amount and accrued backstop credit.
 
-The authorized filler cannot be the pool or backstop. Exact source-balance
-deltas govern both transfers. The bid enters the selected pool-tier without
-minting shares or a user claim, appreciating active and queued shares and
-immediately assuming that tier's protocol roles. Unfilled amounts remain in
-their original accumulators after stale recovery. The `4:3:2` ratio allocates
-credit lots; auction timing may produce a different ratio of realized donated
-value.
+The authorized filler cannot be the pool or backstop and MUST grant the
+backstop sufficient tier-token allowance. The pool transfers the realized
+reserve lot and atomically invokes tier-aware `donate` for the realized bid.
+The bid enters the selected pool-tier without minting shares or a user claim,
+appreciating active and queued shares and immediately assuming that tier's
+protocol roles. Unfilled amounts remain in their original accumulators after
+stale recovery. The `4:3:2` ratio allocates credit lots; auction timing may
+produce a different ratio of realized donated value.
 
 ## 6. BLND emissions — **Added and extended**
 

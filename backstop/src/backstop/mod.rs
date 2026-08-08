@@ -6,11 +6,8 @@ mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
 mod interest;
-pub(crate) use interest::{
-    commit_interest_lot, interest_tier_locked, quote_pool_take_rate_batch, release_interest_lot,
-    settle_interest_lot,
-};
-pub use interest::{InterestLotQuote, TakeRateQuote};
+pub(crate) use interest::quote_pool_take_rate_batch;
+pub use interest::TakeRateQuote;
 
 mod withdrawal;
 pub use withdrawal::{

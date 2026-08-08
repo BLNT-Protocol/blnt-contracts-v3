@@ -16,6 +16,4 @@ pub(crate) use tier_interest_auction::{
     create_interest_auction, delete_stale_interest_auction, fill_interest_auction,
     get_interest_auction, interest_reserve_state,
 };
-pub use tier_interest_auction::{
-    InterestAuctionData, InterestAuctionFill, InterestLotQuote, InterestReserveState,
-};
+pub use tier_interest_auction::{InterestAuctionData, InterestAuctionFill, InterestReserveState};

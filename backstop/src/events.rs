@@ -1,6 +1,6 @@
-use soroban_sdk::{contractevent, Address, BytesN, Env};
+use soroban_sdk::{contractevent, Address, Env};
 
-use crate::backstop::{BackstopTier, InterestLotQuote};
+use crate::backstop::BackstopTier;
 
 macro_rules! single_value_event {
     (
@@ -62,35 +62,6 @@ single_value_event!(
     [],
     amount: i128
 );
-#[contractevent(topics = ["interest_lot_committed"], data_format = "vec")]
-struct InterestLotCommittedEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-    quote: InterestLotQuote,
-}
-
-#[contractevent(
-    topics = ["interest_lot_released"],
-    data_format = "single-value"
-)]
-struct InterestLotReleasedEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-}
-
-#[contractevent(topics = ["interest_lot_settled"], data_format = "vec")]
-struct InterestLotSettledEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-    base_bid_amount: i128,
-    bid_amount: i128,
-    from: Address,
-    tier: BackstopTier,
-    complete: bool,
-}
 vec_event!(
     TierDepositEvent,
     "deposit",
@@ -184,47 +155,6 @@ impl BackstopEvents {
 
     pub fn backfill_funded(e: &Env, amount: i128) {
         BackfillFundedEvent { amount }.publish(e);
-    }
-
-    pub fn interest_lot_committed(
-        e: &Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        quote: InterestLotQuote,
-    ) {
-        InterestLotCommittedEvent {
-            pool,
-            auction_id,
-            quote,
-        }
-        .publish(e);
-    }
-
-    pub fn interest_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
-        InterestLotReleasedEvent { pool, auction_id }.publish(e);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn interest_lot_settled(
-        e: &Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        base_bid_amount: i128,
-        bid_amount: i128,
-        from: Address,
-        tier: BackstopTier,
-        complete: bool,
-    ) {
-        InterestLotSettledEvent {
-            pool,
-            auction_id,
-            base_bid_amount,
-            bid_amount,
-            from,
-            tier,
-            complete,
-        }
-        .publish(e);
     }
 
     /// Emit a v2-shaped deposit event scoped to a v3 tier.
