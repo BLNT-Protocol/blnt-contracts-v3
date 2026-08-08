@@ -141,6 +141,7 @@ pub(crate) fn create_backstop<'a>(
             usdc_token,
             xlm_token,
             pool_factory,
+            soroban_sdk::Vec::<(Address, i128)>::new(e),
         ),
     );
     e.as_contract(&backstop_id, || {

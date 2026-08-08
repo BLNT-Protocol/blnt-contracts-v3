@@ -576,6 +576,8 @@ fn test_backstop_constructor() {
         create_backstop_assets(&e);
     let emitter = Address::generate(&e);
     let contract_id = Address::generate(&e);
+    let recipient = Address::generate(&e);
+    let drop_list = vec![&e, (recipient.clone(), 40_000_000 * SCALAR_7)];
     let pool_factory = e.register(
         MockPoolFactory {},
         (PoolInitMeta {
@@ -595,6 +597,7 @@ fn test_backstop_constructor() {
             usdc_token.clone(),
             xlm_token.clone(),
             pool_factory.clone(),
+            drop_list.clone(),
         ),
     );
 
@@ -640,6 +643,13 @@ fn test_backstop_constructor() {
             .get::<Symbol, Address>(&Symbol::new(&e, "PoolFact"))
             .unwrap();
         assert_eq!(contract_pool_factory, pool_factory);
+
+        let contract_drop_list = e
+            .storage()
+            .persistent()
+            .get::<Symbol, Vec<(Address, i128)>>(&Symbol::new(&e, "DropList"))
+            .unwrap();
+        assert_eq!(contract_drop_list, drop_list);
     });
 
     let backstop_client = BackstopClient::new(&e, &contract_id);
@@ -679,6 +689,7 @@ fn test_backstop_constructor_rejects_wrong_factory_binding() {
             usdc,
             xlm,
             pool_factory,
+            Vec::<(Address, i128)>::new(&e),
         ),
     );
 }
@@ -711,6 +722,39 @@ fn test_backstop_constructor_rejects_wrong_comet_pair() {
             usdc_token,
             xlm_token,
             pool_factory,
+            Vec::<(Address, i128)>::new(&e),
+        ),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1000)")]
+fn test_backstop_constructor_rejects_drop_list_over_cap() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = Address::generate(&e);
+    let (blnd, usdc, xlm, blnd_usdc, blnd_xlm) = create_backstop_assets(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnd_id: blnd.clone(),
+        },),
+    );
+    let drop_list = vec![&e, (Address::generate(&e), 40_000_000 * SCALAR_7 + 1)];
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            blnd_usdc,
+            blnd_xlm,
+            Address::generate(&e),
+            blnd,
+            usdc,
+            xlm,
+            pool_factory,
+            drop_list,
         ),
     );
 }

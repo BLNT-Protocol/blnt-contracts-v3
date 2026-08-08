@@ -431,13 +431,18 @@ no backfill. Queueing checkpoints accrued BLND and stops future weight;
 dequeueing resumes at the current index. Queueing or withdrawal never
 forfeits already accrued BLND.
 
-Successful migration awards no discretionary BLND. If the schedule is
-positive, `drop` may be called once after activation and must request exactly
-that amount from the emitter for this backstop alone. An exact increase in the
-configured BLND balance is required. Backstop and pool claims remain disabled
-until the full positive schedule is funded. Backfill uses the ordinary claim
-paths: BLND:USDC claims compound into that tier and the 30% pool tranche uses
-the inherited pool allowance and claim accounting.
+The constructor binds an immutable initial-drop recipient list. Its aggregate
+allocation plus the maximum 10-million-BLND backfill MUST NOT exceed the
+emitter's 50-million-BLND ceiling. Choosing recipients, including choosing an
+empty list, is deployment policy rather than protocol policy.
+
+After activation, `drop` may be called once. It submits the configured list
+and, when positive, the exact scheduled backfill for this backstop. The
+configured BLND balance MUST increase by the total amount directed to the
+backstop. Backstop and pool claims remain disabled until the full positive
+schedule is funded. Backfill uses the ordinary claim paths: BLND:USDC claims
+compound into that tier and the 30% pool tranche uses the inherited pool
+allowance and claim accounting.
 
 ### 6.2 Ongoing backstop-depositor emissions — **Extended and safety fixed**
 

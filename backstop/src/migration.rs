@@ -1,5 +1,5 @@
 use sep_41_token::TokenClient;
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, Vec};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 
 use crate::{
     constants::MAX_BACKFILLED_EMISSIONS,
@@ -275,7 +275,7 @@ pub(crate) fn drop(e: &Env) {
     }
     require_active(e);
     let scheduled = scheduled_backfill(e);
-    if scheduled <= 0 || scheduled > MAX_BACKFILLED_EMISSIONS {
+    if !(0..=MAX_BACKFILLED_EMISSIONS).contains(&scheduled) {
         panic_with_error!(e, BackstopError::InvalidBackfillFunding);
     }
 
@@ -285,11 +285,21 @@ pub(crate) fn drop(e: &Env) {
     let candidate = e.current_contract_address();
     let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
     let balance_before = blnd.balance(&candidate);
-    let mut recipients = Vec::new(e);
-    recipients.push_back((candidate.clone(), scheduled));
+    let mut recipients = storage::get_drop_list(e);
+    let mut expected_candidate_delta = scheduled;
+    for (recipient, amount) in recipients.iter() {
+        if recipient == candidate {
+            expected_candidate_delta = expected_candidate_delta
+                .checked_add(amount)
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        }
+    }
+    if scheduled > 0 {
+        recipients.push_back((candidate.clone(), scheduled));
+    }
     emitter(e).drop(&recipients);
     let received = checked_signed_sub(e, blnd.balance(&candidate), balance_before);
-    if received != scheduled {
+    if received != expected_candidate_delta {
         panic_with_error!(e, BackstopError::InvalidBackfillFunding);
     }
     storage::set_blnd_binding_verified(e);
@@ -517,7 +527,7 @@ mod tests {
     use sep_41_token::TokenClient;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
-        vec, Address, Env,
+        vec, Address, Env, Vec,
     };
 
     use crate::{
@@ -650,6 +660,17 @@ mod tests {
     #[test]
     fn backfill_uses_ordinary_indexes_and_exact_funding() {
         let fixture = Fixture::create();
+        let discretionary_recipient = Address::generate(&fixture.e);
+        let discretionary_amount = 1_000 * SCALAR_7;
+        fixture.e.as_contract(&fixture.backstop, || {
+            storage::set_drop_list(
+                &fixture.e,
+                &vec![
+                    &fixture.e,
+                    (discretionary_recipient.clone(), discretionary_amount),
+                ],
+            );
+        });
         assert_eq!(fixture.queue(), 1_000);
 
         fixture.e.ledger().set_timestamp(1_010);
@@ -706,6 +727,10 @@ mod tests {
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             scheduled + 10 * SCALAR_7
         );
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd).balance(&discretionary_recipient),
+            discretionary_amount
+        );
         assert!(fixture.client().try_drop().is_err());
         assert!(fixture.client().gulp_emissions(&fixture.pool) > 0);
         assert_eq!(
@@ -748,6 +773,28 @@ mod tests {
                 &SCALAR_7,
             ),
             SCALAR_7
+        );
+    }
+
+    #[test]
+    fn discretionary_drop_does_not_require_positive_backfill() {
+        let fixture = Fixture::create();
+        let recipient = Address::generate(&fixture.e);
+        let amount = 1_000 * SCALAR_7;
+        fixture.e.as_contract(&fixture.backstop, || {
+            storage::set_reward_zone(&fixture.e, &Vec::new(&fixture.e));
+            storage::set_drop_list(&fixture.e, &vec![&fixture.e, (recipient.clone(), amount)]);
+        });
+
+        fixture.queue();
+        fixture.prepare_swap_and_sync();
+        assert_eq!(fixture.client().migration_state().scheduled_backfill, 0);
+
+        fixture.client().drop();
+        assert_eq!(fixture.client().migration_state().funded_backfill, Some(0));
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd).balance(&recipient),
+            amount
         );
     }
 

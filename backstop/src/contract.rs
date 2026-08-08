@@ -3,6 +3,7 @@ use crate::{
         self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier, PoolData,
         TakeRateQuote, UserBalance, Q4W,
     },
+    constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     dependencies::PoolFactoryClient,
     emissions::{self, OngoingEmissionState, PoolOngoingEmissions, UserOngoingEmissions},
     errors::BackstopError,
@@ -78,7 +79,7 @@ pub trait Backstop {
     /// Return the complete incumbent-emitter migration state.
     fn migration_state(e: Env) -> MigrationState;
 
-    /// Fund the scheduled migration backfill through the emitter's v2 drop.
+    /// Execute the configured initial drop and fund any scheduled migration backfill.
     fn drop(e: Env);
 
     /// Fetch the reward zone for the backstop
@@ -190,6 +191,7 @@ impl BackstopContract {
     /// * `usdc_token` - The USDC token ID
     /// * `xlm_token` - The XLM token ID
     /// * `pool_factory` - The pool factory ID
+    /// * `drop_list` - Immutable discretionary recipient addresses and BLND amounts
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
@@ -200,6 +202,7 @@ impl BackstopContract {
         usdc_token: Address,
         xlm_token: Address,
         pool_factory: Address,
+        drop_list: Vec<(Address, i128)>,
     ) {
         validate_backstop_assets(
             &e,
@@ -214,6 +217,16 @@ impl BackstopContract {
             panic_with_error!(&e, BackstopError::InvalidPoolFactoryBinding);
         }
         let _ = factory.is_pool(&e.current_contract_address());
+        let mut drop_total = MAX_BACKFILLED_EMISSIONS;
+        for (_, amount) in drop_list.iter() {
+            require_nonnegative(&e, amount);
+            drop_total = drop_total
+                .checked_add(amount)
+                .unwrap_or_else(|| panic_with_error!(&e, BackstopError::OverflowError));
+        }
+        if drop_total > MAX_INITIAL_DROP {
+            panic_with_error!(&e, BackstopError::BadRequest);
+        }
         storage::set_blnd_usdc_token(&e, &blnd_usdc_token);
         storage::set_blnd_xlm_token(&e, &blnd_xlm_token);
         storage::set_blnd_token(&e, &blnd_token);
@@ -221,6 +234,7 @@ impl BackstopContract {
         storage::set_xlm_token(&e, &xlm_token);
         storage::set_pool_factory(&e, &pool_factory);
         storage::set_emitter(&e, &emitter);
+        storage::set_drop_list(&e, &drop_list);
         migration::initialize(&e);
         storage::extend_instance(&e);
     }

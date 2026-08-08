@@ -135,8 +135,8 @@ impl TestFixture<'_> {
         emitter_client.swap_backstop();
         backstop_client.distribute();
 
-        // Test users are funded explicitly; a successful v3 migration has no
-        // discretionary BLND recipient list.
+        // This test deployment uses an empty discretionary BLND recipient list;
+        // test users are funded explicitly.
         blnd_client.mint(&bombadil, &(10_000_000 * SCALAR_7));
         blnd_client.mint(&frodo, &(30_000_000 * SCALAR_7));
 

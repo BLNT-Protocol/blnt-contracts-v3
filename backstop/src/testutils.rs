@@ -104,7 +104,16 @@ fn register_backstop(
     e.register_at(
         &backstop,
         BackstopContract {},
-        (blnd_usdc, blnd_xlm, emitter, blnd, usdc, xlm, pool_factory),
+        (
+            blnd_usdc,
+            blnd_xlm,
+            emitter,
+            blnd,
+            usdc,
+            xlm,
+            pool_factory,
+            Vec::<(Address, i128)>::new(e),
+        ),
     );
     e.as_contract(&backstop, || {
         set_test_valuation_override(e, Some(false));

@@ -17,6 +17,9 @@ pub const Q4W_LOCK_TIME: u64 = 17 * 24 * 60 * 60;
 /// Represents between 3-4 months worth of token emissions.
 pub const MAX_BACKFILLED_EMISSIONS: i128 = 10_000_000 * SCALAR_7;
 
+/// The emitter's maximum one-time initial drop.
+pub const MAX_INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
+
 /// The verified USDC value required for an inactive pool to activate.
 pub const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
 

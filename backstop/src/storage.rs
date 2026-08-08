@@ -102,6 +102,7 @@ const BLND_TOKEN_KEY: &str = "BLNDTkn";
 const BLND_XLM_TOKEN_KEY: &str = "BXLMTkn";
 const USDC_TOKEN_KEY: &str = "USDCTkn";
 const XLM_TOKEN_KEY: &str = "XLMTkn";
+const DROP_LIST_KEY: &str = "DropList";
 #[cfg(test)]
 const LAST_DISTRO_KEY: &str = "LastDist";
 const REWARD_ZONE_KEY: &str = "RZ";
@@ -302,6 +303,23 @@ pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
+}
+
+/// Fetch the immutable initial-drop recipient list.
+pub fn get_drop_list(e: &Env) -> Vec<(Address, i128)> {
+    e.storage()
+        .persistent()
+        .get::<Symbol, Vec<(Address, i128)>>(&Symbol::new(e, DROP_LIST_KEY))
+        .unwrap_optimized()
+}
+
+/// Store the immutable initial-drop recipient list.
+pub fn set_drop_list(e: &Env, drop_list: &Vec<(Address, i128)>) {
+    let key = Symbol::new(e, DROP_LIST_KEY);
+    e.storage().persistent().set(&key, drop_list);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 }
 
 /********** User Shares **********/

@@ -29,6 +29,7 @@ pub fn create_backstop<'a>(
                 usdc_token,
                 xlm_token,
                 pool_factory,
+                soroban_sdk::Vec::<(Address, i128)>::new(e),
             ),
         );
     } else {
@@ -43,6 +44,7 @@ pub fn create_backstop<'a>(
                 usdc_token,
                 xlm_token,
                 pool_factory,
+                soroban_sdk::Vec::<(Address, i128)>::new(e),
             ),
         );
     }
