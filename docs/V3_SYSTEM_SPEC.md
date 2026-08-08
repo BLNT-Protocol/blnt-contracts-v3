@@ -97,7 +97,7 @@ Capital state has these canonical policy effects:
 | --- | --- | --- | --- | --- |
 | Active accounted shares | Included | Available | Included | BLND-bearing tiers |
 | Queued shares | Excluded | Available | Included | Excluded |
-| Bad-debt committed assets | Excluded | Reserved for that loss | Included | Inherits active-share state until transferred |
+| Pool-selected bad-debt lot | Included until drawn | Selected for that auction | Included | Inherits active-share state until drawn |
 | Raw direct transfer | Excluded | Excluded | Excluded | Excluded |
 
 User, pool, and global shares decrease only when an expired withdrawal
@@ -110,12 +110,11 @@ releases the selected tier's lock at the inherited 500-ledger stale boundary.
 
 Every withdrawal calls
 `backstop_withdrawal_allowed(backstop)` on the attributed pool. The callback
-MUST identify the immutable backstop and find no liability, committed loss, or
-unresolved bad debt. Amounts remain reserve-keyed and are never summed across
-asset units. A missing, failed, negative, nonzero, or inconsistent record fails
-closed. Borrow, repay, liquidation handoff, bad-debt preparation, fill,
-continuation, stale release, and supplier default update these records
-atomically. Interest commitments use the selected-tier lock instead.
+MUST identify the immutable backstop and find no liability, prepared bad-debt
+auction, or unresolved bad debt. Amounts remain reserve-keyed and are never
+summed across asset units. A missing, failed, negative, nonzero, or inconsistent
+record fails closed. Pool actions update liability records and bad-debt auction
+state atomically. Interest commitments use the selected-tier lock instead.
 
 ## 4. Pool activation — **Replaced**
 
@@ -259,24 +258,26 @@ This replaces the single-token realization in `V2-AUCTION-003` and
 `V2-AUCTION-004`; all other auction and supplier-default arithmetic is
 inherited.
 
-### 5.1 Shared tier-auction lifecycle
+### 5.1 Tier-auction lifecycle
 
-Each pool may have one active bad-debt auction and one active interest auction
-per tier. Creation atomically stores matching pool and backstop records for one
+Each pool may have one active bad-debt auction. It may also have one active
+interest auction per backstop tier. The bad-debt auction is stored by the pool;
+each interest auction has matching pool and backstop records. Records bind one
 identifier, selected tier, and base amounts with a 46-day temporary lifetime.
-Only the registered pool may mutate its commitment; reads do not renew it.
+Reads do not renew them.
 
-Bad-debt eligibility requires at least 100 USDC of available tier capital;
+Bad-debt eligibility requires at least 100 USDC of accounted tier capital;
 interest-auction creation requires at least 100 USDC in the selected tier's
 pending lot. Equality qualifies. A successfully valued smaller amount is
 ineligible, while unavailable or invalid valuation fails closed.
 
-A partial fill removes selected base amounts, applies the inherited time
-modifier only to actual transfers, and synchronizes both records using a
-45-day renewal threshold and 46-day bump. Completion deletes both. At the
-inherited 500-ledger stale boundary, permissionless deletion releases the
-commitment without changing liabilities, pending credit, balances, or tier
-assets. All effects commit or roll back together.
+A partial fill removes selected base amounts and applies the inherited time
+modifier only to actual transfers. Interest fills synchronize both records;
+bad-debt fills update the pool record and draw the realized loss atomically.
+Records use a 45-day renewal threshold and 46-day bump. Completion deletes the
+applicable records. At the inherited 500-ledger stale boundary, permissionless
+deletion releases the selection without changing liabilities, pending credit,
+balances, or tier assets.
 
 ### 5.2 Bad-debt waterfall
 
@@ -286,7 +287,7 @@ assets. All effects commit or roll back together.
 4. Pool suppliers.
 
 Sections 3.1 and 3.3 govern eligibility. One auction sells one tier, selecting
-the first with at least 100 USDC of eligible uncommitted capital. Smaller
+the first with at least 100 USDC of accounted capital. Smaller
 tiers are skipped without a debt-covering exception; valuation failure stops
 the search. Supplier loss begins only after all three successfully value below
 the minimum, so less than 300 USDC may be skipped. Skipped capital remains
@@ -297,29 +298,30 @@ lot, which is the smaller of available tier tokens and the target amount. A
 partial LP amount rounds up and requires linear per-share valuation so it
 cannot underfill. Loss passed onward MUST NOT be understated.
 
-Commitment transfers no assets and changes no shares or exchange rate.
-Committed assets are excluded from activation and later loss lots. Expiry
-leaves persistent liabilities blocking withdrawal, and later price movement
-does not resize a committed lot.
+Selection transfers no assets and changes no accounting, activation value,
+shares, exchange rate, take-rate weight, or emission weight. The pool permits
+no second bad-debt auction, and its withdrawal callback blocks withdrawals
+while the auction or liabilities remain. Expiry leaves persistent liabilities
+blocking withdrawal, and later price movement does not resize a selected lot.
 
 Fills otherwise apply `V2-AUCTION-001` and `V2-AUCTION-003`. The time modifier
 scales only dTokens and tier tokens transferred, while selected base amounts
 reduce the auction. The filler assumes dTokens and receives the selected tier
 token; no swap occurs. Only tokens actually transferred reduce accounted
 assets, impairing active and queued shares without burning them. Untransferred
-base becomes uncommitted capacity. Residual dTokens after a complete
+base returns to ordinary capacity. Residual dTokens after a complete
 late-discount fill remain liabilities and block withdrawal. A partial fill
-reduces committed value in proportion to the remaining base lot; original
+reduces selected value in proportion to the remaining base lot; original
 debt, target, unfilled target, and valuation validity remain creation metadata.
 
 When no bad-debt auction is active, permissionless
 `continue_bad_debt_resolution` performs one bounded step. It validates every
 reserve-keyed backstop liability and fails on unknown, missing, negative, or
 inconsistent records. The next batch follows immutable reserve order and
-contains at most `min(max_positions - 1, 4)` reserves. The pool and backstop
-MUST use one atomic backstop call to select and commit the first qualifying
-tier, and each continuation restarts the strict tier search. A result with no
-commitment proves that all three tiers are below the operational minimum.
+contains at most `min(max_positions - 1, 4)` reserves. The pool MUST use
+canonical `pool_data` to select the first qualifying tier, and each
+continuation restarts the strict tier search. A result with no selected lot
+proves that all three tiers are below the operational minimum.
 
 Only a successful no-tier result may default all remaining liabilities to
 suppliers. The transaction accrues each affected reserve, applies
@@ -341,8 +343,7 @@ D
 \]
 
 A zero-value tier is omitted and the formula renormalizes. Eligibility follows
-Section 3.3, using full accounted value even when committed to bad debt.
-Take-rate and bad-debt commitments coexist but remain independently atomic.
+Section 3.3, using full accounted value even when selected for bad debt.
 
 Each pool and reserve stores three pending tier amounts and an isolated carry.
 New credit plus carry is apportioned by the formula; floors and new carry
@@ -578,12 +579,12 @@ requires a production checkpoint no more than five seconds old. Other pools
 and plain USDC are exempt. A mutation cannot change prior allocation and may
 affect only the unresolved five-second window.
 
-Queued shares have zero weight; dequeue resumes at the current index. Committed
-bad-debt capital remains eligible until a guarded fill transfers it, at which
-point only the transferred amount loses weight. Commitment, discount, stale
-release, balance or composition changes, membership, and pool status never
-rewrite prior allocation. A position MUST NOT earn through two tiers or both
-eligible and ineligible accounting.
+Queued shares have zero weight; dequeue resumes at the current index. Selected
+bad-debt capital remains eligible until a fill transfers it, at which point
+only the transferred amount loses weight. Selection, discount, stale release,
+balance or composition changes, membership, and pool status never rewrite
+prior allocation. A position MUST NOT earn through two tiers or both eligible
+and ineligible accounting.
 
 The owner authorizes a claim for one eligible tier and supplies a minimum LP
 output. The claim checkpoints that tier for one pool, reduces only its accrued

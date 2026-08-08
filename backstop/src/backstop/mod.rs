@@ -5,13 +5,6 @@ pub use deposit::execute_deposit_for_tier;
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
-mod bad_debt;
-pub use bad_debt::BadDebtLotQuote;
-pub(crate) use bad_debt::{
-    available_pool_tier_assets, bad_debt_commitment, commit_bad_debt_lot,
-    pool_bad_debt_commitment_count, release_bad_debt_lot, settle_bad_debt_lot,
-};
-
 mod interest;
 pub(crate) use interest::{
     commit_interest_lot, interest_tier_locked, quote_pool_take_rate_batch, release_interest_lot,

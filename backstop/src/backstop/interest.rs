@@ -387,7 +387,7 @@ fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -
 mod tests {
     use soroban_sdk::testutils::Address as _;
 
-    use crate::{backstop::pool_bad_debt_commitment_count, testutils::create_backstop};
+    use crate::testutils::create_backstop;
 
     use super::*;
 
@@ -444,7 +444,7 @@ mod tests {
     }
 
     #[test]
-    fn interest_commitment_keys_are_isolated_by_tier_and_from_bad_debt() {
+    fn interest_commitment_keys_are_isolated_by_tier() {
         let e = Env::default();
         let contract = create_backstop(&e);
         let pool = Address::generate(&e);
@@ -486,7 +486,6 @@ mod tests {
             assert!(interest_tier_locked(&e, BackstopTier::BlndUsdc, &pool));
             assert!(interest_tier_locked(&e, BackstopTier::BlndXlm, &pool));
             assert!(!interest_tier_locked(&e, BackstopTier::Usdc, &pool));
-            assert_eq!(pool_bad_debt_commitment_count(&e, &pool), 0);
         });
     }
 }

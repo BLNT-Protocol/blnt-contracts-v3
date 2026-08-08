@@ -17,8 +17,8 @@ mod testutils;
 #[cfg(any(test, feature = "testutils"))]
 pub use backstop::set_test_valuation_override;
 pub use backstop::{
-    ActivationQuote, ActivationValues, AssetValuation, BackstopTier, BadDebtLotQuote,
-    BlndEmissionValues, PoolBalance, PoolData, PoolTierData, UserBalance, Q4W,
+    ActivationQuote, ActivationValues, AssetValuation, BackstopTier, BlndEmissionValues,
+    PoolBalance, PoolData, PoolTierData, UserBalance, Q4W,
 };
 pub use contract::*;
 pub use dependencies::EmitterClient;

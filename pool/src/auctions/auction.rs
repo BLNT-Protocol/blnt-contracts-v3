@@ -82,8 +82,7 @@ pub fn create_auction(
     let auction_type_enum = AuctionType::from_u32(e, auction_type);
     let auction_data = match auction_type_enum {
         AuctionType::UserLiquidation => create_user_liq_auction_data(e, user, bid, lot, percent),
-        // V3 bad debt requires a pool/backstop commitment and must use the
-        // dedicated single-tier lifecycle.
+        // V3 bad debt requires the pool-owned single-tier lifecycle.
         AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
         // V3 interest auctions require synchronized pool/backstop commitments
         // and must use the dedicated tier-specific lifecycle.

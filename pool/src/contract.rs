@@ -107,7 +107,7 @@ pub trait Pool {
     fn backstop_loss_state(e: Env) -> BackstopLossState;
 
     /// Return true only for this pool's configured backstop and only while no
-    /// liability, committed loss, or unresolved bad debt exists.
+    /// liability, prepared bad-debt auction, or unresolved bad debt exists.
     fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool;
 
     /// Submit a set of requests to the pool where `from` takes on the position, `spender` sends any

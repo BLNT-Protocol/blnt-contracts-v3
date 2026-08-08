@@ -1,6 +1,6 @@
 use soroban_sdk::{contractevent, Address, BytesN, Env};
 
-use crate::backstop::{BackstopTier, BadDebtLotQuote, InterestLotQuote};
+use crate::backstop::{BackstopTier, InterestLotQuote};
 
 macro_rules! single_value_event {
     (
@@ -62,36 +62,6 @@ single_value_event!(
     [],
     amount: i128
 );
-#[contractevent(topics = ["bad_debt_lot_committed"], data_format = "vec")]
-struct BadDebtLotCommittedEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-    quote: BadDebtLotQuote,
-}
-
-#[contractevent(
-    topics = ["bad_debt_lot_released"],
-    data_format = "single-value"
-)]
-struct BadDebtLotReleasedEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-}
-
-#[contractevent(topics = ["bad_debt_lot_settled"], data_format = "vec")]
-struct BadDebtLotSettledEvent {
-    #[topic]
-    pool: Address,
-    auction_id: BytesN<32>,
-    base_lot_amount: i128,
-    lot_amount: i128,
-    to: Address,
-    tier: BackstopTier,
-    complete: bool,
-}
-
 #[contractevent(topics = ["interest_lot_committed"], data_format = "vec")]
 struct InterestLotCommittedEvent {
     #[topic]
@@ -177,7 +147,7 @@ vec_event!(
 vec_event!(
     DrawEvent,
     "draw",
-    [pool_address: Address],
+    [tier: BackstopTier, pool_address: Address],
     [to: Address, amount: i128]
 );
 single_value_event!(
@@ -214,47 +184,6 @@ impl BackstopEvents {
 
     pub fn backfill_funded(e: &Env, amount: i128) {
         BackfillFundedEvent { amount }.publish(e);
-    }
-
-    pub fn bad_debt_lot_committed(
-        e: &Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        quote: BadDebtLotQuote,
-    ) {
-        BadDebtLotCommittedEvent {
-            pool,
-            auction_id,
-            quote,
-        }
-        .publish(e);
-    }
-
-    pub fn bad_debt_lot_released(e: &Env, pool: Address, auction_id: BytesN<32>) {
-        BadDebtLotReleasedEvent { pool, auction_id }.publish(e);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn bad_debt_lot_settled(
-        e: &Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        base_lot_amount: i128,
-        lot_amount: i128,
-        to: Address,
-        tier: BackstopTier,
-        complete: bool,
-    ) {
-        BadDebtLotSettledEvent {
-            pool,
-            auction_id,
-            base_lot_amount,
-            lot_amount,
-            to,
-            tier,
-            complete,
-        }
-        .publish(e);
     }
 
     pub fn interest_lot_committed(
@@ -451,15 +380,17 @@ impl BackstopEvents {
 
     /// Emitted when tokens are drawn from the backstop
     ///
-    /// - topics - `["draw", pool_address: Address]`
+    /// - topics - `["draw", tier: BackstopTier, pool_address: Address]`
     /// - data - `[to: Address, amount: i128]`
     ///
     /// ### Arguments
+    /// * `tier` - The tier whose token is drawn
     /// * `pool_address` - The address of the pool
     /// * `to` - The address receiving the drawn tokens
     /// * `amount` - The amount of tokens drawn
-    pub fn draw(e: &Env, pool_address: Address, to: Address, amount: i128) {
+    pub fn draw(e: &Env, tier: BackstopTier, pool_address: Address, to: Address, amount: i128) {
         DrawEvent {
+            tier,
             pool_address,
             to,
             amount,

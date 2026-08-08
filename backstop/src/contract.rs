@@ -1,6 +1,6 @@
 use crate::{
     backstop::{
-        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier, BadDebtLotQuote,
+        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier,
         InterestLotQuote, PoolData, TakeRateQuote, UserBalance, Q4W,
     },
     dependencies::PoolFactoryClient,
@@ -83,27 +83,6 @@ pub trait Backstop {
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
-
-    /// Select and reserve the first qualifying single-tier bad-debt lot.
-    fn commit_bad_debt_lot(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        debt_value: i128,
-    ) -> Option<BadDebtLotQuote>;
-
-    /// Release a pool-authorized bad-debt commitment.
-    fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>);
-
-    /// Settle one partial or complete fill of a committed bad-debt lot.
-    fn settle_bad_debt_lot(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        base_lot_amount: i128,
-        lot_amount: i128,
-        to: Address,
-    ) -> Option<BadDebtLotQuote>;
 
     /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
     fn quote_pool_take_rate_batch(
@@ -193,10 +172,10 @@ pub trait Backstop {
 
     /********** Fund Management *********/
 
-    /// (Only Pool) Take backstop token from a pools backstop
+    /// (Only Pool) Take one tier token from a pool's backstop
     ///
     /// ### Arguments
-    /// * `from` - The address of the pool drawing tokens from the backstop
+    /// * `tier` - The tier whose token is drawn
     /// * `pool_address` - The address of the pool
     /// * `amount` - The amount of backstop tokens to draw
     /// * `to` - The address to send the backstop tokens to
@@ -204,7 +183,7 @@ pub trait Backstop {
     /// ### Errors
     /// If the pool does not have enough backstop tokens, or if the pool does
     /// not authorize the call
-    fn draw(e: Env, pool_address: Address, amount: i128, to: Address);
+    fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address);
 
     /// (Only Pool) Sends backstop tokens from `from` to a pools backstop
     ///
@@ -342,56 +321,6 @@ impl Backstop for BackstopContract {
     fn reward_zone(e: Env) -> Vec<Address> {
         storage::extend_instance(&e);
         emissions::get_reward_zone(&e)
-    }
-
-    fn commit_bad_debt_lot(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        debt_value: i128,
-    ) -> Option<BadDebtLotQuote> {
-        storage::extend_instance(&e);
-        pool.require_auth();
-        let quote = backstop::commit_bad_debt_lot(&e, &pool, &auction_id, debt_value);
-        if let Some(quote) = &quote {
-            BackstopEvents::bad_debt_lot_committed(&e, pool, auction_id, quote.clone());
-        }
-        quote
-    }
-
-    fn release_bad_debt_lot(e: Env, pool: Address, auction_id: BytesN<32>) {
-        storage::extend_instance(&e);
-        pool.require_auth();
-        backstop::release_bad_debt_lot(&e, &pool, &auction_id);
-        BackstopEvents::bad_debt_lot_released(&e, pool, auction_id);
-    }
-
-    fn settle_bad_debt_lot(
-        e: Env,
-        pool: Address,
-        auction_id: BytesN<32>,
-        base_lot_amount: i128,
-        lot_amount: i128,
-        to: Address,
-    ) -> Option<BadDebtLotQuote> {
-        storage::extend_instance(&e);
-        pool.require_auth();
-        let tier = backstop::bad_debt_commitment(&e, &pool, &auction_id)
-            .unwrap_or_else(|| panic_with_error!(&e, BackstopError::BadDebtCommitmentNotFound))
-            .tier;
-        let remaining =
-            backstop::settle_bad_debt_lot(&e, &pool, &auction_id, base_lot_amount, lot_amount, &to);
-        BackstopEvents::bad_debt_lot_settled(
-            &e,
-            pool,
-            auction_id,
-            base_lot_amount,
-            lot_amount,
-            to,
-            tier,
-            remaining.is_none(),
-        );
-        remaining
     }
 
     fn quote_pool_take_rate_batch(
@@ -533,13 +462,13 @@ impl Backstop for BackstopContract {
 
     /********** Fund Management *********/
 
-    fn draw(e: Env, pool_address: Address, amount: i128, to: Address) {
+    fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address) {
         storage::extend_instance(&e);
         pool_address.require_auth();
 
-        backstop::execute_draw(&e, &pool_address, amount, &to);
+        backstop::execute_draw(&e, tier, &pool_address, amount, &to);
 
-        BackstopEvents::draw(&e, pool_address, to, amount);
+        BackstopEvents::draw(&e, tier, pool_address, to, amount);
     }
 
     fn donate(e: Env, from: Address, pool_address: Address, amount: i128) {

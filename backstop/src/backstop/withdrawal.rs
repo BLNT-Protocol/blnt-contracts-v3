@@ -5,7 +5,7 @@ use crate::{
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
-use super::{interest_tier_locked, pool_bad_debt_commitment_count, tier_token, BackstopTier, Q4W};
+use super::{interest_tier_locked, tier_token, BackstopTier, Q4W};
 
 /// Perform a queue for withdrawal from one fixed backstop tier.
 pub fn execute_queue_withdrawal_for_tier(
@@ -83,7 +83,6 @@ pub fn execute_withdraw_for_tier(
     require_nonnegative(e, amount);
     let pool_client = PoolClient::new(e, pool_address);
     if interest_tier_locked(e, tier, pool_address)
-        || pool_bad_debt_commitment_count(e, pool_address) != 0
         || !pool_client.backstop_withdrawal_allowed(&e.current_contract_address())
     {
         panic_with_error!(e, &BackstopError::BadDebtExists);
@@ -669,7 +668,7 @@ mod tests {
                 &pool_address,
                 1_0000000,
             );
-            execute_draw(&e, &pool_address, 1_9999999, &frodo);
+            execute_draw(&e, BackstopTier::BlndUsdc, &pool_address, 1_9999999, &frodo);
         });
 
         e.ledger().set(LedgerInfo {
@@ -844,7 +843,7 @@ mod tests {
                 &pool_address,
                 1_0000000,
             );
-            execute_draw(&e, &pool_address, 2_0000001, &frodo);
+            execute_draw(&e, BackstopTier::BlndUsdc, &pool_address, 2_0000001, &frodo);
         });
 
         e.ledger().set(LedgerInfo {
@@ -1017,7 +1016,13 @@ mod tests {
                 &pool_address,
                 deposit_amount,
             );
-            execute_draw(&e, &pool_address, draw_amount, &samwise);
+            execute_draw(
+                &e,
+                BackstopTier::BlndUsdc,
+                &pool_address,
+                draw_amount,
+                &samwise,
+            );
         });
 
         e.ledger().set(LedgerInfo {

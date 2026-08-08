@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, BytesN, Env, Map, Symbol,
+    contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env, Map, Symbol,
 };
 
 use crate::{storage, PoolError};
@@ -11,17 +11,16 @@ const MAX_LOSS_RECORDS_PER_KIND: u32 = 30;
 
 /// Canonical nonzero records that can prevent backstop withdrawals.
 ///
-/// Values remain in each reserve, auction, or bad-debt record's own units.
+/// Values remain in each reserve or unresolved-bad-debt record's own units.
 /// They are never summed across maps.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 struct BackstopLossRecords {
-    committed_losses: Map<BytesN<32>, bool>,
     liabilities: Map<Address, i128>,
     unresolved_bad_debt: Map<Address, i128>,
 }
 
-/// Counts derived from the canonical records that prevent backstop withdrawals.
+/// Counts derived from canonical records and the prepared bad-debt auction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct BackstopLossState {
@@ -44,13 +43,8 @@ pub(crate) fn initialize_loss_records(e: &Env) {
 
 pub(crate) fn backstop_loss_state(e: &Env) -> BackstopLossState {
     let records = get_loss_records(e);
-    let committed_loss_entries = records
-        .committed_losses
-        .len()
-        .checked_add(u32::from(crate::auctions::has_prepared_bad_debt_auction(e)))
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
     BackstopLossState {
-        committed_loss_entries,
+        committed_loss_entries: u32::from(crate::auctions::has_prepared_bad_debt_auction(e)),
         liability_entries: records.liabilities.len(),
         unresolved_bad_debt_entries: records.unresolved_bad_debt.len(),
     }
@@ -99,25 +93,8 @@ pub(crate) fn set_unresolved_bad_debt(e: &Env, reserve: &Address, amount: i128) 
     set_loss_records(e, &records);
 }
 
-#[allow(dead_code)]
-pub(crate) fn set_committed_loss(e: &Env, auction: &BytesN<32>, committed: bool) {
-    let mut records = get_loss_records(e);
-    if committed {
-        require_record_capacity(
-            e,
-            records.committed_losses.len(),
-            records.committed_losses.contains_key(auction.clone()),
-        );
-        records.committed_losses.set(auction.clone(), true);
-    } else {
-        records.committed_losses.remove(auction.clone());
-    }
-    set_loss_records(e, &records);
-}
-
 fn empty_loss_records(e: &Env) -> BackstopLossRecords {
     BackstopLossRecords {
-        committed_losses: Map::new(e),
         liabilities: Map::new(e),
         unresolved_bad_debt: Map::new(e),
     }
@@ -165,21 +142,20 @@ fn require_record_capacity(e: &Env, len: u32, exists: bool) {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{testutils::Address as _, Address, BytesN};
+    use soroban_sdk::{testutils::Address as _, Address};
 
     use crate::{storage, testutils::create_pool, PoolClient};
 
     use super::*;
 
     #[test]
-    fn loss_state_tracks_liabilities_and_future_loss_records() {
+    fn loss_state_tracks_liabilities_and_unresolved_loss_records() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         let pool = create_pool(&e);
         let client = PoolClient::new(&e, &pool);
         let backstop = e.as_contract(&pool, || storage::get_backstop(&e));
         let reserve = Address::generate(&e);
-        let auction = BytesN::from_array(&e, &[7; 32]);
 
         assert_eq!(
             client.backstop_loss_state(),
@@ -215,11 +191,7 @@ mod tests {
 
         e.as_contract(&pool, || {
             set_unresolved_bad_debt(&e, &reserve, 0);
-            set_committed_loss(&e, &auction, true);
         });
-        assert_eq!(client.backstop_loss_state().committed_loss_entries, 1);
-
-        e.as_contract(&pool, || set_committed_loss(&e, &auction, false));
         assert!(client.backstop_withdrawal_allowed(&backstop));
     }
 

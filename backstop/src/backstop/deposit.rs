@@ -342,7 +342,7 @@ mod tests {
         // initialize pool 0 with funds than drain the backstop
         e.as_contract(&backstop_address, || {
             execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, SCALAR_7);
-            execute_draw(&e, &pool_0_id, SCALAR_7, &frodo);
+            execute_draw(&e, BackstopTier::BlndUsdc, &pool_0_id, SCALAR_7, &frodo);
         });
 
         e.as_contract(&backstop_address, || {

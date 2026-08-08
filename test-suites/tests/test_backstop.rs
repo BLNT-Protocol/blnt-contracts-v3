@@ -367,7 +367,9 @@ fn test_backstop() {
 
     // Backstop loses money
     let amount = 1_000 * SCALAR_7;
-    fixture.backstop.draw(&pool.address, &amount, &frodo);
+    fixture
+        .backstop
+        .draw(&BackstopTier::BlndUsdc, &pool.address, &amount, &frodo);
     frodo_bstop_token_balance += amount;
     bstop_bstop_token_balance -= amount;
     assert_eq!(
@@ -380,6 +382,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "draw"),
                     vec![
                         &fixture.env,
+                        BackstopTier::BlndUsdc.into_val(&fixture.env),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env),
                         frodo.to_val()
@@ -396,7 +399,12 @@ fn test_backstop() {
             &fixture.env,
             (
                 fixture.backstop.address.clone(),
-                (Symbol::new(&fixture.env, "draw"), pool.address.clone()).into_val(&fixture.env),
+                (
+                    Symbol::new(&fixture.env, "draw"),
+                    BackstopTier::BlndUsdc,
+                    pool.address.clone()
+                )
+                    .into_val(&fixture.env),
                 vec![&fixture.env, frodo.to_val(), amount.into_val(&fixture.env),]
                     .into_val(&fixture.env)
             )

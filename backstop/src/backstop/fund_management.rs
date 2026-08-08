@@ -2,23 +2,31 @@ use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{require_is_from_pool_factory, BackstopTier};
+use super::{require_is_from_pool_factory, tier_token, BackstopTier};
 
 /// Perform a draw from a pool's backstop
 ///
 /// `pool_address` MUST be authenticated before calling
-pub fn execute_draw(e: &Env, pool_address: &Address, amount: i128, to: &Address) {
+pub fn execute_draw(
+    e: &Env,
+    tier: BackstopTier,
+    pool_address: &Address,
+    amount: i128,
+    to: &Address,
+) {
     require_nonnegative(e, amount);
-    emissions::prepare_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
+    if amount == 0 {
+        return;
+    }
+    emissions::prepare_pool_weight_change(e, tier, pool_address);
 
-    let mut pool_balance = storage::get_pool_balance(e, pool_address);
+    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
 
     pool_balance.withdraw(e, amount, 0);
-    storage::set_pool_balance(e, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, BackstopTier::BlndUsdc, pool_address);
+    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
+    emissions::finish_pool_weight_change(e, tier, pool_address);
 
-    let blnd_usdc_token = TokenClient::new(e, &storage::get_blnd_usdc_token(e));
-    blnd_usdc_token.transfer(&e.current_contract_address(), to, &amount);
+    TokenClient::new(e, &tier_token(e, tier)).transfer(&e.current_contract_address(), to, &amount);
 }
 
 /// Perform a donation to a pool's backstop
@@ -228,7 +236,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_draw(&e, &pool_0_id, 30_0000000, &samwise);
+            execute_draw(&e, BackstopTier::BlndUsdc, &pool_0_id, 30_0000000, &samwise);
 
             let new_pool_balance = storage::get_pool_balance(&e, &pool_0_id);
             assert_eq!(new_pool_balance.shares, 50_0000000);
@@ -266,7 +274,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_id, || {
-            execute_draw(&e, &pool_0_id, 51_0000000, &samwise);
+            execute_draw(&e, BackstopTier::BlndUsdc, &pool_0_id, 51_0000000, &samwise);
         });
     }
 
@@ -295,7 +303,13 @@ mod tests {
         });
 
         e.as_contract(&backstop_id, || {
-            execute_draw(&e, &pool_0_id, -30_0000000, &samwise);
+            execute_draw(
+                &e,
+                BackstopTier::BlndUsdc,
+                &pool_0_id,
+                -30_0000000,
+                &samwise,
+            );
         });
     }
 }

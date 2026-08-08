@@ -21,7 +21,6 @@ use test_suites::{
 #[derive(Clone)]
 #[contracttype]
 struct CanonicalBackstopLossRecords {
-    committed_losses: Map<BytesN<32>, bool>,
     liabilities: Map<Address, i128>,
     unresolved_bad_debt: Map<Address, i128>,
 }
@@ -39,7 +38,6 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         supply: map![&fixture.env],
     };
     let records = CanonicalBackstopLossRecords {
-        committed_losses: map![&fixture.env],
         liabilities: map![&fixture.env, (stable.clone(), debt)],
         unresolved_bad_debt: map![&fixture.env],
     };
@@ -103,7 +101,6 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         supply: map![&fixture.env],
     };
     let records = CanonicalBackstopLossRecords {
-        committed_losses: map![&fixture.env],
         liabilities: map![&fixture.env, (stable.clone(), debt)],
         unresolved_bad_debt: map![&fixture.env],
     };
@@ -311,7 +308,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         supply: map![&fixture.env],
     };
     let records = CanonicalBackstopLossRecords {
-        committed_losses: map![&fixture.env],
         liabilities: map![&fixture.env, (stable.clone(), debt)],
         unresolved_bad_debt: map![&fixture.env],
     };
@@ -441,7 +437,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         supply: map![&fixture.env],
     };
     let dust_records = CanonicalBackstopLossRecords {
-        committed_losses: map![&fixture.env],
         liabilities: map![&fixture.env, (stable.clone(), dust)],
         unresolved_bad_debt: map![&fixture.env],
     };
@@ -569,7 +564,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         supply: map![&fixture.env],
     };
     let mut records = CanonicalBackstopLossRecords {
-        committed_losses: map![&fixture.env],
         liabilities: map![&fixture.env],
         unresolved_bad_debt: map![&fixture.env],
     };

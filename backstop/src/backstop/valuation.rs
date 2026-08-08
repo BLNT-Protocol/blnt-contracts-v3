@@ -8,7 +8,7 @@ use crate::{
     storage,
 };
 
-use super::{available_pool_tier_assets, require_registered_pool, BackstopTier, PoolBalance};
+use super::{require_registered_pool, BackstopTier, PoolBalance};
 
 const BLND_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
@@ -52,25 +52,34 @@ pub(crate) struct PoolValuation {
     pub active_blnd: BlndEmissionValues,
     pub active_values: ActivationValues,
     pub queued_values: ActivationValues,
+    pub total_values: ActivationValues,
     pub valid_until: u64,
+}
+
+struct PoolTierValuation {
+    active: AssetValuation,
+    queued: AssetValuation,
+    total: AssetValuation,
 }
 
 /// One pool's accounting and canonical valuation for a fixed backstop tier.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolTierData {
-    /// Underlying BLND represented by active, uncommitted tier assets.
+    /// Underlying BLND represented by active tier assets.
     pub active_blnd: i128,
-    /// USDC value of active, uncommitted tier assets.
+    /// USDC value of active tier assets.
     pub active_value: i128,
-    /// Total tier-token assets, including assets committed to an auction.
+    /// Total tier-token assets.
     pub assets: i128,
     /// Shares currently queued for withdrawal.
     pub queued_shares: i128,
-    /// USDC value of queued, uncommitted tier assets.
+    /// USDC value of queued tier assets.
     pub queued_value: i128,
     /// Total issued shares, including queued shares.
     pub shares: i128,
+    /// USDC value of all tier assets before active/queued rounding.
+    pub total_value: i128,
 }
 
 /// One pool's complete three-tier backstop accounting and valuation.
@@ -98,18 +107,21 @@ pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolData {
             valuation.active_blnd.blnd_usdc,
             valuation.active_values.blnd_usdc,
             valuation.queued_values.blnd_usdc,
+            valuation.total_values.blnd_usdc,
         ),
         blnd_xlm: tier_data(
             &blnd_xlm,
             valuation.active_blnd.blnd_xlm,
             valuation.active_values.blnd_xlm,
             valuation.queued_values.blnd_xlm,
+            valuation.total_values.blnd_xlm,
         ),
         usdc: tier_data(
             &usdc,
             0,
             valuation.active_values.usdc,
             valuation.queued_values.usdc,
+            valuation.total_values.usdc,
         ),
         q4w_percentage: calculate_q4w_percentage(
             e,
@@ -125,6 +137,7 @@ fn tier_data(
     active_blnd: i128,
     active_value: i128,
     queued_value: i128,
+    total_value: i128,
 ) -> PoolTierData {
     PoolTierData {
         active_blnd,
@@ -133,6 +146,7 @@ fn tier_data(
         queued_shares: balance.q4w,
         queued_value,
         shares: balance.shares,
+        total_value,
     }
 }
 
@@ -140,37 +154,153 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     // A pool invokes this while refreshing its own status. Factory
     // registration is sufficient and avoids a pool -> backstop -> pool cycle.
     require_registered_pool(e, pool);
-    let (blnd_usdc_active, blnd_usdc_queued) =
+    let (blnd_usdc_active, blnd_usdc_queued, blnd_usdc_total) =
         pool_tier_asset_partition(e, BackstopTier::BlndUsdc, pool);
-    let (blnd_xlm_active, blnd_xlm_queued) =
+    let (blnd_xlm_active, blnd_xlm_queued, blnd_xlm_total) =
         pool_tier_asset_partition(e, BackstopTier::BlndXlm, pool);
-    let (usdc_active, usdc_queued) = pool_tier_asset_partition(e, BackstopTier::Usdc, pool);
+    let (usdc_active, usdc_queued, usdc_total) =
+        pool_tier_asset_partition(e, BackstopTier::Usdc, pool);
 
-    let blnd_usdc_active_quote = quote_lp_amount(e, BackstopTier::BlndUsdc, blnd_usdc_active);
-    let blnd_usdc_queued_quote = quote_lp_amount(e, BackstopTier::BlndUsdc, blnd_usdc_queued);
-    let blnd_xlm_active_quote = quote_lp_amount(e, BackstopTier::BlndXlm, blnd_xlm_active);
-    let blnd_xlm_queued_quote = quote_lp_amount(e, BackstopTier::BlndXlm, blnd_xlm_queued);
+    let (blnd_usdc_quotes, blnd_xlm_quotes) = quote_pool_lp_amounts(
+        e,
+        (blnd_usdc_active, blnd_usdc_queued, blnd_usdc_total),
+        (blnd_xlm_active, blnd_xlm_queued, blnd_xlm_total),
+    );
 
     PoolValuation {
         active_blnd: BlndEmissionValues {
-            blnd_usdc: blnd_usdc_active_quote.underlying_blnd,
-            blnd_xlm: blnd_xlm_active_quote.underlying_blnd,
+            blnd_usdc: blnd_usdc_quotes.active.underlying_blnd,
+            blnd_xlm: blnd_xlm_quotes.active.underlying_blnd,
         },
         active_values: ActivationValues {
-            blnd_usdc: blnd_usdc_active_quote.usdc_value,
-            blnd_xlm: blnd_xlm_active_quote.usdc_value,
+            blnd_usdc: blnd_usdc_quotes.active.usdc_value,
+            blnd_xlm: blnd_xlm_quotes.active.usdc_value,
             usdc: usdc_active,
         },
         queued_values: ActivationValues {
-            blnd_usdc: blnd_usdc_queued_quote.usdc_value,
-            blnd_xlm: blnd_xlm_queued_quote.usdc_value,
+            blnd_usdc: blnd_usdc_quotes.queued.usdc_value,
+            blnd_xlm: blnd_xlm_quotes.queued.usdc_value,
             usdc: usdc_queued,
         },
-        valid_until: blnd_usdc_active_quote
+        total_values: ActivationValues {
+            blnd_usdc: blnd_usdc_quotes.total.usdc_value,
+            blnd_xlm: blnd_xlm_quotes.total.usdc_value,
+            usdc: usdc_total,
+        },
+        valid_until: blnd_usdc_quotes
+            .active
             .valid_until
-            .min(blnd_usdc_queued_quote.valid_until)
-            .min(blnd_xlm_active_quote.valid_until)
-            .min(blnd_xlm_queued_quote.valid_until),
+            .min(blnd_usdc_quotes.queued.valid_until)
+            .min(blnd_usdc_quotes.total.valid_until)
+            .min(blnd_xlm_quotes.active.valid_until)
+            .min(blnd_xlm_quotes.queued.valid_until)
+            .min(blnd_xlm_quotes.total.valid_until),
+    }
+}
+
+fn quote_pool_lp_amounts(
+    e: &Env,
+    blnd_usdc: (i128, i128, i128),
+    blnd_xlm: (i128, i128, i128),
+) -> (PoolTierValuation, PoolTierValuation) {
+    for amount in [
+        blnd_usdc.0,
+        blnd_usdc.1,
+        blnd_usdc.2,
+        blnd_xlm.0,
+        blnd_xlm.1,
+        blnd_xlm.2,
+    ] {
+        if amount < 0 {
+            panic_with_error!(e, BackstopError::InvalidValuation);
+        }
+    }
+
+    if blnd_usdc.2 == 0 && blnd_xlm.2 == 0 {
+        return (
+            unit_pool_tier_valuation(blnd_usdc),
+            unit_pool_tier_valuation(blnd_xlm),
+        );
+    }
+
+    #[cfg(any(test, feature = "testutils"))]
+    if let Some(should_fail) = test_valuation_override(e) {
+        if should_fail {
+            panic_with_error!(e, BackstopError::InvalidValuation);
+        }
+        return (
+            unit_pool_tier_valuation(blnd_usdc),
+            unit_pool_tier_valuation(blnd_xlm),
+        );
+    }
+
+    let blnd = storage::get_blnd_token(e);
+    let usdc = storage::get_usdc_token(e);
+    let anchor = read_comet(e, &storage::get_blnd_usdc_token(e), &blnd, &usdc);
+    let anchor_value = checked_mul(e, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
+    let blnd_usdc_quotes = pool_tier_valuation(e, blnd_usdc, anchor_value, &anchor);
+    let blnd_xlm_quotes = if blnd_xlm.2 == 0 {
+        unit_pool_tier_valuation(blnd_xlm)
+    } else {
+        let target = read_comet(
+            e,
+            &storage::get_blnd_xlm_token(e),
+            &blnd,
+            &storage::get_xlm_token(e),
+        );
+        let target_value = mul_div_floor(e, target.blnd_reserve, anchor_value, anchor.blnd_reserve);
+        pool_tier_valuation(e, blnd_xlm, target_value, &target)
+    };
+    (blnd_usdc_quotes, blnd_xlm_quotes)
+}
+
+fn pool_tier_valuation(
+    e: &Env,
+    amounts: (i128, i128, i128),
+    total_value: i128,
+    composition: &CometComposition,
+) -> PoolTierValuation {
+    if total_value <= 0 || amounts.2 > composition.total_supply {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    PoolTierValuation {
+        active: quote_from_composition(e, amounts.0, total_value, composition),
+        queued: quote_from_composition(e, amounts.1, total_value, composition),
+        total: quote_from_composition(e, amounts.2, total_value, composition),
+    }
+}
+
+fn quote_from_composition(
+    e: &Env,
+    amount: i128,
+    total_value: i128,
+    composition: &CometComposition,
+) -> AssetValuation {
+    AssetValuation {
+        underlying_blnd: mul_div_floor(
+            e,
+            amount,
+            composition.blnd_reserve,
+            composition.total_supply,
+        ),
+        usdc_value: mul_div_floor(e, amount, total_value, composition.total_supply),
+        valid_until: u64::MAX,
+    }
+}
+
+fn unit_pool_tier_valuation(amounts: (i128, i128, i128)) -> PoolTierValuation {
+    PoolTierValuation {
+        active: unit_asset_valuation(amounts.0),
+        queued: unit_asset_valuation(amounts.1),
+        total: unit_asset_valuation(amounts.2),
+    }
+}
+
+fn unit_asset_valuation(amount: i128) -> AssetValuation {
+    AssetValuation {
+        underlying_blnd: amount,
+        usdc_value: amount,
+        valid_until: u64::MAX,
     }
 }
 
@@ -192,17 +322,15 @@ pub fn quote_activation(
     }
 }
 
-fn pool_tier_asset_partition(e: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128) {
-    let mut balance = storage::get_pool_balance_for_tier(e, tier, pool);
-    balance.tokens = available_pool_tier_assets(e, tier, pool);
+fn pool_tier_asset_partition(e: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128, i128) {
+    let balance = storage::get_pool_balance_for_tier(e, tier, pool);
     let active_shares = balance
         .shares
         .checked_sub(balance.q4w)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
-    (
-        assets_from_shares(e, active_shares, &balance),
-        assets_from_shares(e, balance.q4w, &balance),
-    )
+    let active = assets_from_shares(e, active_shares, &balance);
+    let queued = assets_from_shares(e, balance.q4w, &balance);
+    (active, queued, balance.tokens)
 }
 
 fn assets_from_shares(e: &Env, shares: i128, balance: &PoolBalance) -> i128 {
@@ -562,6 +690,7 @@ mod tests {
                 queued_shares: 1_000 * SCALAR_7,
                 queued_value: 1_000 * SCALAR_7,
                 shares: 4_000 * SCALAR_7,
+                total_value: 4_000 * SCALAR_7,
             }
         );
         assert_eq!(
@@ -573,6 +702,7 @@ mod tests {
                 queued_shares: 2_000 * SCALAR_7,
                 queued_value: 2_000 * SCALAR_7,
                 shares: 5_000 * SCALAR_7,
+                total_value: 5_000 * SCALAR_7,
             }
         );
         assert_eq!(
@@ -584,6 +714,7 @@ mod tests {
                 queued_shares: 0,
                 queued_value: 0,
                 shares: 6_500 * SCALAR_7,
+                total_value: 6_500 * SCALAR_7,
             }
         );
         assert_eq!(pool_data.q4w_percentage, 1_935_484);
