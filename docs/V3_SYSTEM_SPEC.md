@@ -402,8 +402,8 @@ BLND:XLM LP.
 
 As in v2, public `distribute` returns the allocated BLND amount and public
 `drop` returns no value. One read-only `migration_state` snapshot exposes the
-complete lifecycle state; accounting views and events expose the detailed
-split without adding replacement mutating APIs.
+complete lifecycle state; persistent accounting records the detailed split
+without adding replacement mutating APIs.
 
 Before replacement, `distribute` observes the live queue, opens the original
 accounting epoch, and checkpoints backfill. During the queue's final seven

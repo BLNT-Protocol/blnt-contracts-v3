@@ -288,7 +288,7 @@ fn advance_without_distribution(
     }
 }
 
-pub(crate) fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
+fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
     let state = storage::get_ongoing_emission_state(e);
     validate_ongoing_emission_state(e, &state);
     state
@@ -795,6 +795,11 @@ mod tests {
                 .as_contract(&self.backstop, || get_pool_ongoing_emissions(&self.e, pool))
         }
 
+        fn ongoing_state(&self) -> OngoingEmissionState {
+            self.e
+                .as_contract(&self.backstop, || get_ongoing_emission_state(&self.e))
+        }
+
         fn distribution(&self) -> OngoingDistribution {
             self.e
                 .as_contract(&self.backstop, || super::distribute(&self.e))
@@ -904,7 +909,7 @@ mod tests {
         assert_eq!(second_distribution.distributed, 5 * SCALAR_7);
         assert_eq!(second_distribution.split_carry, 0);
         assert_eq!(
-            fixture.client().ongoing_emission_state(),
+            fixture.ongoing_state(),
             OngoingEmissionState {
                 backstop_allocated: 105_000_000,
                 backstop_carry: 0,
@@ -952,10 +957,7 @@ mod tests {
 
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
-        assert_eq!(
-            fixture.client().ongoing_emission_state().total_distributed,
-            15 * SCALAR_7
-        );
+        assert_eq!(fixture.ongoing_state().total_distributed, 15 * SCALAR_7);
     }
 
     #[test]
@@ -1065,10 +1067,7 @@ mod tests {
             TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop),
             blnd_xlm_before + blnd_xlm_out
         );
-        assert_eq!(
-            fixture.client().ongoing_emission_state().backstop_claimed,
-            7 * SCALAR_7
-        );
+        assert_eq!(fixture.ongoing_state().backstop_claimed, 7 * SCALAR_7);
         assert_eq!(fixture.pool_emissions(&pool).accrued_pool, 3 * SCALAR_7);
     }
 
@@ -1112,10 +1111,7 @@ mod tests {
                 .shares,
             shares_before
         );
-        assert_eq!(
-            fixture.client().ongoing_emission_state().backstop_claimed,
-            0
-        );
+        assert_eq!(fixture.ongoing_state().backstop_claimed, 0);
     }
 
     #[test]
@@ -1168,7 +1164,7 @@ mod tests {
         assert!(fixture.client().try_distribute().is_err());
         assert!(!fixture.client().migration_state().blnd_binding_verified);
         assert_eq!(
-            fixture.client().ongoing_emission_state(),
+            fixture.ongoing_state(),
             OngoingEmissionState {
                 backstop_allocated: 0,
                 backstop_carry: 0,

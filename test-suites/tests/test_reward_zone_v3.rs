@@ -64,10 +64,6 @@ fn exercise_reward_zone(wasm: bool) {
     assert!(fixture.backstop.reward_zone().contains(&first));
     assert!(fixture.backstop.reward_zone().contains(&second));
 
-    assert_eq!(
-        fixture.backstop.ongoing_emission_state().last_distribution,
-        Some(e.ledger().timestamp())
-    );
     let third_data = fixture.backstop.pool_data(&third);
     assert!(
         third_data.blnd_usdc.active_value

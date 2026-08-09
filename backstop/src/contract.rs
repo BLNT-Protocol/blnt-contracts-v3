@@ -5,7 +5,7 @@ use crate::{
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     dependencies::PoolFactoryClient,
-    emissions::{self, OngoingEmissionState},
+    emissions,
     errors::BackstopError,
     events::BackstopEvents,
     migration::{self, MigrationState},
@@ -87,9 +87,6 @@ pub trait Backstop {
 
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
-
-    /// Return aggregate BLND allocations, backstop claims, and carries.
-    fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
 
     /// Return one user's claimable BLND for an eligible tier and pool.
     fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128;
@@ -306,11 +303,6 @@ impl Backstop for BackstopContract {
 
         BackstopEvents::distribute(&e, distribution.distributed);
         distribution.distributed
-    }
-
-    fn ongoing_emission_state(e: Env) -> OngoingEmissionState {
-        storage::extend_instance(&e);
-        emissions::get_ongoing_emission_state(&e)
     }
 
     fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128 {
