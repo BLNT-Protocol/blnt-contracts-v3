@@ -35,7 +35,6 @@ pub enum BackstopError {
     InvalidValuation = 1015,
     StaleValuation = 1016,
     InvalidActivationValue = 1017,
-    InvalidTakeRateValue = 1026,
     InvalidEmissionValue = 1027,
     DistributionCheckpointRequired = 1028,
     NoEligibleWeight = 1029,

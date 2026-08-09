@@ -345,13 +345,18 @@ Each pool and reserve stores three pending tier amounts and an isolated carry.
 New credit plus carry is apportioned by the formula; floors and new carry
 conserve the exact input without combining scopes.
 
+As in v2, the pool owns take-rate and interest-auction policy. It applies the
+immutable weights locally using the backstop's canonical `pool_data` values;
+the backstop exposes no separate weighting or allocation entry point.
+
 Any caller may create one tier-specific interest auction for a pool by
 supplying a unique identifier and one to `min(max_positions - 1, 4)` unique
 configured reserves. Creation atomically:
 
 1. Accrue and persist every reserve in the supplied batch.
 2. Checkpoint each asset's newly available backstop credit into its three
-   pending tier amounts through one canonical backstop weighting quote.
+   pending tier amounts using the immutable pool-local weighting formula and
+   one canonical `pool_data` snapshot.
 3. Value each tier's pending amounts with the pool's immutable reserve oracle.
 4. Starting at the pool's stored cyclic tier cursor, select the first
    qualifying tier without an active auction whose pending lot meets the shared

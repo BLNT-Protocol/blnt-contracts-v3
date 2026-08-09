@@ -5,10 +5,6 @@ pub use deposit::execute_deposit_for_tier;
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
-mod interest;
-pub(crate) use interest::quote_pool_take_rate_batch;
-pub use interest::TakeRateQuote;
-
 mod withdrawal;
 pub use withdrawal::{
     execute_dequeue_withdrawal_for_tier, execute_queue_withdrawal_for_tier,
@@ -33,8 +29,7 @@ mod valuation;
 #[cfg(any(test, feature = "testutils"))]
 pub use valuation::set_test_valuation_override;
 pub(crate) use valuation::{
-    build_pool_data, build_pool_valuation, quote_activation, quote_lp_amount,
-    validate_backstop_assets,
+    build_pool_data, build_pool_valuation, quote_activation, validate_backstop_assets,
 };
 pub use valuation::{
     ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolData, PoolTierData,

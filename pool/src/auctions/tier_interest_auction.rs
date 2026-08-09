@@ -1,8 +1,6 @@
 use crate::{
     constants::SCALAR_7,
-    dependencies::{
-        BackstopClient, BackstopContractTakeRateQuote, BackstopContractTier, BackstopPoolData,
-    },
+    dependencies::{BackstopClient, BackstopContractTier, BackstopPoolData},
     errors::PoolError,
     pool::Pool,
     storage,
@@ -21,6 +19,9 @@ const MAX_INTEREST_LOT_ASSETS: u32 = 4;
 const INTEREST_TIER_MINIMUM_VALUE_USDC: i128 = 100 * SCALAR_7;
 const INTEREST_STATE_TTL_THRESHOLD: u32 = 179 * ONE_DAY_LEDGERS;
 const INTEREST_STATE_TTL_BUMP: u32 = 180 * ONE_DAY_LEDGERS;
+const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 4;
+const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 3;
+const TAKE_RATE_WEIGHT_USDC: i128 = 2;
 
 /// Pending reserve credit apportioned to each tier for one reserve asset.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -149,19 +150,19 @@ pub fn create_interest_auction(
     let backstop = storage::get_backstop(e);
     let pool_address = e.current_contract_address();
     let backstop_client = BackstopClient::new(e, &backstop);
-    let quotes = backstop_client.quote_pool_take_rate_batch(&pool_address, &distributions);
-    if quotes.len() != distributions.len() {
-        panic_with_error!(e, PoolError::InvalidLot);
-    }
+    let pool_data = backstop_client.pool_data(&pool_address);
+    let take_rate_values = [
+        pool_data.blnd_usdc.total_value,
+        pool_data.blnd_xlm.total_value,
+        pool_data.usdc.total_value,
+    ];
     for (asset, distribution) in distributions.iter() {
-        let quote = quotes
-            .get(asset.clone())
-            .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot));
-        apply_take_rate_quote(e, &mut states, &asset, distribution, quote);
+        let allocation = allocate_take_rate(e, distribution, take_rate_values);
+        apply_take_rate_allocation(e, &mut states, &asset, allocation);
     }
 
     let mut tier_values = [0_i128; 3];
-    let mut valid_until = u64::MAX;
+    let mut valid_until = pool_data.valuation_valid_until;
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
         let reserve = pool.load_reserve(e, &asset, false);
@@ -205,7 +206,6 @@ pub fn create_interest_auction(
         panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
     }
 
-    let pool_data = backstop_client.pool_data(&pool_address);
     let (bid_token, bid_amount, target_value, bid_valid_until) =
         build_interest_bid(e, &backstop, &pool_data, tier, lot_value);
     if bid_valid_until < e.ledger().timestamp() {
@@ -389,31 +389,51 @@ fn consume_pending_interest_lot(
     }
 }
 
-fn apply_take_rate_quote(
+fn allocate_take_rate(e: &Env, distribution: i128, values: [i128; 3]) -> InterestReserveState {
+    if distribution < 0 || values.iter().any(|value| *value < 0) {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+
+    let blnd_usdc_weighted = checked_mul(e, values[0], TAKE_RATE_WEIGHT_BLND_USDC);
+    let blnd_xlm_weighted = checked_mul(e, values[1], TAKE_RATE_WEIGHT_BLND_XLM);
+    let usdc_weighted = checked_mul(e, values[2], TAKE_RATE_WEIGHT_USDC);
+    let denominator = checked_add(
+        e,
+        checked_add(e, blnd_usdc_weighted, blnd_xlm_weighted),
+        usdc_weighted,
+    );
+    if denominator == 0 {
+        return InterestReserveState {
+            blnd_usdc: 0,
+            blnd_xlm: 0,
+            carry: distribution,
+            usdc: 0,
+        };
+    }
+
+    let blnd_usdc = proportional_floor(e, distribution, blnd_usdc_weighted, denominator);
+    let blnd_xlm = proportional_floor(e, distribution, blnd_xlm_weighted, denominator);
+    let usdc = proportional_floor(e, distribution, usdc_weighted, denominator);
+    let allocated = checked_add(e, checked_add(e, blnd_usdc, blnd_xlm), usdc);
+    InterestReserveState {
+        blnd_usdc,
+        blnd_xlm,
+        carry: checked_sub(e, distribution, allocated),
+        usdc,
+    }
+}
+
+fn apply_take_rate_allocation(
     e: &Env,
     states: &mut Map<Address, InterestReserveState>,
     asset: &Address,
-    distribution: i128,
-    quote: BackstopContractTakeRateQuote,
+    allocation: InterestReserveState,
 ) {
-    let allocated = checked_add(
-        e,
-        checked_add(e, quote.blnd_usdc, quote.blnd_xlm),
-        checked_add(e, quote.usdc, quote.remainder),
-    );
-    if quote.blnd_usdc < 0
-        || quote.blnd_xlm < 0
-        || quote.usdc < 0
-        || quote.remainder < 0
-        || allocated != distribution
-    {
-        panic_with_error!(e, PoolError::InvalidLot);
-    }
     let mut state = states.get(asset.clone()).unwrap();
-    state.blnd_usdc = checked_add(e, state.blnd_usdc, quote.blnd_usdc);
-    state.blnd_xlm = checked_add(e, state.blnd_xlm, quote.blnd_xlm);
-    state.usdc = checked_add(e, state.usdc, quote.usdc);
-    state.carry = quote.remainder;
+    state.blnd_usdc = checked_add(e, state.blnd_usdc, allocation.blnd_usdc);
+    state.blnd_xlm = checked_add(e, state.blnd_xlm, allocation.blnd_xlm);
+    state.usdc = checked_add(e, state.usdc, allocation.usdc);
+    state.carry = allocation.carry;
     states.set(asset.clone(), state);
 }
 
@@ -649,6 +669,11 @@ fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
 }
 
+fn checked_mul(e: &Env, left: i128, right: i128) -> i128 {
+    left.checked_mul(right)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
 fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_sub(right)
         .filter(|result| *result >= 0)
@@ -669,6 +694,17 @@ fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
 }
 
+fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
+    if value < 0 || numerator < 0 || denominator <= 0 {
+        panic_with_error!(e, PoolError::OverflowError);
+    }
+    I256::from_i128(e, value)
+        .mul(&I256::from_i128(e, numerator))
+        .div(&I256::from_i128(e, denominator))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
 #[cfg(test)]
 mod tests {
     use soroban_sdk::testutils::Address as _;
@@ -676,6 +712,34 @@ mod tests {
     use crate::testutils::create_pool;
 
     use super::*;
+
+    #[test]
+    fn take_rate_allocation_applies_pool_weights() {
+        let e = Env::default();
+        let allocation = allocate_take_rate(&e, 90, [1, 1, 1]);
+
+        assert_eq!(
+            allocation,
+            InterestReserveState {
+                blnd_usdc: 30,
+                blnd_xlm: 40,
+                carry: 0,
+                usdc: 20,
+            }
+        );
+    }
+
+    #[test]
+    fn take_rate_allocation_conserves_rounding_remainder() {
+        let e = Env::default();
+        let allocation = allocate_take_rate(&e, 10, [3, 2, 1]);
+
+        assert_eq!(
+            allocation.blnd_usdc + allocation.blnd_xlm + allocation.usdc + allocation.carry,
+            10
+        );
+        assert_eq!(allocation.carry, 1);
+    }
 
     #[test]
     fn interest_auction_keys_are_isolated_by_tier_and_from_bad_debt() {

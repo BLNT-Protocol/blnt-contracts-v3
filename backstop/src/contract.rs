@@ -1,7 +1,7 @@
 use crate::{
     backstop::{
         self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier, PoolData,
-        TakeRateQuote, UserBalance, Q4W,
+        UserBalance, Q4W,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     dependencies::PoolFactoryClient,
@@ -11,9 +11,7 @@ use crate::{
     migration::{self, MigrationState},
     storage,
 };
-use soroban_sdk::{
-    contract, contractclient, contractimpl, panic_with_error, Address, Env, Map, Vec,
-};
+use soroban_sdk::{contract, contractclient, contractimpl, panic_with_error, Address, Env, Vec};
 
 /// ### Backstop
 ///
@@ -84,13 +82,6 @@ pub trait Backstop {
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
-
-    /// Allocate a bounded reserve-credit batch from canonical pool-tier value.
-    fn quote_pool_take_rate_batch(
-        e: Env,
-        pool: Address,
-        distributions: Map<Address, i128>,
-    ) -> Map<Address, TakeRateQuote>;
 
     /********** Emissions **********/
 
@@ -313,15 +304,6 @@ impl Backstop for BackstopContract {
     fn reward_zone(e: Env) -> Vec<Address> {
         storage::extend_instance(&e);
         emissions::get_reward_zone(&e)
-    }
-
-    fn quote_pool_take_rate_batch(
-        e: Env,
-        pool: Address,
-        distributions: Map<Address, i128>,
-    ) -> Map<Address, TakeRateQuote> {
-        storage::extend_instance(&e);
-        backstop::quote_pool_take_rate_batch(&e, &pool, &distributions)
     }
 
     /********** Emissions **********/

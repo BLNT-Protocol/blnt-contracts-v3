@@ -368,67 +368,6 @@ pub(crate) fn validate_backstop_assets(
     validate_comet(e, blnd_xlm, blnd, xlm);
 }
 
-pub(crate) fn quote_lp_amount(e: &Env, tier: BackstopTier, amount: i128) -> AssetValuation {
-    if amount < 0 {
-        panic_with_error!(e, BackstopError::InvalidValuation);
-    }
-    if amount == 0 {
-        return AssetValuation {
-            underlying_blnd: 0,
-            usdc_value: 0,
-            valid_until: u64::MAX,
-        };
-    }
-
-    #[cfg(any(test, feature = "testutils"))]
-    if let Some(should_fail) = test_valuation_override(e) {
-        if should_fail {
-            panic_with_error!(e, BackstopError::InvalidValuation);
-        }
-        return AssetValuation {
-            underlying_blnd: amount,
-            usdc_value: amount,
-            valid_until: u64::MAX,
-        };
-    }
-
-    let blnd = storage::get_blnd_token(e);
-    let usdc = storage::get_usdc_token(e);
-    let anchor = read_comet(e, &storage::get_blnd_usdc_token(e), &blnd, &usdc);
-    let (total_value, composition) = match tier {
-        BackstopTier::BlndUsdc => (
-            checked_mul(e, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER),
-            anchor,
-        ),
-        BackstopTier::BlndXlm => {
-            let target = read_comet(
-                e,
-                &storage::get_blnd_xlm_token(e),
-                &blnd,
-                &storage::get_xlm_token(e),
-            );
-            let anchor_value = checked_mul(e, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
-            let total_value =
-                mul_div_floor(e, target.blnd_reserve, anchor_value, anchor.blnd_reserve);
-            (total_value, target)
-        }
-        BackstopTier::Usdc => panic_with_error!(e, BackstopError::InvalidValuation),
-    };
-    if amount > composition.total_supply || total_value <= 0 {
-        panic_with_error!(e, BackstopError::InvalidValuation);
-    }
-    AssetValuation {
-        underlying_blnd: mul_div_floor(
-            e,
-            amount,
-            composition.blnd_reserve,
-            composition.total_supply,
-        ),
-        usdc_value: mul_div_floor(e, amount, total_value, composition.total_supply),
-        valid_until: u64::MAX,
-    }
-}
-
 struct CometComposition {
     blnd_reserve: i128,
     pair_reserve: i128,
@@ -594,10 +533,12 @@ mod tests {
 
         let (blnd_usdc, blnd_xlm) = e.as_contract(&backstop, || {
             set_test_valuation_override(&e, None);
-            (
-                quote_lp_amount(&e, BackstopTier::BlndUsdc, 20 * SCALAR_7),
-                quote_lp_amount(&e, BackstopTier::BlndXlm, 10 * SCALAR_7),
-            )
+            let (blnd_usdc, blnd_xlm) = quote_pool_lp_amounts(
+                &e,
+                (20 * SCALAR_7, 0, 20 * SCALAR_7),
+                (10 * SCALAR_7, 0, 10 * SCALAR_7),
+            );
+            (blnd_usdc.total, blnd_xlm.total)
         });
 
         assert_eq!(
