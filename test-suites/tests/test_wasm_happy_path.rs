@@ -865,14 +865,11 @@ fn test_wasm_happy_path() {
         backstop_blnd_balance
     );
     backstop_blnd_balance += fixture.backstop.distribute();
-    let backstop_accrual = fixture
-        .backstop
-        .user_ongoing_emissions(
-            &frodo,
-            &pool_fixture.pool.address,
-            &BackstopContractTier::BlndUsdc,
-        )
-        .accrued;
+    let backstop_accrual = fixture.backstop.claimable(
+        &frodo,
+        &pool_fixture.pool.address,
+        &BackstopContractTier::BlndUsdc,
+    );
     assert!(backstop_accrual > 0);
     let compounded_lp = fixture.backstop.claim(
         &BackstopContractTier::BlndUsdc,
@@ -1072,14 +1069,11 @@ fn test_wasm_happy_path() {
         frodo_balance + claim_amount
     );
 
-    let backstop_accrual = fixture
-        .backstop
-        .user_ongoing_emissions(
-            &frodo,
-            &pool_fixture.pool.address,
-            &BackstopContractTier::BlndUsdc,
-        )
-        .accrued;
+    let backstop_accrual = fixture.backstop.claimable(
+        &frodo,
+        &pool_fixture.pool.address,
+        &BackstopContractTier::BlndUsdc,
+    );
     assert_approx_eq_rel(backstop_accrual, 4233600000000, 0_0100000);
     assert!(
         fixture.backstop.claim(
@@ -1127,14 +1121,11 @@ fn test_wasm_happy_path() {
     // Frodo claims a year worth of backstop emissions
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let backstop_accrual = fixture
-        .backstop
-        .user_ongoing_emissions(
-            &frodo,
-            &pool_fixture.pool.address,
-            &BackstopContractTier::BlndUsdc,
-        )
-        .accrued;
+    let backstop_accrual = fixture.backstop.claimable(
+        &frodo,
+        &pool_fixture.pool.address,
+        &BackstopContractTier::BlndUsdc,
+    );
     assert_approx_eq_rel(backstop_accrual, 22_014_720_0000000, 0_0100000);
     assert!(
         fixture.backstop.claim(

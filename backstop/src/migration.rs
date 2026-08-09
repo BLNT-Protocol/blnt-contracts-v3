@@ -676,21 +676,21 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_010);
         let first = fixture.client().distribute();
         assert_eq!(first, 10 * SCALAR_7);
-        let pool_state = fixture.client().pool_ongoing_emissions(&fixture.pool);
+        let pool_state = fixture.e.as_contract(&fixture.backstop, || {
+            emissions::get_pool_ongoing_emissions(&fixture.e, &fixture.pool)
+        });
         assert!(pool_state.blnd_usdc_index > 0);
         assert_eq!(pool_state.blnd_xlm_index, 0);
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc,)
-                .accrued,
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
             7 * SCALAR_7
         );
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm,)
-                .accrued,
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm),
             0
         );
         assert!(fixture
@@ -707,8 +707,7 @@ mod tests {
         assert!(
             fixture
                 .client()
-                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm,)
-                .accrued
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm)
                 > 0
         );
         assert!(fixture
@@ -761,8 +760,7 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc)
-                .accrued,
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
             7 * SCALAR_7
         );
         assert_eq!(
@@ -804,10 +802,10 @@ mod tests {
         fixture.queue();
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
-        let accrued_before_queue = fixture
-            .client()
-            .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc)
-            .accrued;
+        let accrued_before_queue =
+            fixture
+                .client()
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc);
         fixture.client().queue_withdrawal(
             &BackstopTier::BlndUsdc,
             &fixture.user,
@@ -851,8 +849,7 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc,)
-                .accrued,
+                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
             accrued_before_queue
         );
         assert!(

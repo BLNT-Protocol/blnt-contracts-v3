@@ -22,10 +22,7 @@ pub use backstop::{
 };
 pub use contract::*;
 pub use dependencies::EmitterClient;
-pub use emissions::{
-    OngoingBlndSplit, OngoingDistribution, OngoingEmissionState, PoolOngoingEmissions,
-    UserOngoingEmissions,
-};
+pub use emissions::{OngoingBlndSplit, OngoingDistribution, OngoingEmissionState};
 pub use errors::BackstopError;
 pub use migration::{MigrationState, MigrationStatus};
 pub use storage::{BackstopDataKey, BackstopEmissionData, PoolUserKey, UserEmissionData};

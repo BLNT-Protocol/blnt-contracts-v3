@@ -5,7 +5,7 @@ use crate::{
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     dependencies::PoolFactoryClient,
-    emissions::{self, OngoingEmissionState, PoolOngoingEmissions, UserOngoingEmissions},
+    emissions::{self, OngoingEmissionState},
     errors::BackstopError,
     events::BackstopEvents,
     migration::{self, MigrationState},
@@ -91,16 +91,8 @@ pub trait Backstop {
     /// Return aggregate BLND allocations, backstop claims, and carries.
     fn ongoing_emission_state(e: Env) -> OngoingEmissionState;
 
-    /// Return one pool's ongoing BLND allocation and active tier amounts.
-    fn pool_ongoing_emissions(e: Env, pool: Address) -> PoolOngoingEmissions;
-
-    /// Return one user's pending BLND, including migration backfill.
-    fn user_ongoing_emissions(
-        e: Env,
-        user: Address,
-        pool: Address,
-        tier: BackstopTier,
-    ) -> UserOngoingEmissions;
+    /// Return one user's claimable BLND for an eligible tier and pool.
+    fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128;
 
     /// Compound one eligible tier's accrued BLND into that tier's Comet LP.
     fn claim(
@@ -321,21 +313,10 @@ impl Backstop for BackstopContract {
         emissions::get_ongoing_emission_state(&e)
     }
 
-    fn pool_ongoing_emissions(e: Env, pool: Address) -> PoolOngoingEmissions {
+    fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128 {
         storage::extend_instance(&e);
         backstop::require_registered_pool(&e, &pool);
-        emissions::get_pool_ongoing_emissions(&e, &pool)
-    }
-
-    fn user_ongoing_emissions(
-        e: Env,
-        user: Address,
-        pool: Address,
-        tier: BackstopTier,
-    ) -> UserOngoingEmissions {
-        storage::extend_instance(&e);
-        backstop::require_registered_pool(&e, &pool);
-        emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool)
+        emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool).accrued
     }
 
     fn claim(

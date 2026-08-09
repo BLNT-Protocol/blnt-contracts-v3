@@ -77,8 +77,8 @@ the common valuation-validity bound in one snapshot. V3 exposes no separate
 pool-tier-state or pool-valuation view.
 
 The public backstop surface is limited to user operations, pool callbacks,
-and consolidated operational views. Pure calculations used only by the
-contracts are not separate entry points.
+consolidated operational views, and a narrow claimable-BLND view. Internal
+pool and user emission indexes and carries are not separate entry points.
 
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
@@ -594,6 +594,11 @@ only the transferred amount loses weight. Selection, discount, stale release,
 balance or composition changes, membership, and pool status never rewrite
 prior allocation. A position MUST NOT earn through two tiers or both eligible
 and ineligible accounting.
+
+The read-only `claimable(owner, pool, tier)` view returns the owner's currently
+accrued BLND without requiring authorization or changing its checkpoint. It
+rejects plain USDC and unregistered pools without exposing internal indexes or
+carries.
 
 The owner authorizes a claim for one eligible tier and supplies a minimum LP
 output. The claim checkpoints that tier for one pool, reduces only its accrued

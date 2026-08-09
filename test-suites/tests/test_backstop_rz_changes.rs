@@ -84,14 +84,11 @@ fn test_backstop_rz_changes_handle_emissions() {
     // Claim the allocation accrued before reward-zone removal. Removed pools
     // do not continue accruing ongoing emissions.
     fixture.jump(60 * 60 * 24 * 3);
-    let accrued = fixture
-        .backstop
-        .user_ongoing_emissions(
-            &sam,
-            &pool_fixture.pool.address,
-            &backstop::BackstopTier::BlndUsdc,
-        )
-        .accrued;
+    let accrued = fixture.backstop.claimable(
+        &sam,
+        &pool_fixture.pool.address,
+        &backstop::BackstopTier::BlndUsdc,
+    );
     assert_eq!(accrued, 907_200 * SCALAR_7);
     assert!(
         fixture.backstop.claim(

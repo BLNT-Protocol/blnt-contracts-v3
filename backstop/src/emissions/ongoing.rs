@@ -790,6 +790,11 @@ mod tests {
             BackstopClient::new(&self.e, &self.backstop)
         }
 
+        fn pool_emissions(&self, pool: &Address) -> PoolOngoingEmissions {
+            self.e
+                .as_contract(&self.backstop, || get_pool_ongoing_emissions(&self.e, pool))
+        }
+
         fn distribution(&self) -> OngoingDistribution {
             self.e
                 .as_contract(&self.backstop, || super::distribute(&self.e))
@@ -871,7 +876,7 @@ mod tests {
         );
         for pool in [first.clone(), second.clone()] {
             assert_eq!(
-                fixture.client().pool_ongoing_emissions(&pool),
+                fixture.pool_emissions(&pool),
                 PoolOngoingEmissions {
                     accrued_backstop: 35_000_000,
                     accrued_pool: 15_000_000,
@@ -954,6 +959,44 @@ mod tests {
     }
 
     #[test]
+    fn claimable_is_read_only_and_validates_scope() {
+        let fixture = Fixture::create();
+        let pool = fixture.pool(10 * SCALAR_7, 0);
+        let user = Address::generate(&fixture.e);
+        fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, 10 * SCALAR_7);
+        fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
+        fixture.e.ledger().set_timestamp(1_010);
+        fixture.client().distribute();
+
+        let stored_before = fixture.e.as_contract(&fixture.backstop, || {
+            storage::get_user_ongoing_emissions(&fixture.e, BackstopTier::BlndUsdc, &user, &pool)
+        });
+        assert_eq!(
+            fixture
+                .client()
+                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
+            7 * SCALAR_7
+        );
+        assert!(fixture.e.auths().is_empty());
+        let stored_after = fixture.e.as_contract(&fixture.backstop, || {
+            storage::get_user_ongoing_emissions(&fixture.e, BackstopTier::BlndUsdc, &user, &pool)
+        });
+        assert_eq!(stored_after, stored_before);
+        assert!(fixture
+            .client()
+            .try_claimable(&user, &pool, &BackstopTier::Usdc)
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claimable(
+                &user,
+                &Address::generate(&fixture.e),
+                &BackstopTier::BlndUsdc,
+            )
+            .is_err());
+    }
+
+    #[test]
     fn users_claim_only_the_two_blnd_tier_allocations() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 10 * SCALAR_7);
@@ -973,15 +1016,13 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc)
-                .accrued,
+                .claimable(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc),
             35_000_000
         );
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm)
-                .accrued,
+                .claimable(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm),
             35_000_000
         );
 
@@ -997,15 +1038,13 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc)
-                .accrued,
+                .claimable(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc),
             0
         );
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm)
-                .accrued,
+                .claimable(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm),
             35_000_000
         );
         let blnd_xlm_out =
@@ -1030,10 +1069,7 @@ mod tests {
             fixture.client().ongoing_emission_state().backstop_claimed,
             7 * SCALAR_7
         );
-        assert_eq!(
-            fixture.client().pool_ongoing_emissions(&pool).accrued_pool,
-            3 * SCALAR_7
-        );
+        assert_eq!(fixture.pool_emissions(&pool).accrued_pool, 3 * SCALAR_7);
     }
 
     #[test]
@@ -1048,8 +1084,7 @@ mod tests {
         fixture.client().distribute();
         let accrued = fixture
             .client()
-            .user_ongoing_emissions(&user, &pool, &BackstopTier::BlndUsdc)
-            .accrued;
+            .claimable(&user, &pool, &BackstopTier::BlndUsdc);
         let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
         let shares_before = fixture
             .client()
@@ -1063,8 +1098,7 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_ongoing_emissions(&user, &pool, &BackstopTier::BlndUsdc)
-                .accrued,
+                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
             accrued
         );
         assert_eq!(
@@ -1166,7 +1200,7 @@ mod tests {
         assert_eq!(distribution.distributed, 5 * SCALAR_7);
         assert_eq!(distribution.eligible_blnd, 300 * SCALAR_7);
         for pool in pools.iter() {
-            let emissions = fixture.client().pool_ongoing_emissions(&pool);
+            let emissions = fixture.pool_emissions(&pool);
             assert!(emissions.accrued_backstop > 0);
             assert!(emissions.accrued_pool > 0);
         }
@@ -1199,13 +1233,7 @@ mod tests {
             &pool,
             &SCALAR_7,
         );
-        assert_eq!(
-            fixture
-                .client()
-                .pool_ongoing_emissions(&pool)
-                .active_blnd_usdc,
-            SCALAR_7
-        );
+        assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, SCALAR_7);
 
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(
@@ -1277,12 +1305,6 @@ mod tests {
         fixture
             .client()
             .queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7);
-        assert_eq!(
-            fixture
-                .client()
-                .pool_ongoing_emissions(&pool)
-                .active_blnd_usdc,
-            9 * SCALAR_7
-        );
+        assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, 9 * SCALAR_7);
     }
 }
