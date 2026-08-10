@@ -64,10 +64,22 @@ pub struct PoolOngoingEmissions {
     pub active_blnd_xlm: i128,
     pub active_blnd_xlm_shares: i128,
     pub backstop_tier_carry: i128,
-    pub blnd_usdc_index: i128,
-    pub blnd_usdc_index_carry: i128,
-    pub blnd_xlm_index: i128,
-    pub blnd_xlm_index_carry: i128,
+    pub blnd_usdc_stream: TierEmissionStream,
+    pub blnd_xlm_stream: TierEmissionStream,
+    pub pending_blnd_usdc: i128,
+    pub pending_blnd_xlm: i128,
+}
+
+/// One pool tier's v2-style seven-day BLND emission stream.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct TierEmissionStream {
+    pub eps: u64,
+    pub expiration: u64,
+    pub index: i128,
+    pub index_carry: i128,
+    pub last_time: u64,
+    pub schedule_carry: i128,
 }
 
 /// One user's ongoing BLND checkpoint in one BLND-bearing tier.
@@ -639,10 +651,24 @@ pub fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoingEmissio
             active_blnd_xlm: 0,
             active_blnd_xlm_shares: 0,
             backstop_tier_carry: 0,
-            blnd_usdc_index: 0,
-            blnd_usdc_index_carry: 0,
-            blnd_xlm_index: 0,
-            blnd_xlm_index_carry: 0,
+            blnd_usdc_stream: TierEmissionStream {
+                eps: 0,
+                expiration: 0,
+                index: 0,
+                index_carry: 0,
+                last_time: 0,
+                schedule_carry: 0,
+            },
+            blnd_xlm_stream: TierEmissionStream {
+                eps: 0,
+                expiration: 0,
+                index: 0,
+                index_carry: 0,
+                last_time: 0,
+                schedule_carry: 0,
+            },
+            pending_blnd_usdc: 0,
+            pending_blnd_xlm: 0,
         },
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,

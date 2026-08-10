@@ -41,16 +41,6 @@ macro_rules! vec_event {
 }
 
 vec_event!(
-    MigrationPreparedEvent,
-    "migration_prepared",
-    [],
-    [
-        original_unlock: u64,
-        retry_count: u32,
-        verified_queue_unlock: u64
-    ]
-);
-vec_event!(
     MigrationActivatedEvent,
     "migration_activated",
     [],
@@ -131,20 +121,6 @@ single_value_event!(
 pub struct BackstopEvents {}
 
 impl BackstopEvents {
-    pub fn migration_prepared(
-        e: &Env,
-        original_unlock: u64,
-        retry_count: u32,
-        verified_queue_unlock: u64,
-    ) {
-        MigrationPreparedEvent {
-            original_unlock,
-            retry_count,
-            verified_queue_unlock,
-        }
-        .publish(e);
-    }
-
     pub fn migration_activated(e: &Env, activated_at: u64, backfill_end: u64) {
         MigrationActivatedEvent {
             activated_at,

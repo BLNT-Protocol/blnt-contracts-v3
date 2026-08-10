@@ -100,7 +100,7 @@ pub trait Backstop {
         min_lp_tokens_out: i128,
     ) -> i128;
 
-    /// Grant one pool an allowance for its accrued 30% tranche.
+    /// Start or refresh the pool's tier streams and grant its accrued 30% allowance.
     fn gulp_emissions(e: Env, pool: Address) -> i128;
 
     /// Add a threshold-qualified pool with positive active BLND to the reward zone.
@@ -215,7 +215,6 @@ impl BackstopContract {
         storage::set_pool_factory(&e, &pool_factory);
         storage::set_emitter(&e, &emitter);
         storage::set_drop_list(&e, &drop_list);
-        migration::initialize(&e);
         storage::extend_instance(&e);
     }
 }
@@ -334,9 +333,10 @@ impl Backstop for BackstopContract {
 
     fn gulp_emissions(e: Env, pool: Address) -> i128 {
         storage::extend_instance(&e);
-        let amount = emissions::gulp_pool_ongoing_emissions(&e, &pool);
-        BackstopEvents::gulp_emissions(&e, pool, 0, amount);
-        amount
+        let (backstop_emissions, pool_emissions) =
+            emissions::gulp_pool_ongoing_emissions(&e, &pool);
+        BackstopEvents::gulp_emissions(&e, pool, backstop_emissions, pool_emissions);
+        pool_emissions
     }
 
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>) {

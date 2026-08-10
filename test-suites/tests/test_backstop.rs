@@ -2,13 +2,12 @@
 
 use backstop::{BackstopClient, BackstopContract, BackstopTier, MigrationStatus};
 use mock_pool_factory::{MockPoolFactory, PoolInitMeta};
-use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
     vec, Address, BytesN, Env, IntoVal, Symbol, Val, Vec,
 };
 use test_suites::{
-    assertions::{assert_approx_eq_abs, event_from_end},
+    assertions::event_from_end,
     create_fixture_with_data,
     liquidity_pool::create_lp_pool,
     test_fixture::{TokenIndex, SCALAR_7},
@@ -494,6 +493,9 @@ fn test_backstop() {
         .backstop
         .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
         .shares;
+    let claimable = fixture
+        .backstop
+        .claimable(&sam, &pool.address, &BackstopTier::BlndUsdc);
     let lp_compounded = fixture
         .backstop
         .claim(&BackstopTier::BlndUsdc, &sam, &pool.address, &0);
@@ -519,16 +521,6 @@ fn test_backstop() {
     );
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
 
-    // 6d23hr at 20% of 0.7 BLND/sec
-    // 7d + 16d1s at 11% of 0.7 BLND/sec
-    let emission_share_1 = 0_7000000.fixed_mul_floor(0_2000000, SCALAR_7).unwrap();
-    let emission_share_2 = 0_7000000.fixed_mul_floor(0_1111111, SCALAR_7).unwrap();
-    let emitted_blnd_1 = ((7 * 24 * 60 * 60 - 60 * 60) * SCALAR_7)
-        .fixed_mul_floor(emission_share_1, SCALAR_7)
-        .unwrap();
-    let emitted_blnd_2 = ((23 * 24 * 60 * 60 + 1) * SCALAR_7)
-        .fixed_mul_floor(emission_share_2, SCALAR_7)
-        .unwrap();
     let blnd_compounded =
         bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let shares_minted = fixture
@@ -554,7 +546,7 @@ fn test_backstop() {
         ]
     );
 
-    assert_approx_eq_abs(blnd_compounded, emitted_blnd_1 + emitted_blnd_2, SCALAR_7);
+    assert_eq!(blnd_compounded, claimable);
     assert_eq!(
         bstop_token.balance(&fixture.backstop.address),
         bstop_lp_balance + lp_compounded
@@ -659,8 +651,9 @@ fn test_backstop_constructor() {
     );
     let migration = backstop_client.migration_state();
     assert_eq!(migration.status, MigrationStatus::Pending);
-    assert_eq!(migration.prefunding_start, 0);
-    assert_eq!(migration.absolute_migration_deadline, 138 * 24 * 60 * 60);
+    assert_eq!(migration.migration_epoch_start, None);
+    assert_eq!(migration.activated_at, None);
+    assert_eq!(migration.scheduled_backfill, 0);
 }
 
 #[test]

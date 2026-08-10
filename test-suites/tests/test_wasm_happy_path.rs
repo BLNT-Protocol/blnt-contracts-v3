@@ -851,8 +851,8 @@ fn test_wasm_happy_path() {
 
     // claim frodo's setup emissions (1h1m passes during setup)
     // - Frodo should receive 60 * 61 * .3 = 1098 BLND from the pool claim
-    // - The backstop tranche is allocated immediately for the full first
-    //   emission cycle, unlike the pool tranche's seven-day stream.
+    // - The backstop claim consumes the already-started seven-day stream; the
+    //   new distribution below remains pending until the pool's next gulp.
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let claim_amount = pool_fixture

@@ -146,11 +146,13 @@ pub(crate) fn create_backstop<'a>(
     );
     e.as_contract(&backstop_id, || {
         backstop::set_test_valuation_override(e, Some(false));
+        backstop::activate_for_test(e, e.ledger().timestamp());
     });
     e.as_contract(pool_address, || {
         storage::set_backstop(e, &backstop_id);
     });
-    (backstop_id.clone(), BackstopClient::new(e, &backstop_id))
+    let client = BackstopClient::new(e, &backstop_id);
+    (backstop_id.clone(), client)
 }
 
 /// Deploy a test Comet LP pool of 80% BLND / 20% USDC and set it as the backstop token.

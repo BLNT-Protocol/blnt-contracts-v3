@@ -393,48 +393,48 @@ produce a different ratio of realized donated value.
 ### 6.1 Migration lifecycle and backfill — **Added**
 
 The backstop retains v2's permissionless `distribute` and `drop` migration
-surface around the incumbent emitter's 31-day backstop-swap queue. Construction
-starts prefunding and fixes a 138-day absolute deadline. A caller queues and
-executes replacement through the emitter's existing `queue_swap_backstop` and
-`swap_backstop` functions. The original queue must start within 31 days of
-construction and every observed queue must designate this backstop and
-BLND:XLM LP.
+surface around the incumbent emitter's 31-day backstop-swap queue. The first
+pre-replacement `distribute` starts a queue-independent backfill clock. A caller
+queues and executes replacement through the emitter's existing
+`queue_swap_backstop` and `swap_backstop` functions. Every live queue observed
+by `distribute` must designate this backstop and BLND:XLM LP. A compatible
+queue must be attested no earlier than its final seven days and no later than
+the end of the post-unlock grace period.
 
 As in v2, public `distribute` returns the allocated BLND amount and public
 `drop` returns no value. One read-only `migration_state` snapshot exposes the
 complete lifecycle state; persistent accounting records the detailed split
 without adding replacement mutating APIs.
 
-Before replacement, `distribute` observes the live queue, opens the original
-accounting epoch, and checkpoints backfill. During the queue's final seven
-days it also verifies the candidate's strictly greater direct BLND:USDC
-balance and records the prepared queue. The original unlock permanently
-anchors the recovery horizon, and at most two retry queues may be verified
-within the original unlock plus 76 days. Observing a queue before a
-BLND-bearing weight mutation opens the epoch and requires a current
-distribution checkpoint, preventing later weight from receiving retroactive
-credit. An unverified replacement queue cannot advance backfill beyond the
-original or most recently verified unlock; a valid replacement catches up only
-when it is prepared.
+Before replacement, the first `distribute` initializes the accounting epoch at
+its invocation time and returns zero; later calls checkpoint backfill whether
+or not an emitter queue exists. Queue creation, cancellation, or replacement
+does not start, pause, reset, or extend that clock. After the clock starts, a
+current distribution checkpoint is required before BLND-bearing weight
+changes, preventing later weight from receiving retroactive credit.
+Observing no queue, a different compatible queue, or the end of the grace
+period clears a stale attestation; an incompatible queue fails closed. The
+bounded attestation is required because the deployed emitter deletes its queue
+and exposes no designated-token getter after replacement.
 
-After a caller executes the prepared emitter swap, the next `distribute`
-detects the registered candidate and activates ongoing accounting through the
-same bounded synchronization path. It returns zero for that transition call,
-matching v2's first post-swap reset. Synchronization is available only through
-seven days after the verified unlock. While the candidate remains
-unsynchronized, BLND-bearing weight mutations and reward-zone edits fail
-closed; plain-USDC operations remain available.
+After the emitter swap, `distribute` detects the registered candidate and
+activates only through seven days after the attested unlock. It ends backfill
+at the most recent pre-replacement checkpoint, resets the distribution
+timestamp to the emitter's candidate checkpoint, and returns zero. This
+deliberately matches v2 and omits any uncheckpointed interval between the final
+candidate call and the swap. No interval receives both backfill and ongoing
+BLND. Until this transition succeeds, BLND-bearing weight mutations and
+reward-zone edits fail closed; plain-USDC operations remain available.
 
-The original queue opens the ordinary emission indexes at one BLND per eligible
-second, capped at 10 million BLND. Synchronization checkpoints backfill only
-through the verified unlock, so the interval before a later direct swap is
-conservatively omitted. Backfill uses the same 70/30 split, reward zone,
-carries, and cumulative indexes specified in Sections 6.2 and 6.3, except
-that only active, nonqueued underlying BLND in BLND:USDC LP contributes to
-either pool-level or depositor-level weight. BLND:XLM LP and plain USDC receive
-no backfill. Queueing checkpoints accrued BLND and stops future weight;
-dequeueing resumes at the current index. Queueing or withdrawal never
-forfeits already accrued BLND.
+The first pre-replacement `distribute` opens the ordinary allocation epoch at
+one BLND per eligible second, capped at 10 million BLND. Backfill uses the same
+70/30 split, reward zone, pending-pool accounting, and seven-day streams
+specified in Sections 6.2 and 6.3, except that active, nonqueued BLND:USDC
+LP-token amounts determine pool weight directly, matching v2. The 70% tranche
+is pending only for BLND:USDC; BLND:XLM and plain USDC receive no backfill. A
+pool gulp starts or refreshes the BLND:USDC stream, and active shares earn as
+that stream advances. Queueing first realizes streamed accrual and then stops
+future stream weight; dequeueing resumes at the current index.
 
 The constructor binds an immutable initial-drop recipient list. Its aggregate
 allocation plus the maximum 10-million-BLND backfill MUST NOT exceed the
@@ -444,16 +444,15 @@ empty list, is deployment policy rather than protocol policy.
 After activation, `drop` may be called once. It submits the configured list
 and, when positive, the exact scheduled backfill for this backstop. The
 configured BLND balance MUST increase by the total amount directed to the
-backstop. Backstop and pool claims remain disabled until the full positive
-schedule is funded. Backfill uses the ordinary claim paths: BLND:USDC claims
-compound into that tier and the 30% pool tranche uses the inherited pool
-allowance and claim accounting.
+backstop. Backstop-tier claims remain disabled until the full positive schedule
+is funded. Backfill uses the ordinary claim paths: BLND:USDC claims compound
+into that tier and the 30% pool tranche uses the inherited pool allowance and
+claim accounting.
 
-### 6.2 Ongoing backstop-depositor emissions — **Extended and safety fixed**
+### 6.2 Backstop-depositor emissions — **Extended**
 
-`V2-EMISSIONS-002` applies, but a successful checkpoint assigns the 70% tranche
-immediately through the tier indexes below instead of the
-`V2-BACKSTOP-006` seven-day stream. For distributable BLND plus prior carry:
+`V2-BACKSTOP-006` and `V2-EMISSIONS-002` apply. For distributable BLND plus
+prior carry:
 
 \[
 E_{\mathrm{backstop}} =
@@ -465,8 +464,9 @@ E_{\mathrm{total}} - E_{\mathrm{backstop}} - E_{\mathrm{pool}}
 \]
 
 The candidate retains \(C_{\mathrm{next}}\) for the next split. Both tranches
-use the same reward-zone pool weight; the pool tranche remains segregated
-under Section 6.3.
+use the same reward-zone pool weight. The pool tranche remains pending under
+Section 6.3, while the backstop tranche becomes tier-specific pending BLND and
+does not enter a depositor index until a pool gulp.
 
 After activation, the distributable amount is one BLND per elapsed emitter
 checkpoint second, matching v2. Each call verifies the emitter's returned mint
@@ -492,16 +492,13 @@ pool may activate but cannot enter or earn until active, nonqueued
 BLND-bearing capital gives it positive weight. Stored pool status does not
 otherwise gate membership, distribution, or accrued emissions.
 
-Only reward-zone pools participate. Pool and user weights are active,
+Only reward-zone pools participate. After activation, pool weight is active,
 nonqueued underlying BLND across the two BLND-bearing tiers:
 
 \[
 B_p =
 B_{p,\mathrm{BLND:USDC}} +
-B_{p,\mathrm{BLND:XLM}},\qquad
-B_{p,u} =
-B_{p,u,\mathrm{BLND:USDC}} +
-B_{p,u,\mathrm{BLND:XLM}}
+B_{p,\mathrm{BLND:XLM}}
 \]
 
 \[
@@ -510,18 +507,13 @@ E_{x,p} =
 \frac{B_p}{\sum_{q \in \mathrm{reward\ zone}} B_q}
 \right\rfloor
 \quad
-(x\in\{\mathrm{backstop},\mathrm{pool}\}),
-\qquad
-E_{\mathrm{backstop},p,u} =
-\left\lfloor E_{\mathrm{backstop},p}
-\frac{B_{p,u}}{B_p}
-\right\rfloor
+(x\in\{\mathrm{backstop},\mathrm{pool}\})
 \]
 
 Plain USDC and the paired USDC/XLM portions contribute no weight. Bounded
 implementation uses one accumulator per eligible tier and scoped carry.
 
-The checkpoint splits \(E_{\mathrm{backstop},p}\) between the two tiers:
+The checkpoint fixes \(E_{\mathrm{backstop},p}\) between the two tiers:
 
 \[
 E_{p,t} =
@@ -531,19 +523,27 @@ E_{p,t} =
 \right\rfloor
 \]
 
-The unassigned sum becomes pool-local tier carry
-\(C_{p,\mathrm{tier}}\). Later composition changes cannot rewrite the split.
+The unassigned sum becomes pool-local tier carry. Later composition changes
+cannot redirect pending BLND between tiers or across the migration boundary.
 
-For active tier shares \(S_{p,t}\), each eligible tier uses a
-\(10^{14}\)-scaled cumulative index:
+At most once per 24 hours, a permissionless pool gulp checkpoints each existing
+tier stream, combines its exact unstreamed remainder with pending tier BLND, and
+starts a fresh seven-day stream. With \(D=604800\), pending amount \(P_{p,t}\),
+old seconds remaining \(r_{p,t}\), old scaled rate
+\(\epsilon_{p,t}\), and schedule carry \(C_{p,t}^{\mathrm{schedule}}\):
 
 \[
-N_{p,t}=E_{p,t}10^{14}+C_{p,t,\mathrm{index}},\qquad
-\Delta I_{p,t} =
-\left\lfloor \frac{N_{p,t}}{S_{p,t}} \right\rfloor,\qquad
-C'_{p,t,\mathrm{index}} =
-N_{p,t} - \Delta I_{p,t}S_{p,t}
+Q_{p,t} =
+P_{p,t}10^7 + r_{p,t}\epsilon_{p,t}
++ C_{p,t}^{\mathrm{schedule}},\qquad
+\epsilon'_{p,t} = \left\lfloor\frac{Q_{p,t}}{D}\right\rfloor
 \]
+
+The new expiration is the gulp timestamp plus \(D\), and the remainder
+\(Q_{p,t}-D\epsilon'_{p,t}\) remains tier-local carry. At a stream checkpoint,
+elapsed scaled emissions advance that tier's \(10^{14}\)-scaled cumulative
+index over its active, nonqueued shares. An expiration checkpoint includes the
+schedule remainder so a completed stream does not strand a whole token unit.
 
 For user shares \(S_{p,t,u}\):
 
@@ -558,9 +558,10 @@ N_{p,t,u} - \Delta E_{p,t,u}10^{14}
 \]
 
 Carries remain at their pool-tier or user scope. Before deposit, queue,
-dequeue, or withdrawal changes active shares, the user's index MUST
-checkpoint. New and dequeued shares start at the current index; queueing first
-realizes current accrual. No path grants retroactive credit.
+dequeue, or withdrawal changes active shares, the tier stream and user's index
+MUST checkpoint. New and dequeued shares start at the current index; queueing
+first realizes current streamed accrual. Elapsed emissions with no active
+shares receive no depositor credit, matching v2.
 
 At each allocation checkpoint, underlying BLND uses same-invocation Comet
 reserves:
@@ -580,7 +581,7 @@ checkpoint manipulation exposure is accepted and MUST be
 disclosed.
 
 Pool and user allocation uses bounded accumulators without iterating over all
-pools or depositors. Every remainder carries at its original scope.
+depositors. Every rounding remainder carries at its original scope.
 
 After distribution begins, deposits, queue/dequeue, withdrawals, actual loss,
 or auction gain that changes a reward-zone pool's active BLND-bearing LP amount

@@ -78,6 +78,11 @@ first:
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
 - Ongoing BLND weight only for active, nonqueued underlying BLND in the two
   BLND-bearing tiers.
+- Migration backfill starts with the first pre-replacement `distribute`, not
+  with an emitter queue, and remains capped at 10 million BLND.
+- A compatible BLND:XLM emitter queue must be attested no earlier than its
+  final seven days, and local activation must occur within seven days after
+  unlock.
 - Backstop BLND claims compound into the originating BLND-bearing tier and
   credit active shares to the same user and pool.
 - Backstop value is derived only from current 80:20 Comet reserves, with

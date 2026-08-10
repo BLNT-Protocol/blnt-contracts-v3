@@ -12,7 +12,9 @@ use crate::{
     dependencies::{CometClient, EmitterClient},
     errors::BackstopError,
     migration,
-    storage::{self, OngoingEmissionState, PoolOngoingEmissions, UserOngoingEmissions},
+    storage::{
+        self, OngoingEmissionState, PoolOngoingEmissions, TierEmissionStream, UserOngoingEmissions,
+    },
 };
 
 use super::policy::{
@@ -23,6 +25,7 @@ use super::policy::{
 const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 5;
 const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
+const BACKSTOP_EMISSION_STREAM_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 /// Result of one completed permissionless BLND distribution checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -119,9 +122,9 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
     result
 }
 
-/// Accrue migration backfill through the ordinary 70/30 emission indexes.
-/// Before activation, only BLND:USDC contributes backstop weight and receives
-/// the backstop tranche.
+/// Accrue migration backfill through the ordinary 70/30 emission pipeline.
+/// Before activation, active BLND:USDC LP tokens directly determine pool
+/// weight, and only that tier receives pending backstop emissions.
 pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> OngoingDistribution {
     if migration::is_active(e) {
         panic_with_error!(e, BackstopError::AlreadyFinalized);
@@ -158,14 +161,18 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> OngoingDistributi
 
 fn collect_weights(
     e: &Env,
-    include_blnd_xlm: bool,
+    use_underlying_blnd: bool,
 ) -> (Vec<(Address, i128, BlndEmissionValues)>, i128) {
     let reward_zone = storage::get_reward_zone(e);
     if reward_zone.is_empty() {
         return (Vec::new(e), 0);
     }
-    let (blnd_usdc_supply, blnd_usdc_reserve) = comet_composition(e, BackstopTier::BlndUsdc);
-    let (blnd_xlm_supply, blnd_xlm_reserve) = if include_blnd_xlm {
+    let (blnd_usdc_supply, blnd_usdc_reserve) = if use_underlying_blnd {
+        comet_composition(e, BackstopTier::BlndUsdc)
+    } else {
+        (0, 0)
+    };
+    let (blnd_xlm_supply, blnd_xlm_reserve) = if use_underlying_blnd {
         comet_composition(e, BackstopTier::BlndXlm)
     } else {
         (0, 0)
@@ -176,14 +183,18 @@ fn collect_weights(
     let mut total_blnd_xlm = 0_i128;
     for pool in reward_zone.iter() {
         let pool_state = get_pool_ongoing_emissions(e, &pool);
-        total_blnd_usdc = checked_add(e, total_blnd_usdc, pool_state.active_blnd_usdc);
-        let pool_blnd_usdc = underlying_blnd_from_composition(
-            e,
-            pool_state.active_blnd_usdc,
-            blnd_usdc_supply,
-            blnd_usdc_reserve,
-        );
-        let pool_blnd_xlm = if include_blnd_xlm {
+        let pool_blnd_usdc = if use_underlying_blnd {
+            total_blnd_usdc = checked_add(e, total_blnd_usdc, pool_state.active_blnd_usdc);
+            underlying_blnd_from_composition(
+                e,
+                pool_state.active_blnd_usdc,
+                blnd_usdc_supply,
+                blnd_usdc_reserve,
+            )
+        } else {
+            pool_state.active_blnd_usdc
+        };
+        let pool_blnd_xlm = if use_underlying_blnd {
             total_blnd_xlm = checked_add(e, total_blnd_xlm, pool_state.active_blnd_xlm);
             underlying_blnd_from_composition(
                 e,
@@ -205,7 +216,8 @@ fn collect_weights(
             },
         ));
     }
-    if total_blnd_usdc > blnd_usdc_supply || (include_blnd_xlm && total_blnd_xlm > blnd_xlm_supply)
+    if use_underlying_blnd
+        && (total_blnd_usdc > blnd_usdc_supply || total_blnd_xlm > blnd_xlm_supply)
     {
         panic_with_error!(e, BackstopError::NoEligibleWeight);
     }
@@ -318,12 +330,13 @@ pub(crate) fn preview_user_ongoing_emissions(
     pool: &Address,
 ) -> UserOngoingEmissions {
     require_emission_tier(e, tier);
-    let pool_state = get_pool_ongoing_emissions(e, pool);
+    let mut pool_state = get_pool_ongoing_emissions(e, pool);
+    let current_index = advance_pool_tier_stream(e, &mut pool_state, tier);
     accrue_user_ongoing_emissions(
         e,
         get_user_ongoing_emissions(e, tier, user, pool),
         storage::get_user_balance_for_tier(e, tier, pool, user).shares,
-        pool_ongoing_index(e, &pool_state, tier),
+        current_index,
     )
 }
 
@@ -427,10 +440,9 @@ pub(crate) fn claim_user_ongoing_blnd(
     }
 }
 
-pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> i128 {
+pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     pool.require_auth();
     require_registered_pool(e, pool);
-    migration::require_backfill_funded(e);
 
     let now = e.ledger().timestamp();
     if storage::get_pool_emission_gulp(e, pool).is_some_and(|last_gulp| {
@@ -442,25 +454,44 @@ pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> i128 {
     }
 
     let mut pool_state = get_pool_ongoing_emissions(e, pool);
-    let amount = pool_state.accrued_pool;
-    if amount == 0 {
-        return 0;
+    let backstop_amount = checked_add(e, pool_state.pending_blnd_usdc, pool_state.pending_blnd_xlm);
+    let pool_amount = pool_state.accrued_pool;
+    if backstop_amount == 0 && pool_amount == 0 {
+        return (0, 0);
     }
+    refresh_tier_stream(
+        e,
+        &mut pool_state.blnd_usdc_stream,
+        pool_state.active_blnd_usdc_shares,
+        pool_state.pending_blnd_usdc,
+        now,
+    );
+    refresh_tier_stream(
+        e,
+        &mut pool_state.blnd_xlm_stream,
+        pool_state.active_blnd_xlm_shares,
+        pool_state.pending_blnd_xlm,
+        now,
+    );
+    pool_state.pending_blnd_usdc = 0;
+    pool_state.pending_blnd_xlm = 0;
     pool_state.accrued_pool = 0;
 
-    let backstop = e.current_contract_address();
-    let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
-    let allowance = checked_add(e, blnd.allowance(&backstop, pool), amount);
-    let expiration_ledger = e
-        .ledger()
-        .sequence()
-        .checked_add(storage::LEDGER_BUMP_USER)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    blnd.approve(&backstop, pool, &allowance, &expiration_ledger);
+    if pool_amount > 0 {
+        let backstop = e.current_contract_address();
+        let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
+        let allowance = checked_add(e, blnd.allowance(&backstop, pool), pool_amount);
+        let expiration_ledger = e
+            .ledger()
+            .sequence()
+            .checked_add(storage::LEDGER_BUMP_USER)
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        blnd.approve(&backstop, pool, &allowance, &expiration_ledger);
+    }
 
     set_pool_ongoing_emissions(e, pool, &pool_state);
     storage::set_pool_emission_gulp(e, pool, now);
-    amount
+    (backstop_amount, pool_amount)
 }
 
 pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
@@ -489,7 +520,10 @@ pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Add
 }
 
 pub(crate) fn finish_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
-    if tier != BackstopTier::Usdc && storage::get_reward_zone(e).contains(pool.clone()) {
+    // A removed pool can still have a previously scheduled seven-day stream.
+    // Keep its cached active shares synchronized until that stream expires so
+    // later dequeues or deposits cannot distort the remaining distribution.
+    if tier != BackstopTier::Usdc {
         refresh_pool_ongoing_assets(e, pool);
     }
 }
@@ -497,14 +531,6 @@ pub(crate) fn finish_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Addr
 fn require_emission_tier(e: &Env, tier: BackstopTier) {
     if tier == BackstopTier::Usdc {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
-    }
-}
-
-fn pool_ongoing_index(e: &Env, state: &PoolOngoingEmissions, tier: BackstopTier) -> i128 {
-    match tier {
-        BackstopTier::BlndUsdc => state.blnd_usdc_index,
-        BackstopTier::BlndXlm => state.blnd_xlm_index,
-        BackstopTier::Usdc => panic_with_error!(e, BackstopError::InvalidEmissionValue),
     }
 }
 
@@ -566,41 +592,118 @@ fn checkpoint_user_ongoing_emissions(
     user: &Address,
     pool: &Address,
 ) -> UserOngoingEmissions {
-    let state = preview_user_ongoing_emissions(e, tier, user, pool);
+    require_emission_tier(e, tier);
+    let mut pool_state = get_pool_ongoing_emissions(e, pool);
+    let current_index = advance_pool_tier_stream(e, &mut pool_state, tier);
+    set_pool_ongoing_emissions(e, pool, &pool_state);
+    let state = accrue_user_ongoing_emissions(
+        e,
+        get_user_ongoing_emissions(e, tier, user, pool),
+        storage::get_user_balance_for_tier(e, tier, pool, user).shares,
+        current_index,
+    );
     set_user_ongoing_emissions(e, tier, user, pool, &state);
     state
 }
 
-fn advance_ongoing_emission_index(
-    e: &Env,
-    allocation: i128,
-    active_shares: i128,
-    index: i128,
-    carry: i128,
-) -> (i128, i128) {
-    if allocation < 0 || active_shares < 0 || index < 0 || carry < 0 {
+fn advance_pool_tier_stream(e: &Env, state: &mut PoolOngoingEmissions, tier: BackstopTier) -> i128 {
+    let now = e.ledger().timestamp();
+    match tier {
+        BackstopTier::BlndUsdc => {
+            advance_tier_stream(
+                e,
+                &mut state.blnd_usdc_stream,
+                state.active_blnd_usdc_shares,
+                now,
+            );
+            state.blnd_usdc_stream.index
+        }
+        BackstopTier::BlndXlm => {
+            advance_tier_stream(
+                e,
+                &mut state.blnd_xlm_stream,
+                state.active_blnd_xlm_shares,
+                now,
+            );
+            state.blnd_xlm_stream.index
+        }
+        BackstopTier::Usdc => panic_with_error!(e, BackstopError::InvalidEmissionValue),
+    }
+}
+
+fn advance_tier_stream(e: &Env, stream: &mut TierEmissionStream, active_shares: i128, now: u64) {
+    validate_tier_stream(e, stream);
+    if active_shares < 0 || stream.last_time > now {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
-    if active_shares == 0 {
-        if allocation != 0 {
-            panic_with_error!(e, BackstopError::InvalidEmissionValue);
-        }
-        return (index, carry);
+    let stream_end = now.min(stream.expiration);
+    if active_shares > 0 && stream_end > stream.last_time {
+        let elapsed = stream_end - stream.last_time;
+        let emitted_scaled = I256::from_i128(e, i128::from(elapsed))
+            .mul(&I256::from_i128(e, i128::from(stream.eps)))
+            .add(&if stream_end == stream.expiration {
+                I256::from_i128(e, stream.schedule_carry)
+            } else {
+                I256::from_i128(e, 0)
+            });
+        let numerator = emitted_scaled
+            .mul(&I256::from_i128(e, SCALAR_7))
+            .add(&I256::from_i128(e, stream.index_carry));
+        let denominator = I256::from_i128(e, active_shares);
+        let index_increment = numerator
+            .div(&denominator)
+            .to_i128()
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        stream.index_carry = numerator
+            .sub(&I256::from_i128(e, index_increment).mul(&denominator))
+            .to_i128()
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        stream.index = checked_add(e, stream.index, index_increment);
+    }
+    if stream_end == stream.expiration && stream_end > stream.last_time {
+        stream.schedule_carry = 0;
+    }
+    stream.last_time = now;
+}
+
+fn refresh_tier_stream(
+    e: &Env,
+    stream: &mut TierEmissionStream,
+    active_shares: i128,
+    pending: i128,
+    now: u64,
+) {
+    if pending < 0 {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    advance_tier_stream(e, stream, active_shares, now);
+    if pending == 0 {
+        return;
     }
 
-    let numerator = I256::from_i128(e, allocation)
-        .mul(&I256::from_i128(e, SCALAR_14))
-        .add(&I256::from_i128(e, carry));
-    let denominator = I256::from_i128(e, active_shares);
-    let index_increment = numerator
-        .div(&denominator)
+    let remaining_seconds = stream.expiration.saturating_sub(now);
+    let scaled_total = I256::from_i128(e, pending)
+        .mul(&I256::from_i128(e, SCALAR_7))
+        .add(
+            &I256::from_i128(e, i128::from(remaining_seconds))
+                .mul(&I256::from_i128(e, i128::from(stream.eps))),
+        )
+        .add(&I256::from_i128(e, stream.schedule_carry));
+    let duration = I256::from_i128(e, i128::from(BACKSTOP_EMISSION_STREAM_SECONDS));
+    let eps = scaled_total
+        .div(&duration)
         .to_i128()
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    let next_carry = numerator
-        .sub(&I256::from_i128(e, index_increment).mul(&denominator))
+    stream.schedule_carry = scaled_total
+        .sub(&I256::from_i128(e, eps).mul(&duration))
         .to_i128()
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    (checked_add(e, index, index_increment), next_carry)
+    stream.eps =
+        u64::try_from(eps).unwrap_or_else(|_| panic_with_error!(e, BackstopError::OverflowError));
+    stream.expiration = now
+        .checked_add(BACKSTOP_EMISSION_STREAM_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    stream.last_time = now;
 }
 
 fn allocate_pool_backstop_emissions(
@@ -621,20 +724,8 @@ fn allocate_pool_backstop_emissions(
     let blnd_usdc = proportional_floor(e, distribution, values.blnd_usdc, total_weight);
     let blnd_xlm = proportional_floor(e, distribution, values.blnd_xlm, total_weight);
     state.backstop_tier_carry = checked_sub(e, distribution, checked_add(e, blnd_usdc, blnd_xlm));
-    (state.blnd_usdc_index, state.blnd_usdc_index_carry) = advance_ongoing_emission_index(
-        e,
-        blnd_usdc,
-        state.active_blnd_usdc_shares,
-        state.blnd_usdc_index,
-        state.blnd_usdc_index_carry,
-    );
-    (state.blnd_xlm_index, state.blnd_xlm_index_carry) = advance_ongoing_emission_index(
-        e,
-        blnd_xlm,
-        state.active_blnd_xlm_shares,
-        state.blnd_xlm_index,
-        state.blnd_xlm_index_carry,
-    );
+    state.pending_blnd_usdc = checked_add(e, state.pending_blnd_usdc, blnd_usdc);
+    state.pending_blnd_xlm = checked_add(e, state.pending_blnd_xlm, blnd_xlm);
 }
 
 fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
@@ -681,10 +772,20 @@ fn validate_pool_ongoing_emissions(e: &Env, state: &PoolOngoingEmissions) {
         || state.active_blnd_xlm < 0
         || state.active_blnd_xlm_shares < 0
         || state.backstop_tier_carry < 0
-        || state.blnd_usdc_index < 0
-        || state.blnd_usdc_index_carry < 0
-        || state.blnd_xlm_index < 0
-        || state.blnd_xlm_index_carry < 0
+        || state.pending_blnd_usdc < 0
+        || state.pending_blnd_xlm < 0
+    {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    validate_tier_stream(e, &state.blnd_usdc_stream);
+    validate_tier_stream(e, &state.blnd_xlm_stream);
+}
+
+fn validate_tier_stream(e: &Env, stream: &TierEmissionStream) {
+    if stream.index < 0
+        || stream.index_carry < 0
+        || stream.schedule_carry < 0
+        || stream.schedule_carry >= i128::from(BACKSTOP_EMISSION_STREAM_SECONDS)
     {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
@@ -858,6 +959,103 @@ mod tests {
         }
     }
 
+    fn empty_stream() -> TierEmissionStream {
+        TierEmissionStream {
+            eps: 0,
+            expiration: 0,
+            index: 0,
+            index_carry: 0,
+            last_time: 0,
+            schedule_carry: 0,
+        }
+    }
+
+    #[test]
+    fn backfill_weights_use_active_blnd_usdc_lp_tokens() {
+        let fixture = Fixture::create();
+        let first = fixture.pool(10 * SCALAR_7, 0);
+        let second = fixture.pool(20 * SCALAR_7, 20 * SCALAR_7);
+        fixture.set_reward_zone(&vec![&fixture.e, first.clone(), second.clone()]);
+
+        let (weights, total_weight) = fixture
+            .e
+            .as_contract(&fixture.backstop, || collect_weights(&fixture.e, false));
+
+        assert_eq!(total_weight, 30 * SCALAR_7);
+        assert_eq!(
+            weights,
+            vec![
+                &fixture.e,
+                (
+                    first,
+                    10 * SCALAR_7,
+                    BlndEmissionValues {
+                        blnd_usdc: 10 * SCALAR_7,
+                        blnd_xlm: 0,
+                    },
+                ),
+                (
+                    second,
+                    20 * SCALAR_7,
+                    BlndEmissionValues {
+                        blnd_usdc: 20 * SCALAR_7,
+                        blnd_xlm: 0,
+                    },
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tier_stream_rolls_unfinished_emissions_into_a_fresh_seven_days() {
+        let e = Env::default();
+        let active_shares = 10 * SCALAR_7;
+        let allocation = 7 * SCALAR_7;
+        let start = 1_000;
+        let mut stream = empty_stream();
+
+        refresh_tier_stream(&e, &mut stream, active_shares, allocation, start);
+        assert_eq!(stream.expiration, start + BACKSTOP_EMISSION_STREAM_SECONDS);
+
+        let next_gulp = start + 24 * 60 * 60;
+        advance_tier_stream(&e, &mut stream, active_shares, next_gulp);
+        let first_day = accrue_user_ongoing_emissions(
+            &e,
+            UserOngoingEmissions {
+                accrued: 0,
+                carry: 0,
+                index: 0,
+            },
+            active_shares,
+            stream.index,
+        );
+        assert!((SCALAR_7 - 1..=SCALAR_7).contains(&first_day.accrued));
+
+        refresh_tier_stream(&e, &mut stream, active_shares, allocation, next_gulp);
+        assert_eq!(
+            stream.expiration,
+            next_gulp + BACKSTOP_EMISSION_STREAM_SECONDS
+        );
+        advance_tier_stream(
+            &e,
+            &mut stream,
+            active_shares,
+            next_gulp + BACKSTOP_EMISSION_STREAM_SECONDS,
+        );
+        let completed = accrue_user_ongoing_emissions(
+            &e,
+            UserOngoingEmissions {
+                accrued: 0,
+                carry: 0,
+                index: 0,
+            },
+            active_shares,
+            stream.index,
+        );
+        assert_eq!(completed.accrued, 2 * allocation);
+        assert_eq!(stream.schedule_carry, 0);
+    }
+
     #[test]
     fn allocates_by_emitter_checkpoint_and_ignores_unrelated_blnd() {
         let fixture = Fixture::create();
@@ -890,14 +1088,10 @@ mod tests {
                     active_blnd_xlm: if pool == second { 10 * SCALAR_7 } else { 0 },
                     active_blnd_xlm_shares: if pool == second { 10 * SCALAR_7 } else { 0 },
                     backstop_tier_carry: 0,
-                    blnd_usdc_index: if pool == first { 35_000_000_000_000 } else { 0 },
-                    blnd_usdc_index_carry: 0,
-                    blnd_xlm_index: if pool == second {
-                        35_000_000_000_000
-                    } else {
-                        0
-                    },
-                    blnd_xlm_index_carry: 0,
+                    blnd_usdc_stream: empty_stream(),
+                    blnd_xlm_stream: empty_stream(),
+                    pending_blnd_usdc: if pool == first { 35_000_000 } else { 0 },
+                    pending_blnd_xlm: if pool == second { 35_000_000 } else { 0 },
                 }
             );
         }
@@ -969,6 +1163,17 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
+        assert_eq!(
+            fixture
+                .client()
+                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
+            0
+        );
+        assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
 
         let stored_before = fixture.e.as_contract(&fixture.backstop, || {
             storage::get_user_ongoing_emissions(&fixture.e, BackstopTier::BlndUsdc, &user, &pool)
@@ -1015,6 +1220,11 @@ mod tests {
 
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
+        assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
         assert_eq!(
             fixture
                 .client()
@@ -1027,6 +1237,10 @@ mod tests {
                 .claimable(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm),
             35_000_000
         );
+
+        // Refresh the reward-zone checkpoint before claims compound into the
+        // two tier positions.
+        fixture.client().distribute();
 
         let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
         let blnd_usdc_before =
@@ -1068,7 +1282,7 @@ mod tests {
             blnd_xlm_before + blnd_xlm_out
         );
         assert_eq!(fixture.ongoing_state().backstop_claimed, 7 * SCALAR_7);
-        assert_eq!(fixture.pool_emissions(&pool).accrued_pool, 3 * SCALAR_7);
+        assert!(fixture.pool_emissions(&pool).accrued_pool > 3 * SCALAR_7);
     }
 
     #[test]
@@ -1080,6 +1294,12 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
 
         fixture.e.ledger().set_timestamp(1_010);
+        fixture.client().distribute();
+        assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
         fixture.client().distribute();
         let accrued = fixture
             .client()

@@ -14,8 +14,8 @@ mod ongoing;
 pub(crate) use ongoing::get_pool_ongoing_emissions;
 pub use ongoing::OngoingDistribution;
 pub(crate) use ongoing::{
-    checkpoint_backfill, checkpoint_user_ongoing_for_weight_change, claim_user_ongoing_blnd,
-    distribute, finish_pool_weight_change, gulp_pool_ongoing_emissions, prepare_pool_weight_change,
+    checkpoint_user_ongoing_for_weight_change, claim_user_ongoing_blnd, distribute,
+    finish_pool_weight_change, gulp_pool_ongoing_emissions, prepare_pool_weight_change,
     preview_user_ongoing_emissions, refresh_pool_ongoing_assets,
 };
 
