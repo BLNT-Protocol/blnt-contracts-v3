@@ -26,7 +26,7 @@ pub use auctions::{
 pub use contract::*;
 pub use emissions::ReserveEmissionMetadata;
 pub use errors::PoolError;
-pub use pool::{BackstopLossState, FlashLoan, Positions, Request, RequestType};
+pub use pool::{FlashLoan, Positions, Request, RequestType};
 pub use storage::{
     AuctionKey, PoolConfig, PoolDataKey, PoolEmissionConfig, ReserveConfig, ReserveData,
     ReserveEmissionData, UserEmissionData, UserReserveKey,

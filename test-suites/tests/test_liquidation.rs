@@ -1,9 +1,7 @@
 #![cfg(test)]
 use backstop::{BackstopDataKey, PoolBalance};
 use cast::i128;
-use pool::{
-    BackstopLossState, BackstopTier, FlashLoan, PoolDataKey, Request, RequestType, ReserveConfig,
-};
+use pool::{BackstopTier, FlashLoan, PoolDataKey, Request, RequestType, ReserveConfig};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     map, testutils::Address as AddressTestTrait, vec, Address, BytesN, Error, IntoVal, Symbol, Vec,
@@ -1129,17 +1127,6 @@ fn test_bad_debt() {
     let bad_debt_1 = backstop_post_bd_1
         .liabilities
         .get_unchecked(stable_pool_index);
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 1,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
-    assert!(!pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
     // d_rate is barely above 1
     assert_approx_eq_rel(bad_debt_1, sam_stable_debt, 0_001000);
 
@@ -1205,15 +1192,4 @@ fn test_bad_debt() {
         post_default_stable.to_asset_from_d_token(&fixture.env, bad_debt_1),
         0_0000100,
     );
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 0,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
-    assert!(pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
 }

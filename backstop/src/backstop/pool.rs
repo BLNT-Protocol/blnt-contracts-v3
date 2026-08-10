@@ -1,11 +1,7 @@
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
-use crate::{
-    dependencies::{PoolClient, PoolFactoryClient},
-    errors::BackstopError,
-    storage,
-};
+use crate::{dependencies::PoolFactoryClient, errors::BackstopError, storage};
 
 #[cfg(test)]
 use crate::{constants::SCALAR_7, dependencies::CometClient};
@@ -71,13 +67,6 @@ pub fn require_is_from_pool_factory(e: &Env, address: &Address, balance: i128) {
             panic_with_error!(e, BackstopError::NotPool);
         }
     }
-}
-
-/// Verify a pool is registered and exposes the permanent fail-closed
-/// withdrawal callback before accepting attributed custody.
-pub fn require_compatible_pool(e: &Env, address: &Address) {
-    require_registered_pool(e, address);
-    let _ = PoolClient::new(e, address).backstop_withdrawal_allowed(&e.current_contract_address());
 }
 
 /// Verify a pool is registered by the configured pool factory.

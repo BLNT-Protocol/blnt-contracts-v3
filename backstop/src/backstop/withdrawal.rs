@@ -82,7 +82,8 @@ pub fn execute_withdraw_for_tier(
 ) -> i128 {
     require_nonnegative(e, amount);
     let pool_client = PoolClient::new(e, pool_address);
-    if !pool_client.backstop_withdrawal_allowed(&e.current_contract_address()) {
+    let backstop_positions = pool_client.get_positions(&e.current_contract_address());
+    if !backstop_positions.liabilities.is_empty() {
         panic_with_error!(e, &BackstopError::BadDebtExists);
     }
 

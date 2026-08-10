@@ -52,13 +52,10 @@ Eligibility follows Section 3.3.
 ### 3.2 Position accounting
 
 The backstop immutably binds a factory whose `backstop` and `is_pool`
-interfaces MUST identify the candidate and its registered pools. Before
-custody changes, a deposit MUST confirm factory registration and the pool's
-fail-closed
-`backstop_withdrawal_allowed(backstop)` interface, but its current boolean
-result does not block new loss-absorbing capital. Canonical valuation requires
-factory registration without calling back into the pool. Every
-factory-deployed pool MUST preserve this withdrawal interface.
+interfaces MUST identify the candidate and its registered pools. A deposit
+MUST confirm factory registration before custody changes. Every registered
+pool MUST expose the v2-compatible `get_positions(address)` interface used to
+guard withdrawals.
 
 Each pool-tier independently applies `V2-BACKSTOP-002`. Checked `assets`,
 `shares`, and `queued_shares` are isolated per pool and tier and grant no
@@ -105,13 +102,10 @@ Capital state has these canonical policy effects:
 User, pool, and global shares decrease only when an expired withdrawal
 transfers custody out.
 
-Every withdrawal calls
-`backstop_withdrawal_allowed(backstop)` on the attributed pool. The callback
-MUST identify the immutable backstop and find no liability, prepared bad-debt
-auction, or unresolved bad debt. Amounts remain reserve-keyed and are never
-summed across asset units. A missing, failed, negative, nonzero, or inconsistent
-record fails closed. Pool actions update liability records and bad-debt auction
-state atomically.
+Every withdrawal reads the configured backstop's pool positions and fails
+while any liability remains, matching v2. Prepared, partially filled, stale,
+and continued bad-debt auctions MUST retain the corresponding backstop
+liability until settlement or supplier default clears it atomically.
 
 ## 4. Pool activation — **Replaced**
 

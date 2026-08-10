@@ -787,14 +787,10 @@ mod tests {
         assert_eq!(auction.lot_quote.target_value, 60 * SCALAR_7);
         assert_eq!(auction.lot_quote.tier, crate::BackstopTier::BlndUsdc);
         assert_eq!(auction.lot_quote.lot_amount, 60 * SCALAR_7);
-        assert_eq!(
-            pool_client.backstop_loss_state(),
-            crate::BackstopLossState {
-                committed_loss_entries: 1,
-                liability_entries: 1,
-                unresolved_bad_debt_entries: 0,
-            }
-        );
+        assert!(!pool_client
+            .get_positions(&backstop_address)
+            .liabilities
+            .is_empty());
         assert_eq!(
             pool_client.try_bad_debt(&backstop_address).err(),
             Some(Ok(Error::from_contract_error(1200)))
@@ -860,19 +856,13 @@ mod tests {
                 },
             }
         );
-        assert_eq!(
-            pool_client.backstop_loss_state(),
-            crate::BackstopLossState {
-                committed_loss_entries: 1,
-                liability_entries: 1,
-                unresolved_bad_debt_entries: 0,
-            }
-        );
-
         e.ledger().set_sequence_number(auction.block + 500);
         pool_client.delete_stale_bad_debt_auction();
         assert!(!e.as_contract(&pool_address, || has_prepared_bad_debt_auction(&e)));
-        assert_eq!(pool_client.backstop_loss_state().committed_loss_entries, 0);
+        assert!(!pool_client
+            .get_positions(&backstop_address)
+            .liabilities
+            .is_empty());
 
         let discounted_auction_id = BytesN::from_array(&e, &[9; 32]);
         let discounted =
@@ -893,16 +883,6 @@ mod tests {
                 .get(reserve_config.index),
             Some(12_5000000)
         );
-        assert_eq!(
-            pool_client.backstop_loss_state(),
-            crate::BackstopLossState {
-                committed_loss_entries: 0,
-                liability_entries: 1,
-                unresolved_bad_debt_entries: 0,
-            }
-        );
-        assert!(!pool_client.backstop_withdrawal_allowed(&backstop_address));
-
         let continuation_id = BytesN::from_array(&e, &[10; 32]);
         let continuation = pool_client.continue_bad_debt_resolution(&continuation_id);
         assert!(continuation.auction_created);
@@ -910,6 +890,10 @@ mod tests {
         let continued = pool_client.get_bad_debt_auction();
         assert_eq!(continued.auction_id, continuation_id);
         assert_eq!(continued.lot_quote.tier, BackstopTier::BlndUsdc);
+        assert!(!pool_client
+            .get_positions(&backstop_address)
+            .liabilities
+            .is_empty());
         assert_eq!(
             continued.bid.get(debt_asset),
             Some(12_5000000),
@@ -925,15 +909,6 @@ mod tests {
             .get_positions(&backstop_address)
             .liabilities
             .is_empty());
-        assert_eq!(
-            pool_client.backstop_loss_state(),
-            crate::BackstopLossState {
-                committed_loss_entries: 0,
-                liability_entries: 0,
-                unresolved_bad_debt_entries: 0,
-            }
-        );
-        assert!(pool_client.backstop_withdrawal_allowed(&backstop_address));
     }
 
     #[test]
@@ -1049,16 +1024,6 @@ mod tests {
         assert_eq!(reserve_after.d_supply, reserve_before.d_supply - debt);
         assert_eq!(reserve_after.b_supply, reserve_before.b_supply);
         assert_eq!(reserve_after.b_rate, SCALAR_7 as i128 * 50_000);
-        assert_eq!(
-            pool_client.backstop_loss_state(),
-            crate::BackstopLossState {
-                committed_loss_entries: 0,
-                liability_entries: 0,
-                unresolved_bad_debt_entries: 0,
-            }
-        );
-        assert!(pool_client.backstop_withdrawal_allowed(&backstop_address));
-
         let dust = 1_i128;
         let dust_positions = Positions {
             collateral: map![&e],
@@ -1085,7 +1050,6 @@ mod tests {
             .get_positions(&backstop_address)
             .liabilities
             .is_empty());
-        assert!(pool_client.backstop_withdrawal_allowed(&backstop_address));
     }
 
     #[test]

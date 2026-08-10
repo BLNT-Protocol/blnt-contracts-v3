@@ -61,10 +61,4 @@ impl MockPool {
             },
         }
     }
-
-    pub fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool {
-        let configured_backstop: Option<Address> = e.storage().instance().get(&DataKey::Backstop);
-        configured_backstop == Some(backstop.clone())
-            && Self::get_positions(e, backstop).liabilities.is_empty()
-    }
 }

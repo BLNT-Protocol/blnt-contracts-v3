@@ -21,9 +21,7 @@ pub fn token(e: &Env, tier: BackstopTier) -> Address {
 
 #[cfg(test)]
 mod tests {
-    use mock_pool::{MockPoolClient, Positions};
     use soroban_sdk::{
-        map,
         testutils::{Address as _, Ledger, LedgerInfo},
         Address,
     };
@@ -164,39 +162,27 @@ mod tests {
     }
 
     #[test]
-    fn deposit_requires_callback_interface_but_not_a_true_callback_result() {
+    fn deposit_requires_factory_registration_only() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
 
         let admin = Address::generate(&e);
         let user = Address::generate(&e);
-        let incompatible_pool = Address::generate(&e);
-        let compatible_pool = Address::generate(&e);
+        let pool = Address::generate(&e);
         let backstop = create_backstop(&e);
         let (_, usdc_client) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         let client = BackstopClient::new(&e, &backstop);
 
         usdc_client.mint(&user, &200);
-        factory.set_pool(&incompatible_pool);
         assert!(client
-            .try_deposit(&crate::BackstopTier::Usdc, &user, &incompatible_pool, &100)
+            .try_deposit(&crate::BackstopTier::Usdc, &user, &pool, &100)
             .is_err());
         assert_eq!(usdc_client.balance(&user), 200);
 
-        factory.set_mock_pool(&compatible_pool);
-        let pool_client = MockPoolClient::new(&e, &compatible_pool);
-        pool_client.set_positions(
-            &backstop,
-            &Positions {
-                liabilities: map![&e, (0, 1)],
-                collateral: map![&e],
-                supply: map![&e],
-            },
-        );
-        assert!(!pool_client.backstop_withdrawal_allowed(&backstop));
+        factory.set_pool(&pool);
         assert_eq!(
-            client.deposit(&crate::BackstopTier::Usdc, &user, &compatible_pool, &100),
+            client.deposit(&crate::BackstopTier::Usdc, &user, &pool, &100),
             100
         );
         assert_eq!(usdc_client.balance(&user), 100);

@@ -5,7 +5,7 @@ use crate::{
     },
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
-    pool::{self, BackstopLossState, FlashLoan, Positions, Request, Reserve},
+    pool::{self, FlashLoan, Positions, Request, Reserve},
     storage::{self, ReserveConfig},
     BackstopTier, PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
@@ -102,13 +102,6 @@ pub trait Pool {
     /// ### Arguments
     /// * `address` - The address to fetch positions for
     fn get_positions(e: Env, address: Address) -> Positions;
-
-    /// Return counts derived from the canonical nonzero backstop loss records.
-    fn backstop_loss_state(e: Env) -> BackstopLossState;
-
-    /// Return true only for this pool's configured backstop and only while no
-    /// liability, prepared bad-debt auction, or unresolved bad debt exists.
-    fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool;
 
     /// Submit a set of requests to the pool where `from` takes on the position, `spender` sends any
     /// required tokens to the pool and `to` receives any tokens sent from the pool.
@@ -498,16 +491,6 @@ impl Pool for PoolContract {
         storage::get_user_positions(&e, &address)
     }
 
-    fn backstop_loss_state(e: Env) -> BackstopLossState {
-        storage::extend_instance(&e);
-        pool::backstop_loss_state(&e)
-    }
-
-    fn backstop_withdrawal_allowed(e: Env, backstop: Address) -> bool {
-        storage::extend_instance(&e);
-        backstop == storage::get_backstop(&e) && pool::backstop_loss_state(&e).is_clear()
-    }
-
     fn submit(
         e: Env,
         from: Address,
@@ -732,35 +715,5 @@ impl Pool for PoolContract {
         storage::extend_instance(&e);
 
         pool::bad_debt(&e, &user);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use soroban_sdk::{testutils::Address as _, Address};
-
-    use crate::{pool::Positions, storage, testutils::create_pool};
-
-    use super::*;
-
-    #[test]
-    fn backstop_withdrawal_callback_checks_identity_and_liabilities() {
-        let e = Env::default();
-        e.mock_all_auths_allowing_non_root_auth();
-
-        let pool = create_pool(&e);
-        let client = PoolClient::new(&e, &pool);
-        let backstop = e.as_contract(&pool, || storage::get_backstop(&e));
-        assert!(client.backstop_withdrawal_allowed(&backstop));
-        assert!(!client.backstop_withdrawal_allowed(&Address::generate(&e)));
-
-        let reserve = Address::generate(&e);
-        let mut positions = Positions::env_default(&e);
-        positions.liabilities.set(0, 1);
-        e.as_contract(&pool, || {
-            storage::push_res_list(&e, &reserve);
-            storage::set_user_positions(&e, &backstop, &positions);
-        });
-        assert!(!client.backstop_withdrawal_allowed(&backstop));
     }
 }

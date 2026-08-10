@@ -1,9 +1,7 @@
 #![cfg(test)]
 
 use backstop::{BackstopDataKey, BackstopTier as BackstopContractTier, PoolBalance};
-use pool::{
-    BackstopLossState, BackstopTier, PoolDataKey, Positions, Request, RequestType, ReserveData,
-};
+use pool::{BackstopTier, PoolDataKey, Positions, Request, RequestType, ReserveData};
 use sep_40_oracle::testutils::Asset;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
@@ -22,7 +20,6 @@ use test_suites::{
 #[contracttype]
 struct CanonicalBackstopLossRecords {
     liabilities: Map<Address, i128>,
-    unresolved_bad_debt: Map<Address, i128>,
 }
 
 #[test]
@@ -39,7 +36,6 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
     };
     let records = CanonicalBackstopLossRecords {
         liabilities: map![&fixture.env, (stable.clone(), debt)],
-        unresolved_bad_debt: map![&fixture.env],
     };
 
     fixture.env.as_contract(&pool_fixture.pool.address, || {
@@ -61,14 +57,11 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
     assert_eq!(auction.auction_id, auction_id);
     assert_eq!(auction.lot_quote.tier, BackstopTier::BlndUsdc);
     assert!(auction.lot_quote.lot_amount > 0);
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 1,
-            liability_entries: 1,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
+    assert!(!pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
 
     fixture
         .env
@@ -76,14 +69,11 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         .set_sequence_number(auction.block + 500);
     pool_fixture.pool.delete_stale_bad_debt_auction();
     assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 1,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
+    assert!(!pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
 }
 
 #[test]
@@ -102,7 +92,6 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     };
     let records = CanonicalBackstopLossRecords {
         liabilities: map![&fixture.env, (stable.clone(), debt)],
-        unresolved_bad_debt: map![&fixture.env],
     };
 
     fixture.env.as_contract(&pool_fixture.pool.address, || {
@@ -208,9 +197,6 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .get(stable_index)
         .unwrap();
     assert!(remaining_debt > 0);
-    assert!(!pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
 
     let continuation_id = BytesN::from_array(&fixture.env, &[11; 32]);
     let continuation = pool_fixture
@@ -241,17 +227,6 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .get_positions(&fixture.backstop.address)
         .liabilities
         .is_empty());
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 0,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
-    assert!(pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
 }
 
 #[test]
@@ -309,7 +284,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     };
     let records = CanonicalBackstopLossRecords {
         liabilities: map![&fixture.env, (stable.clone(), debt)],
-        unresolved_bad_debt: map![&fixture.env],
     };
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         fixture
@@ -418,18 +392,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         .get_positions(&fixture.backstop.address)
         .liabilities
         .is_empty());
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 0,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
-    assert!(pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
-
     let dust = 1_i128;
     let dust_positions = Positions {
         liabilities: map![&fixture.env, (stable_index, dust)],
@@ -438,7 +400,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     };
     let dust_records = CanonicalBackstopLossRecords {
         liabilities: map![&fixture.env, (stable.clone(), dust)],
-        unresolved_bad_debt: map![&fixture.env],
     };
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         let key = PoolDataKey::ResData(stable.clone());
@@ -473,9 +434,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         .get_positions(&fixture.backstop.address)
         .liabilities
         .is_empty());
-    assert!(pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
 }
 
 #[test]
@@ -565,7 +523,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     };
     let mut records = CanonicalBackstopLossRecords {
         liabilities: map![&fixture.env],
-        unresolved_bad_debt: map![&fixture.env],
     };
     let mut pool_config = pool_fixture.pool.get_config();
     pool_config.max_positions = 60;
@@ -633,12 +590,12 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     });
 
     assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 30,
-            unresolved_bad_debt_entries: 0,
-        }
+        pool_fixture
+            .pool
+            .get_positions(&fixture.backstop.address)
+            .liabilities
+            .len(),
+        30
     );
     fixture.env.cost_estimate().budget().reset_unlimited();
     let continuation = pool_fixture
@@ -666,9 +623,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         .get_positions(&fixture.backstop.address)
         .liabilities
         .is_empty());
-    assert!(pool_fixture
-        .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
 }
 
 /// Smoke test for managing positions, tracking emissions, and accruing interest
@@ -680,17 +634,11 @@ fn test_wasm_happy_path() {
     let stable_pool_index = pool_fixture.reserves[&TokenIndex::STABLE];
     let xlm_pool_index = pool_fixture.reserves[&TokenIndex::XLM];
 
-    assert_eq!(
-        pool_fixture.pool.backstop_loss_state(),
-        BackstopLossState {
-            committed_loss_entries: 0,
-            liability_entries: 0,
-            unresolved_bad_debt_entries: 0,
-        }
-    );
     assert!(pool_fixture
         .pool
-        .backstop_withdrawal_allowed(&fixture.backstop.address));
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
 
     // Create two new users
     let sam = Address::generate(&fixture.env); // sam will be supplying XLM and borrowing STABLE
