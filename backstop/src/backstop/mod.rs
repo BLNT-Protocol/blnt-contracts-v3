@@ -30,5 +30,6 @@ pub(crate) use valuation::{
     build_pool_data, build_pool_valuation, quote_activation, validate_backstop_assets,
 };
 pub use valuation::{
-    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolData, PoolTierData,
+    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolBackstopData,
+    PoolTierData,
 };

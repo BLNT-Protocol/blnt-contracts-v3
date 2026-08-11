@@ -85,7 +85,7 @@ pub struct PoolTierData {
 /// One pool's complete three-tier backstop accounting and valuation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct PoolData {
+pub struct PoolBackstopData {
     pub blnd_usdc: PoolTierData,
     pub blnd_xlm: PoolTierData,
     /// Queued value divided by total active-plus-queued value, rounded up.
@@ -95,13 +95,13 @@ pub struct PoolData {
     pub valuation_valid_until: u64,
 }
 
-pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolData {
+pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolBackstopData {
     let valuation = build_pool_valuation(e, pool);
     let blnd_usdc = storage::get_pool_balance_for_tier(e, BackstopTier::BlndUsdc, pool);
     let blnd_xlm = storage::get_pool_balance_for_tier(e, BackstopTier::BlndXlm, pool);
     let usdc = storage::get_pool_balance_for_tier(e, BackstopTier::Usdc, pool);
 
-    PoolData {
+    PoolBackstopData {
         blnd_usdc: tier_data(
             &blnd_usdc,
             valuation.active_blnd.blnd_usdc,

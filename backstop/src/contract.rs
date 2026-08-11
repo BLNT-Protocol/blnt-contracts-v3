@@ -1,7 +1,7 @@
 use crate::{
     backstop::{
-        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier, PoolData,
-        UserBalance, Q4W,
+        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier,
+        PoolBackstopData, UserBalance, Q4W,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     emissions,
@@ -65,7 +65,7 @@ pub trait Backstop {
     ///
     /// ### Arguments
     /// * `pool_address` - The address of the pool
-    fn pool_data(e: Env, pool: Address) -> PoolData;
+    fn pool_data(e: Env, pool: Address) -> PoolBackstopData;
 
     /// Fetch the token contract bound to one fixed backstop tier.
     fn backstop_token(e: Env, tier: BackstopTier) -> Address;
@@ -261,7 +261,7 @@ impl Backstop for BackstopContract {
         withdraw_tier(e, tier, from, pool_address, amount, to)
     }
 
-    fn pool_data(e: Env, pool: Address) -> PoolData {
+    fn pool_data(e: Env, pool: Address) -> PoolBackstopData {
         build_pool_data(&e, &pool)
     }
 
