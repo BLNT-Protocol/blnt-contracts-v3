@@ -51,11 +51,10 @@ Eligibility follows Section 3.3.
 
 ### 3.2 Position accounting
 
-The backstop immutably binds a factory whose `backstop` and `is_pool`
-interfaces MUST identify the candidate and its registered pools. A deposit
-MUST confirm factory registration before custody changes. Every registered
-pool MUST expose the v2-compatible `get_positions(address)` interface used to
-guard withdrawals.
+The backstop immutably binds a factory and uses its `is_pool` interface to
+identify registered pools. A deposit MUST confirm factory registration before
+custody changes. Every registered pool MUST expose the v2-compatible
+`get_positions(address)` interface used to guard withdrawals.
 
 Each pool-tier independently applies `V2-BACKSTOP-002`. Checked `assets`,
 `shares`, and `queued_shares` are isolated per pool and tier and grant no

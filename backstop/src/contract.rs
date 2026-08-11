@@ -4,7 +4,6 @@ use crate::{
         UserBalance, Q4W,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
-    dependencies::PoolFactoryClient,
     emissions,
     errors::BackstopError,
     events::BackstopEvents,
@@ -192,11 +191,6 @@ impl BackstopContract {
             &blnd_usdc_token,
             &blnd_xlm_token,
         );
-        let factory = PoolFactoryClient::new(&e, &pool_factory);
-        if factory.backstop() != e.current_contract_address() {
-            panic_with_error!(&e, BackstopError::InvalidPoolFactoryBinding);
-        }
-        let _ = factory.is_pool(&e.current_contract_address());
         let mut drop_total = MAX_BACKFILLED_EMISSIONS;
         for (_, amount) in drop_list.iter() {
             require_nonnegative(&e, amount);

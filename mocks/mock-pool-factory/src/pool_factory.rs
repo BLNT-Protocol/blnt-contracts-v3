@@ -19,12 +19,6 @@ struct MockPoolFactoryDeployEvent {
 pub struct MockPoolFactory;
 
 pub trait MockPoolFactoryTrait {
-    /// Fetch the immutable backstop used by pools from this factory.
-    fn backstop(e: Env) -> Address;
-
-    /// Fetch the immutable pool WASM hash used by this factory.
-    fn pool_wasm_hash(e: Env) -> BytesN<32>;
-
     /// Deploys and initializes a lending pool
     ///
     /// # Arguments
@@ -76,14 +70,6 @@ impl MockPoolFactory {
 
 #[contractimpl]
 impl MockPoolFactoryTrait for MockPoolFactory {
-    fn backstop(e: Env) -> Address {
-        storage::get_pool_init_meta(&e).backstop
-    }
-
-    fn pool_wasm_hash(e: Env) -> BytesN<32> {
-        storage::get_pool_init_meta(&e).pool_hash
-    }
-
     fn deploy(
         e: Env,
         admin: Address,

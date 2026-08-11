@@ -657,37 +657,6 @@ fn test_backstop_constructor() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #1012)")]
-fn test_backstop_constructor_rejects_wrong_factory_binding() {
-    let e = Env::default();
-    e.mock_all_auths();
-    let (blnd, usdc, xlm, blnd_usdc, blnd_xlm) = create_backstop_assets(&e);
-    let contract_id = Address::generate(&e);
-    let pool_factory = e.register(
-        MockPoolFactory {},
-        (PoolInitMeta {
-            backstop: Address::generate(&e),
-            pool_hash: BytesN::from_array(&e, &[0; 32]),
-            blnd_id: Address::generate(&e),
-        },),
-    );
-    e.register_at(
-        &contract_id,
-        BackstopContract {},
-        (
-            blnd_usdc,
-            blnd_xlm,
-            Address::generate(&e),
-            blnd,
-            usdc,
-            xlm,
-            pool_factory,
-            Vec::<(Address, i128)>::new(&e),
-        ),
-    );
-}
-
-#[test]
 #[should_panic(expected = "Error(Contract, #1014)")]
 fn test_backstop_constructor_rejects_wrong_comet_pair() {
     let e = Env::default();
