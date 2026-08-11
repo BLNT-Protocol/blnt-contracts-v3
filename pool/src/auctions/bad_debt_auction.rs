@@ -2,10 +2,7 @@ use crate::{
     constants::SCALAR_7,
     dependencies::{BackstopClient, BackstopContractTier, BackstopPoolData},
     errors::PoolError,
-    pool::{
-        backstop_liabilities, backstop_liability, sync_backstop_liabilities, Pool, PositionData,
-        User,
-    },
+    pool::{backstop_liabilities, backstop_liability, sync_backstop_liabilities, Pool, User},
     storage,
 };
 use cast::i128;
@@ -59,7 +56,7 @@ pub struct BadDebtAuctionData {
 /// Exact amounts processed by one bad-debt auction fill.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct BadDebtAuctionFill {
+pub(crate) struct BadDebtAuctionFill {
     /// Base lot removed from the pool's selection before the time modifier.
     pub base_lot_amount: i128,
     /// Time-scaled dToken shares assumed by the filler.
@@ -272,26 +269,33 @@ pub fn get_prepared_bad_debt_auction(e: &Env) -> BadDebtAuctionData {
 /// Atomically transfer the scaled debt bid and settle the realized tier loss.
 pub fn fill_prepared_bad_debt_auction(
     e: &Env,
-    filler: &Address,
+    pool: &mut Pool,
+    auction_user: &Address,
+    filler_state: &mut User,
     percent: u32,
-) -> BadDebtAuctionFill {
+) -> AuctionData {
     let pool_address = e.current_contract_address();
     let backstop = storage::get_backstop(e);
-    if filler == &pool_address || filler == &backstop || percent == 0 || percent > 100 {
+    if auction_user != &backstop
+        || filler_state.address == pool_address
+        || filler_state.address == backstop
+        || percent == 0
+        || percent > 100
+    {
         panic_with_error!(e, PoolError::InvalidLiquidation);
     }
-    filler.require_auth();
-    if storage::has_auction(e, &(AuctionType::UserLiquidation as u32), filler) {
+    if storage::has_auction(
+        e,
+        &(AuctionType::UserLiquidation as u32),
+        &filler_state.address,
+    ) {
         panic_with_error!(e, PoolError::AuctionInProgress);
     }
 
     let auction = get_prepared_bad_debt_auction(e);
     let (fill, remaining_bid, remaining_lot_amount) =
         scale_prepared_bad_debt_auction(e, &auction, percent);
-    let mut pool = Pool::load(e);
     let mut backstop_state = User::load(e, &backstop);
-    let mut filler_state = User::load(e, filler);
-    let filler_previous_count = filler_state.positions.effective_count();
 
     for (asset, _) in auction.bid.iter() {
         let reserve = pool.load_reserve(e, &asset, false);
@@ -300,25 +304,14 @@ pub fn fill_prepared_bad_debt_auction(
         }
     }
 
-    backstop_state.rm_positions(e, &mut pool, map![e], fill.bid.clone());
-    filler_state.add_positions(e, &mut pool, map![e], fill.bid.clone());
-    pool.require_under_max(e, &filler_state.positions, filler_previous_count);
-    if filler_state.has_liabilities() {
-        let position_data =
-            PositionData::calculate_from_positions(e, &mut pool, &filler_state.positions);
-        if position_data.is_hf_under(e, 1_0000100) {
-            panic_with_error!(e, PoolError::InvalidHf);
-        }
-        if position_data.collateral_base < pool.config.min_collateral {
-            panic_with_error!(e, PoolError::MinCollateralNotMet);
-        }
-    }
+    backstop_state.rm_positions(e, pool, map![e], fill.bid.clone());
+    filler_state.add_positions(e, pool, map![e], fill.bid.clone());
 
     BackstopClient::new(e, &backstop).draw(
         &to_backstop_tier(fill.tier),
         &pool_address,
         &fill.lot_amount,
-        filler,
+        &filler_state.address,
     );
     if !fill.complete {
         let expected_committed_value = auction.lot_quote.committed_value.fixed_mul_floor(
@@ -350,9 +343,17 @@ pub fn fill_prepared_bad_debt_auction(
 
     sync_backstop_liabilities(e, &backstop_state.positions);
     backstop_state.store(e);
-    filler_state.store(e);
-    pool.store_cached_reserves(e);
-    fill
+    let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(fill.tier));
+    let lot = if fill.lot_amount > 0 {
+        map![e, (lot_token, fill.lot_amount)]
+    } else {
+        map![e]
+    };
+    AuctionData {
+        bid: fill.bid,
+        lot,
+        block: fill.block,
+    }
 }
 
 pub fn del_prepared_bad_debt_auction(e: &Env) {
@@ -583,7 +584,7 @@ mod tests {
 
     use crate::{
         dependencies::BackstopPoolTierData,
-        pool::Positions,
+        pool::{Positions, Request, RequestType},
         storage::PoolConfig,
         testutils::{self, create_pool},
     };
@@ -605,6 +606,51 @@ mod tests {
 
     fn del_bad_debt(pool: &crate::PoolClient, backstop: &Address) {
         pool.del_auction(&1, backstop);
+    }
+
+    fn fill_bad_debt(
+        e: &Env,
+        pool: &crate::PoolClient,
+        backstop: &Address,
+        filler: &Address,
+        percent: i128,
+    ) {
+        pool.submit(
+            filler,
+            filler,
+            filler,
+            &vec![
+                e,
+                Request {
+                    request_type: RequestType::FillBadDebtAuction as u32,
+                    address: backstop.clone(),
+                    amount: percent,
+                },
+            ],
+        );
+    }
+
+    fn try_fill_bad_debt(
+        e: &Env,
+        pool: &crate::PoolClient,
+        backstop: &Address,
+        filler: &Address,
+        percent: i128,
+    ) -> bool {
+        pool.try_submit(
+            filler,
+            filler,
+            filler,
+            &vec![
+                e,
+                Request {
+                    request_type: RequestType::FillBadDebtAuction as u32,
+                    address: backstop.clone(),
+                    amount: percent,
+                },
+            ],
+        )
+        .is_ok()
     }
 
     fn test_tier_data(assets: i128, total_value: i128) -> BackstopPoolTierData {
@@ -803,12 +849,22 @@ mod tests {
             Some(Ok(Error::from_contract_error(1212)))
         );
 
-        assert!(pool_client.try_fill_bad_debt_auction(&filler, &50).is_err());
+        assert!(!try_fill_bad_debt(
+            &e,
+            &pool_client,
+            &backstop_address,
+            &filler,
+            50
+        ));
         e.ledger().set_sequence_number(auction.block + 100);
         let auction_before_failed_fill = get_bad_debt(&pool_client, &backstop_address);
-        assert!(pool_client
-            .try_fill_bad_debt_auction(&unhealthy_filler, &50)
-            .is_err());
+        assert!(!try_fill_bad_debt(
+            &e,
+            &pool_client,
+            &backstop_address,
+            &unhealthy_filler,
+            50
+        ));
         assert_eq!(
             get_bad_debt(&pool_client, &backstop_address),
             auction_before_failed_fill
@@ -818,18 +874,7 @@ mod tests {
             .liabilities
             .is_empty());
 
-        let fill = pool_client.fill_bad_debt_auction(&filler, &50);
-        assert_eq!(
-            fill,
-            BadDebtAuctionFill {
-                base_lot_amount: 30 * SCALAR_7,
-                bid: map![&e, (debt_asset.clone(), 25 * SCALAR_7)],
-                block: auction.block,
-                complete: false,
-                lot_amount: 15 * SCALAR_7,
-                tier: BackstopTier::BlndUsdc,
-            }
-        );
+        fill_bad_debt(&e, &pool_client, &backstop_address, &filler, 50);
         assert_eq!(lp_token_client.balance(&filler), 15 * SCALAR_7);
         assert_eq!(
             pool_client
@@ -863,13 +908,23 @@ mod tests {
 
         let discounted = new_bad_debt(&e, &pool_client, &backstop_address);
         e.ledger().set_sequence_number(discounted.block + 300);
-        let discounted_fill = pool_client.fill_bad_debt_auction(&filler, &100);
-        assert!(discounted_fill.complete);
+        let filler_lp_before = lp_token_client.balance(&filler);
+        let filler_debt_before = pool_client
+            .get_positions(&filler)
+            .liabilities
+            .get(reserve_config.index)
+            .unwrap();
+        fill_bad_debt(&e, &pool_client, &backstop_address, &filler, 100);
+        let filler_debt_after = pool_client
+            .get_positions(&filler)
+            .liabilities
+            .get(reserve_config.index)
+            .unwrap();
+        assert_eq!(filler_debt_after - filler_debt_before, 12_5000000);
         assert_eq!(
-            discounted_fill.bid.get(debt_asset.clone()),
-            Some(12_5000000)
+            lp_token_client.balance(&filler) - filler_lp_before,
+            30 * SCALAR_7
         );
-        assert_eq!(discounted_fill.lot_amount, 30 * SCALAR_7);
         assert!(pool_client.try_get_auction(&1, &backstop_address).is_err());
         assert_eq!(
             pool_client
@@ -892,7 +947,7 @@ mod tests {
         assert!(pool_client.try_bad_debt(&backstop_address).is_err());
 
         e.ledger().set_sequence_number(continued.block + 200);
-        assert!(pool_client.fill_bad_debt_auction(&filler, &100).complete);
+        fill_bad_debt(&e, &pool_client, &backstop_address, &filler, 100);
         assert!(pool_client
             .get_positions(&backstop_address)
             .liabilities

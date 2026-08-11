@@ -2,7 +2,7 @@ use crate::{
     constants::SCALAR_7,
     dependencies::{BackstopClient, BackstopContractTier, BackstopPoolData},
     errors::PoolError,
-    pool::Pool,
+    pool::{Pool, User},
     storage,
 };
 use sep_41_token::TokenClient;
@@ -83,7 +83,7 @@ pub struct InterestAuctionData {
 /// Exact base and time-scaled amounts processed by one interest fill.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct InterestAuctionFill {
+pub(crate) struct InterestAuctionFill {
     pub base_bid_amount: i128,
     pub base_lot: Map<Address, i128>,
     pub bid_amount: i128,
@@ -227,30 +227,31 @@ pub fn get_interest_auction(e: &Env) -> InterestAuctionData {
 
 pub fn fill_interest_auction(
     e: &Env,
-    tier: super::BackstopTier,
-    filler: &Address,
+    pool: &mut Pool,
+    auction_user: &Address,
+    filler_state: &User,
     percent: u32,
-) -> InterestAuctionFill {
+) -> AuctionData {
     let pool_address = e.current_contract_address();
     let backstop = storage::get_backstop(e);
-    if filler == &pool_address || filler == &backstop || percent == 0 || percent > 100 {
+    if auction_user != &backstop
+        || filler_state.address == pool_address
+        || filler_state.address == backstop
+        || percent == 0
+        || percent > 100
+    {
         panic_with_error!(e, PoolError::InvalidInterestAuction);
     }
-    filler.require_auth();
 
     let auction = get_interest_auction(e);
-    if auction.tier != tier {
-        panic_with_error!(e, PoolError::InvalidInterestAuction);
-    }
     let fill = scale_interest_auction(e, &auction, percent);
-    let mut pool = Pool::load(e);
     for (asset, amount) in fill.lot.iter() {
         let token = TokenClient::new(e, &asset);
         let pool_before = token.balance(&pool_address);
-        let filler_before = token.balance(filler);
-        token.transfer(&pool_address, filler, &amount);
+        let filler_before = token.balance(&filler_state.address);
+        token.transfer(&pool_address, &filler_state.address, &amount);
         if token.balance(&pool_address) != checked_sub(e, pool_before, amount)
-            || token.balance(filler) != checked_add(e, filler_before, amount)
+            || token.balance(&filler_state.address) != checked_add(e, filler_before, amount)
         {
             panic_with_error!(e, PoolError::BalanceError);
         }
@@ -262,8 +263,8 @@ pub fn fill_interest_auction(
 
     if fill.bid_amount > 0 {
         BackstopClient::new(e, &backstop).donate(
-            &to_backstop_tier(tier),
-            filler,
+            &to_backstop_tier(auction.tier),
+            &filler_state.address,
             &pool_address,
             &fill.bid_amount,
         );
@@ -275,8 +276,17 @@ pub fn fill_interest_auction(
     } else {
         store_remaining_interest_auction(e, &auction, &fill);
     }
-    pool.store_cached_reserves(e);
-    fill
+    let bid_token = auction.auction.bid.keys().get(0).unwrap();
+    let bid = if fill.bid_amount > 0 {
+        soroban_sdk::map![e, (bid_token, fill.bid_amount)]
+    } else {
+        soroban_sdk::map![e]
+    };
+    AuctionData {
+        bid,
+        lot: fill.lot,
+        block: fill.block,
+    }
 }
 
 pub fn del_interest_auction(e: &Env) {

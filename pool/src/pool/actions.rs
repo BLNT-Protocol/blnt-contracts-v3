@@ -224,14 +224,36 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillBadDebtAuction => {
-                // Preserve the v2 request discriminant but reject the legacy
-                // single-token path. V3 uses `fill_bad_debt_auction`.
-                panic_with_error!(e, PoolError::BadRequest);
+                let percent = request_fill_percent(e, request.amount);
+                let filled_auction = auctions::fill_prepared_bad_debt_auction(
+                    e,
+                    pool,
+                    &request.address,
+                    from_state,
+                    percent,
+                );
+                actions.do_check_health();
+                PoolEvents::fill_auction(
+                    e,
+                    AuctionType::BadDebtAuction as u32,
+                    request.address.clone(),
+                    from_state.address.clone(),
+                    request.amount,
+                    filled_auction,
+                );
             }
             RequestType::FillInterestAuction => {
-                // Preserve the v2 request discriminant but reject the legacy
-                // single-token path. V3 uses `fill_interest_auction`.
-                panic_with_error!(e, PoolError::BadRequest);
+                let percent = request_fill_percent(e, request.amount);
+                let filled_auction =
+                    auctions::fill_interest_auction(e, pool, &request.address, from_state, percent);
+                PoolEvents::fill_auction(
+                    e,
+                    AuctionType::InterestAuction as u32,
+                    request.address.clone(),
+                    from_state.address.clone(),
+                    request.amount,
+                    filled_auction,
+                );
             }
             RequestType::DeleteLiquidationAuction => {
                 // Note: request object is ignored besides type
@@ -247,6 +269,13 @@ pub fn build_actions_from_request(
     }
 
     actions
+}
+
+fn request_fill_percent(e: &Env, amount: i128) -> u32 {
+    if amount <= 0 || amount > 100 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    amount as u32
 }
 
 /// Apply a "supply" request to the pool
@@ -1600,7 +1629,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_fill_bad_debt_auction_rejects_legacy_entrypoint() {
+    fn test_fill_bad_debt_auction_requires_prepared_tier_state() {
         let e = Env::default();
 
         e.mock_all_auths();
@@ -1728,7 +1757,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_fill_interest_auction_rejects_legacy_request() {
+    fn test_fill_interest_auction_requires_tier_interest_state() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();

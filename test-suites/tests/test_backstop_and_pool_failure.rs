@@ -245,14 +245,17 @@ fn test_backstop_and_pool_failure() {
     fixture.jump_with_sequence(200 * 5 + 5);
 
     fixture.backstop.distribute();
-    let fill = pool_fixture.pool.fill_bad_debt_auction(&elrond, &100);
-    assert!(fill.complete);
     pool_fixture.pool.submit(
         &elrond,
         &elrond,
         &elrond,
         &vec![
             &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
             Request {
                 request_type: RequestType::Repay as u32,
                 address: stable.address.clone(),

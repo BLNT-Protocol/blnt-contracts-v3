@@ -219,9 +219,9 @@ status.
   renewal.
 - Auction creation, lookup, and stale deletion retain the v2
   `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
-  discriminator. Bad-debt and tier-interest fills use dedicated entry points
-  for their additional settlement metadata. Auction pricing and
-  submission-based liquidation fills otherwise remain inherited.
+  discriminator. All three fill types use the inherited `submit` request
+  discriminants; tier selection and settlement metadata remain private.
+  Auction pricing and submission behavior otherwise remain inherited.
 
 All extensions share the inherited atomic rollback boundary.
 

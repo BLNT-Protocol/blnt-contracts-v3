@@ -1,10 +1,10 @@
 use crate::{
-    auctions::{self, AuctionData, BadDebtAuctionFill, InterestAuctionFill, InterestReserveState},
+    auctions::{self, AuctionData, InterestReserveState},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, FlashLoan, Positions, Request, Reserve},
     storage::{self, ReserveConfig},
-    BackstopTier, PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
+    PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Env, String, Vec,
@@ -281,17 +281,6 @@ pub trait Pool {
 
     /// Delete a stale auction after the inherited 500-ledger boundary.
     fn del_auction(e: Env, auction_type: u32, user: Address);
-
-    /// Fill part or all of the prepared single-tier bad-debt auction.
-    fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill;
-
-    /// Fill part or all of one active tier-specific interest auction.
-    fn fill_interest_auction(
-        e: Env,
-        tier: BackstopTier,
-        filler: Address,
-        percent: u32,
-    ) -> InterestAuctionFill;
 
     /// Return one reserve's pending tier-specific interest-credit state.
     fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState;
@@ -613,25 +602,6 @@ impl Pool for PoolContract {
             }
         }
         PoolEvents::delete_auction(&e, auction_type, user);
-    }
-
-    fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill {
-        storage::extend_instance(&e);
-        let fill = auctions::fill_prepared_bad_debt_auction(&e, &filler, percent);
-        PoolEvents::fill_bad_debt_auction(&e, filler, percent, fill.clone());
-        fill
-    }
-
-    fn fill_interest_auction(
-        e: Env,
-        tier: BackstopTier,
-        filler: Address,
-        percent: u32,
-    ) -> InterestAuctionFill {
-        storage::extend_instance(&e);
-        let fill = auctions::fill_interest_auction(&e, tier, &filler, percent);
-        PoolEvents::fill_interest_auction(&e, filler, percent, fill.clone());
-        fill
     }
 
     fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState {

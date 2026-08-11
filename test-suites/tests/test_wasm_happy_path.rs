@@ -138,7 +138,19 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     fixture.backstop.distribute();
     assert!(pool_fixture
         .pool
-        .try_fill_bad_debt_auction(&unhealthy_filler, &50)
+        .try_submit(
+            &unhealthy_filler,
+            &unhealthy_filler,
+            &unhealthy_filler,
+            &vec![
+                &fixture.env,
+                Request {
+                    request_type: RequestType::FillBadDebtAuction as u32,
+                    address: fixture.backstop.address.clone(),
+                    amount: 50,
+                },
+            ],
+        )
         .is_err());
     assert_eq!(
         pool_fixture.pool.get_auction(&1, &fixture.backstop.address),
@@ -146,23 +158,39 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     );
     assert_eq!(fixture.lp.balance(&unhealthy_filler), 0);
 
-    let first = pool_fixture.pool.fill_bad_debt_auction(&filler, &50);
-    let first_bid = first.bid.get(stable.clone()).unwrap();
-    assert!(!first.complete);
-    assert_eq!(first_bid, (debt + 1) / 2);
-    assert_eq!(first.base_lot_amount, base_lot_amount / 2);
-    assert_eq!(first.lot_amount, first.base_lot_amount / 2);
-    assert_eq!(
-        fixture.lp.balance(&filler),
-        filler_lp_before + first.lot_amount
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 50,
+            },
+        ],
     );
+    let filler_positions_after_first = pool_fixture.pool.get_positions(&filler);
+    let first_bid = filler_positions_after_first
+        .liabilities
+        .get(stable_index)
+        .unwrap()
+        - filler_positions_before
+            .liabilities
+            .get(stable_index)
+            .unwrap_or(0);
+    let first_base_lot = base_lot_amount / 2;
+    let first_lot = fixture.lp.balance(&filler) - filler_lp_before;
+    assert_eq!(first_bid, (debt + 1) / 2);
+    assert_eq!(first_lot, first_base_lot / 2);
     assert_eq!(
         fixture
             .backstop
             .pool_data(&pool_fixture.pool.address)
             .blnd_usdc
             .assets,
-        tier_assets_before - first.lot_amount
+        tier_assets_before - first_lot
     );
     assert_eq!(
         pool_fixture
@@ -193,19 +221,29 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
             .lot
             .get(blnd_usdc_token)
             .unwrap(),
-        base_lot_amount - first.base_lot_amount
+        base_lot_amount - first_base_lot
     );
 
     fixture
         .env
         .ledger()
         .set_sequence_number(auction.block + 300);
-    let second = pool_fixture.pool.fill_bad_debt_auction(&filler, &100);
-    assert!(second.complete);
-    assert_eq!(
-        fixture.lp.balance(&filler),
-        filler_lp_before + first.lot_amount + second.lot_amount
+    let lp_before_second = fixture.lp.balance(&filler);
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
     );
+    let second_lot = fixture.lp.balance(&filler) - lp_before_second;
+    assert!(second_lot > 0);
     assert!(pool_fixture
         .pool
         .try_get_auction(&1, &fixture.backstop.address)
@@ -235,12 +273,21 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .env
         .ledger()
         .set_sequence_number(continued_auction.block + 200);
-    let third = pool_fixture.pool.fill_bad_debt_auction(&filler, &100);
-    assert!(third.complete);
-    assert_eq!(
-        fixture.lp.balance(&filler),
-        filler_lp_before + first.lot_amount + second.lot_amount + third.lot_amount
+    let lp_before_third = fixture.lp.balance(&filler);
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
     );
+    assert!(fixture.lp.balance(&filler) > lp_before_third);
     assert!(pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)

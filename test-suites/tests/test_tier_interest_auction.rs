@@ -2,12 +2,28 @@
 #![allow(clippy::zero_prefixed_literal)]
 
 use backstop::BackstopTier;
-use pool::{AuctionType, BackstopTier as PoolBackstopTier, ReserveConfig};
-use soroban_sdk::{testutils::Ledger, vec, String};
+use pool::{AuctionType, PoolClient, Request, RequestType, ReserveConfig};
+use soroban_sdk::{testutils::Ledger, vec, Address, Env, String};
 use test_suites::{
     liquidity_pool::LPClient,
     test_fixture::{TestFixture, TokenIndex, SCALAR_7},
 };
+
+fn fill_interest(e: &Env, pool: &PoolClient, backstop: &Address, filler: &Address, percent: i128) {
+    pool.submit(
+        filler,
+        filler,
+        filler,
+        &vec![
+            e,
+            Request {
+                request_type: RequestType::FillInterestAuction as u32,
+                address: backstop.clone(),
+                amount: percent,
+            },
+        ],
+    );
+}
 
 fn exercise_tier_interest_auctions(wasm: bool) {
     let mut fixture = TestFixture::create(wasm);
@@ -184,7 +200,19 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .try_del_auction(&(AuctionType::InterestAuction as u32), &operator)
         .is_err());
     assert!(pool
-        .try_fill_interest_auction(&PoolBackstopTier::BlndXlm, &operator, &100)
+        .try_submit(
+            &operator,
+            &operator,
+            &operator,
+            &vec![
+                &e,
+                Request {
+                    request_type: RequestType::FillInterestAuction as u32,
+                    address: operator.clone(),
+                    amount: 100,
+                },
+            ],
+        )
         .is_err());
     assert!(
         fixture.backstop.deposit(
@@ -226,40 +254,47 @@ fn exercise_tier_interest_auctions(wasm: bool) {
 
     e.ledger()
         .set_sequence_number(first.block.saturating_add(100));
-    let partial = pool.fill_interest_auction(&PoolBackstopTier::BlndUsdc, &operator, &50);
-    assert!(!partial.complete);
+    let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.assets;
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 50);
     assert_eq!(
-        partial
-            .base_lot
+        fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
+        150 * SCALAR_7
+    );
+    assert_eq!(
+        fixture.backstop.pool_data(&pool_address).blnd_usdc.assets - tier_assets_before,
+        288 * SCALAR_7
+    );
+    let remaining_first = pool.get_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
+    assert_eq!(
+        remaining_first
+            .lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
         Some(300 * SCALAR_7)
     );
     assert_eq!(
-        partial
-            .lot
-            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(150 * SCALAR_7)
+        remaining_first
+            .bid
+            .get(fixture.backstop.backstop_token(&BackstopTier::BlndUsdc)),
+        Some(288 * SCALAR_7)
     );
-    assert_eq!(
-        partial
-            .returned_lot
-            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(150 * SCALAR_7)
-    );
-    assert_eq!(partial.base_bid_amount, 288 * SCALAR_7);
-    assert_eq!(partial.bid_amount, 288 * SCALAR_7);
 
     e.ledger()
         .set_sequence_number(first.block.saturating_add(200));
-    let blnd_usdc_fill = pool.fill_interest_auction(&PoolBackstopTier::BlndUsdc, &operator, &100);
-    assert!(blnd_usdc_fill.complete);
+    let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.assets;
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
-        blnd_usdc_fill
-            .lot
-            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(300 * SCALAR_7)
+        fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
+        300 * SCALAR_7
     );
-    assert_eq!(blnd_usdc_fill.bid_amount, 288 * SCALAR_7);
+    assert_eq!(
+        fixture.backstop.pool_data(&pool_address).blnd_usdc.assets - tier_assets_before,
+        288 * SCALAR_7
+    );
     assert!(pool
         .try_get_auction(
             &(AuctionType::InterestAuction as u32),
@@ -287,15 +322,17 @@ fn exercise_tier_interest_auctions(wasm: bool) {
 
     e.ledger()
         .set_sequence_number(second.block.saturating_add(300));
-    let blnd_xlm_fill = pool.fill_interest_auction(&PoolBackstopTier::BlndXlm, &operator, &100);
-    assert!(blnd_xlm_fill.complete);
+    let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_xlm.assets;
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
-        blnd_xlm_fill
-            .lot
-            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(expected_lots[1])
+        fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
+        expected_lots[1]
     );
-    assert_eq!(blnd_xlm_fill.bid_amount, realized_donations[1]);
+    assert_eq!(
+        fixture.backstop.pool_data(&pool_address).blnd_xlm.assets - tier_assets_before,
+        realized_donations[1]
+    );
 
     let third = pool.new_auction(
         &(AuctionType::InterestAuction as u32),
@@ -313,15 +350,17 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     assert_eq!(third.bid.get(usdc_token), Some(expected_bids[2]));
     e.ledger()
         .set_sequence_number(third.block.saturating_add(200));
-    let usdc_fill = pool.fill_interest_auction(&PoolBackstopTier::Usdc, &operator, &100);
-    assert!(usdc_fill.complete);
+    let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).usdc.assets;
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
-        usdc_fill
-            .lot
-            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(expected_lots[2])
+        fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
+        expected_lots[2] - realized_donations[2]
     );
-    assert_eq!(usdc_fill.bid_amount, realized_donations[2]);
+    assert_eq!(
+        fixture.backstop.pool_data(&pool_address).usdc.assets - tier_assets_before,
+        realized_donations[2]
+    );
     assert!(pool
         .try_get_auction(
             &(AuctionType::InterestAuction as u32),

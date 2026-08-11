@@ -1,6 +1,6 @@
 use soroban_sdk::{contractevent, Address, Env, Vec};
 
-use crate::{AuctionData, BadDebtAuctionFill, InterestAuctionFill, ReserveConfig};
+use crate::{AuctionData, ReserveConfig};
 
 macro_rules! single_value_event {
     (
@@ -56,26 +56,6 @@ macro_rules! unit_event {
     };
 }
 
-vec_event!(
-    FillBadDebtAuctionEvent,
-    "fill_bad_debt_auction",
-    [],
-    [
-        filler: Address,
-        percent: u32,
-        fill: BadDebtAuctionFill
-    ]
-);
-vec_event!(
-    FillInterestAuctionEvent,
-    "fill_interest_auction",
-    [],
-    [
-        filler: Address,
-        percent: u32,
-        fill: InterestAuctionFill
-    ]
-);
 single_value_event!(
     SetAdminEvent,
     "set_admin",
@@ -226,29 +206,6 @@ unit_event!(
 pub struct PoolEvents {}
 
 impl PoolEvents {
-    pub fn fill_bad_debt_auction(e: &Env, filler: Address, percent: u32, fill: BadDebtAuctionFill) {
-        FillBadDebtAuctionEvent {
-            filler,
-            percent,
-            fill,
-        }
-        .publish(e);
-    }
-
-    pub fn fill_interest_auction(
-        e: &Env,
-        filler: Address,
-        percent: u32,
-        fill: InterestAuctionFill,
-    ) {
-        FillInterestAuctionEvent {
-            filler,
-            percent,
-            fill,
-        }
-        .publish(e);
-    }
-
     /// Emitted when a new admin is set for a pool
     ///
     /// - topics - `["set_admin", admin: Address]`
