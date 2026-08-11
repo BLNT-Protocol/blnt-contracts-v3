@@ -217,7 +217,11 @@ status.
   liability without summing unlike asset units.
 - Reserve and user state use bounded persistent entries with explicit TTL
   renewal.
-- Tier-interest and bad-debt processes use dedicated direct entry points.
+- Auction creation, lookup, and stale deletion retain the v2
+  `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
+  discriminator. Bad-debt and tier-interest fills use dedicated entry points
+  for their additional settlement metadata. Auction pricing and
+  submission-based liquidation fills otherwise remain inherited.
 
 All extensions share the inherited atomic rollback boundary.
 
@@ -235,7 +239,7 @@ exhausts collateral while liabilities remain, the same transaction MUST:
 - Emit one handoff event per affected reserve.
 
 The handoff does not modify or create a bad-debt auction. New liabilities
-remain input to a later permissionless continuation.
+remain input to a later permissionless type-1 `new_auction` call.
 
 An incomplete fill never hands off. It MUST fail if it exhausts collateral or
 leaves collateral and liabilities while reducing health.
@@ -251,15 +255,17 @@ inherited.
 
 ### 5.1 Tier-auction lifecycle
 
-Each pool may have one active bad-debt auction. It may also have one active
-interest auction per backstop tier. The pool stores every auction, binding one
-identifier, selected tier, and base amounts with a 46-day temporary lifetime.
-Reads do not renew auction state.
+Each pool may have one active bad-debt auction and one active interest auction.
+The public v2-style auction identity is `(auction_type, user)`. For both
+backstop auction types, `user` MUST equal the pool's configured backstop. The
+pool privately stores the selected tier and settlement metadata with a 46-day
+temporary lifetime. Reads do not renew auction state.
 
-Bad-debt eligibility requires at least 100 USDC of accounted tier capital;
-interest-auction creation requires at least 100 USDC in the selected tier's
-pending lot. Equality qualifies. A successfully valued smaller amount is
-ineligible, while unavailable or invalid valuation fails closed.
+Bad-debt selection uses every tier with positive accounted assets and value.
+Interest-auction creation requires at least 200 USDC in the selected tier's
+pending lot; equality qualifies. A successfully valued smaller interest lot
+is ineligible, while unavailable, negative, or inconsistent valuation fails
+closed.
 
 A partial fill removes selected base amounts and applies the inherited time
 modifier only to actual transfers. An interest fill atomically donates the
@@ -277,11 +283,9 @@ or tier assets.
 4. Pool suppliers.
 
 Sections 3.1 and 3.3 govern eligibility. One auction sells one tier, selecting
-the first with at least 100 USDC of accounted capital. Smaller
-tiers are skipped without a debt-covering exception; valuation failure stops
-the search. Supplier loss begins only after all three successfully value below
-the minimum, so less than 300 USDC may be skipped. Skipped capital remains
-attributed and may requalify before supplier settlement.
+the first with positive accounted assets and value. Zero-value tiers are
+skipped; negative or inconsistent accounting or valuation stops the search.
+Supplier loss begins only after all three tiers have no usable value.
 
 The auction targets 120% of oracle-valued debt. Only the pool may authorize a
 lot, which is the smaller of available tier tokens and the target amount. A
@@ -305,18 +309,20 @@ reduces selected value in proportion to the remaining base lot; original
 debt, target, unfilled target, and valuation validity remain creation metadata.
 
 When no bad-debt auction is active, permissionless
-`continue_bad_debt_resolution` performs one bounded step. It validates every
-reserve-keyed backstop liability and fails on unknown, missing, negative, or
-inconsistent records. The next batch follows immutable reserve order and
-contains at most `min(max_positions - 1, 4)` reserves. The pool MUST use
-canonical `pool_data` to select the first qualifying tier, and each
-continuation restarts the strict tier search. A result with no selected lot
-proves that all three tiers are below the operational minimum.
+`new_auction(1, backstop, [], [], 100)` performs one bounded step. It validates
+every reserve-keyed backstop liability and fails on unknown, missing,
+negative, or inconsistent records. The next batch follows immutable reserve
+order and contains at most `min(max_positions - 1, 4)` reserves. The pool MUST
+use canonical `pool_data` to select the first qualifying tier, and each call
+restarts the strict tier search. It returns the v2-compatible `AuctionData`
+projection when a tier qualifies and fails when none qualifies.
 
-Only a successful no-tier result may default all remaining liabilities to
-suppliers. The transaction accrues each affected reserve, applies
-`V2-AUCTION-003` to at most 30 reserves, clears the liability map, and
-recomputes withdrawal eligibility atomically.
+As in v2, the separate permissionless `bad_debt(backstop)` entry point handles
+supplier default. It requires no active bad-debt auction, repeats the canonical
+liability validation, and succeeds only when canonical `pool_data` proves that
+all three tiers have no usable value. The transaction accrues each affected
+reserve, applies `V2-AUCTION-003` to at most 30 reserves, clears the liability
+map, and recomputes withdrawal eligibility atomically.
 
 ### 5.3 Take-rate allocation — **Replaced**
 
@@ -343,9 +349,9 @@ As in v2, the pool owns take-rate and interest-auction policy. It applies the
 immutable weights locally using the backstop's canonical `pool_data` values;
 the backstop exposes no separate weighting or allocation entry point.
 
-Any caller may create one tier-specific interest auction for a pool by
-supplying a unique identifier and one to `min(max_positions - 1, 4)` unique
-configured reserves. Creation atomically:
+When no interest auction is active, any caller may invoke
+`new_auction(2, backstop, [], reserve_assets, 100)` with one to
+`min(max_positions - 1, 4)` unique configured reserves. Creation atomically:
 
 1. Accrue and persist every reserve in the supplied batch.
 2. Checkpoint each asset's newly available backstop credit into its three
@@ -353,17 +359,17 @@ configured reserves. Creation atomically:
    one canonical `pool_data` snapshot.
 3. Value each tier's pending amounts with the pool's immutable reserve oracle.
 4. Starting at the pool's stored cyclic tier cursor, select the first
-   qualifying tier without an active auction whose pending lot meets the shared
-   minimum.
+   qualifying tier whose pending lot meets the 200-USDC minimum.
 5. Store the selected pending amounts in a next-ledger auction and advance
    the cursor to the next tier.
 
 Omitted reserves remain pending or uncheckpointed. Selection is cyclic among
-qualifying available tiers. Each pool may have one active auction per tier and
-three total; active identifiers must be unique within the pool. Get, fill, and
-stale-delete operations identify the tier. Ordinary backstop share operations
-remain available while an auction is active. The selected lot remains in
-persistent pending accounting so expiry cannot lose or reweight it.
+qualifying available tiers. The next tier cannot be selected until the active
+interest auction is filled or stale-deleted. Public lookup and deletion use
+`get_auction(2, backstop)` and `del_auction(2, backstop)`; fill validates the
+privately stored selected tier. Ordinary backstop share operations remain
+available while an auction is active. The selected lot remains in persistent
+pending accounting so expiry cannot lose or reweight it.
 
 The selected seven-decimal tier token is the bid. The pool derives its amount
 from canonical `pool_data`; its base value MUST equal 120% of the reserve lot,

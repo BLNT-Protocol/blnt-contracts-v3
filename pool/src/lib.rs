@@ -19,8 +19,7 @@ mod testutils;
 mod validator;
 
 pub use auctions::{
-    AuctionData, AuctionType, BackstopTier, BadDebtAuctionData, BadDebtAuctionFill,
-    BadDebtContinuation, BadDebtLotQuote, InterestAuctionData, InterestAuctionFill,
+    AuctionData, AuctionType, BackstopTier, BadDebtAuctionFill, InterestAuctionFill,
     InterestReserveState,
 };
 pub use contract::*;

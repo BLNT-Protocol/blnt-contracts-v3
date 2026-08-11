@@ -1,7 +1,7 @@
 #![cfg(test)]
-use pool::{BackstopTier, Request, RequestType};
+use pool::{Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{testutils::Address as AddressTestTrait, vec, Address, BytesN};
+use soroban_sdk::{testutils::Address as AddressTestTrait, vec, Address};
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
     create_fixture_with_data,
@@ -220,18 +220,23 @@ fn test_backstop_and_pool_failure() {
             },
         ],
     );
-    let bad_debt_auction = pool_fixture.pool.new_bad_debt_auction(
-        &BytesN::from_array(&fixture.env, &[1; 32]),
-        &vec![&fixture.env, stable.address.clone()],
+    let bad_debt_auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
     );
     assert_eq!(bad_debt_auction.bid.len(), 1);
     assert_eq!(
         bad_debt_auction.bid.get_unchecked(stable.address.clone()),
         bad_debt_1
     );
-    assert_eq!(bad_debt_auction.lot_quote.tier, BackstopTier::BlndUsdc);
+    let blnd_usdc_token = fixture
+        .backstop
+        .backstop_token(&backstop::BackstopTier::BlndUsdc);
     assert_eq!(
-        bad_debt_auction.lot_quote.lot_amount,
+        bad_debt_auction.lot.get(blnd_usdc_token).unwrap(),
         pool_backstop_data.blnd_usdc.assets
     );
 
@@ -333,15 +338,8 @@ fn test_backstop_and_pool_failure() {
     // d_rate is barely above 1
     assert_approx_eq_rel(bad_debt_2, 60_000 * stable_scalar, 0_001000);
 
-    // default the bad debt after every tier is verified below the minimum
-    let continuation = pool_fixture
-        .pool
-        .continue_bad_debt_resolution(&BytesN::from_array(&fixture.env, &[2; 32]));
-    assert!(!continuation.auction_created);
-    assert_eq!(
-        continuation.defaulted.get(stable.address.clone()),
-        Some(bad_debt_2)
-    );
+    // default the bad debt after every tier is verified exhausted
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
 
     // check b_rate loss (7 decimals)
     let post_stable_reserve = pool_fixture.pool.get_reserve(&stable.address);

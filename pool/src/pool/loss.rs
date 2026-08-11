@@ -117,5 +117,4 @@ mod tests {
             sync_backstop_liabilities(&e, &positions);
         });
     }
-
 }

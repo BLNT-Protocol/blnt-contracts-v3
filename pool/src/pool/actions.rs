@@ -205,10 +205,9 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillUserLiquidationAuction => {
-                let filled_auction = auctions::fill(
+                let filled_auction = auctions::fill_user_liquidation_auction(
                     e,
                     pool,
-                    0,
                     &request.address,
                     from_state,
                     request.amount as u64,
@@ -225,25 +224,9 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillBadDebtAuction => {
-                // Note: will fail if input address is not the backstop since there cannot be a bad debt auction for a different address in storage
-                let filled_auction = auctions::fill(
-                    e,
-                    pool,
-                    1,
-                    &request.address,
-                    from_state,
-                    request.amount as u64,
-                );
-                actions.do_check_health();
-
-                PoolEvents::fill_auction(
-                    e,
-                    1u32,
-                    request.address.clone(),
-                    from_state.address.clone(),
-                    request.amount,
-                    filled_auction,
-                );
+                // Preserve the v2 request discriminant but reject the legacy
+                // single-token path. V3 uses `fill_bad_debt_auction`.
+                panic_with_error!(e, PoolError::BadRequest);
             }
             RequestType::FillInterestAuction => {
                 // Preserve the v2 request discriminant but reject the legacy

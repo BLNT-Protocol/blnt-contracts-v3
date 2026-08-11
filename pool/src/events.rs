@@ -1,9 +1,6 @@
-use soroban_sdk::{contractevent, Address, BytesN, Env, Vec};
+use soroban_sdk::{contractevent, Address, Env, Vec};
 
-use crate::{
-    AuctionData, BadDebtAuctionData, BadDebtAuctionFill, InterestAuctionData, InterestAuctionFill,
-    ReserveConfig,
-};
+use crate::{AuctionData, BadDebtAuctionFill, InterestAuctionFill, ReserveConfig};
 
 macro_rules! single_value_event {
     (
@@ -59,19 +56,6 @@ macro_rules! unit_event {
     };
 }
 
-single_value_event!(
-    NewBadDebtAuctionEvent,
-    "new_bad_debt_auction",
-    [],
-    auction: BadDebtAuctionData
-);
-#[contractevent(
-    topics = ["delete_bad_debt_auction"],
-    data_format = "single-value"
-)]
-struct DeleteBadDebtAuctionEvent {
-    auction_id: BytesN<32>,
-}
 vec_event!(
     FillBadDebtAuctionEvent,
     "fill_bad_debt_auction",
@@ -82,19 +66,6 @@ vec_event!(
         fill: BadDebtAuctionFill
     ]
 );
-single_value_event!(
-    NewInterestAuctionEvent,
-    "new_interest_auction",
-    [],
-    auction: InterestAuctionData
-);
-#[contractevent(
-    topics = ["delete_interest_auction"],
-    data_format = "single-value"
-)]
-struct DeleteInterestAuctionEvent {
-    auction_id: BytesN<32>,
-}
 vec_event!(
     FillInterestAuctionEvent,
     "fill_interest_auction",
@@ -255,14 +226,6 @@ unit_event!(
 pub struct PoolEvents {}
 
 impl PoolEvents {
-    pub fn new_bad_debt_auction(e: &Env, auction: BadDebtAuctionData) {
-        NewBadDebtAuctionEvent { auction }.publish(e);
-    }
-
-    pub fn delete_bad_debt_auction(e: &Env, auction_id: BytesN<32>) {
-        DeleteBadDebtAuctionEvent { auction_id }.publish(e);
-    }
-
     pub fn fill_bad_debt_auction(e: &Env, filler: Address, percent: u32, fill: BadDebtAuctionFill) {
         FillBadDebtAuctionEvent {
             filler,
@@ -270,14 +233,6 @@ impl PoolEvents {
             fill,
         }
         .publish(e);
-    }
-
-    pub fn new_interest_auction(e: &Env, auction: InterestAuctionData) {
-        NewInterestAuctionEvent { auction }.publish(e);
-    }
-
-    pub fn delete_interest_auction(e: &Env, auction_id: BytesN<32>) {
-        DeleteInterestAuctionEvent { auction_id }.publish(e);
     }
 
     pub fn fill_interest_auction(

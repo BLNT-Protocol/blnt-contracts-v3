@@ -1,8 +1,5 @@
 use crate::{
-    auctions::{
-        self, AuctionData, BadDebtAuctionData, BadDebtAuctionFill, BadDebtContinuation,
-        InterestAuctionData, InterestAuctionFill, InterestReserveState,
-    },
+    auctions::{self, AuctionData, BadDebtAuctionFill, InterestAuctionFill, InterestReserveState},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, FlashLoan, Positions, Request, Reserve},
@@ -10,7 +7,7 @@ use crate::{
     BackstopTier, PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
 use soroban_sdk::{
-    contract, contractclient, contractimpl, panic_with_error, Address, BytesN, Env, String, Vec,
+    contract, contractclient, contractimpl, panic_with_error, Address, Env, String, Vec,
 };
 
 /// ### Pool
@@ -262,16 +259,14 @@ pub trait Pool {
 
     /***** Auction / Liquidation Functions *****/
 
-    /// Create a user-liquidation auction.
-    ///
-    /// Bad-debt and interest auctions use their dedicated v3 entry points.
+    /// Create a liquidation, bad-debt, or interest auction.
     ///
     /// ### Arguments
-    /// * `auction_type` - Must be 0 for a user-liquidation auction
-    /// * `user` - The Address whose positions are being liquidated
-    /// * `bid` - The set of assets to include in the auction bid, or what the filler spends when filling the auction.
-    /// * `lot` - The set of assets to include in the auction lot, or what the filler receives when filling the auction.
-    /// * `percent` - The percent of the user's positions to auction (15 => 15%)
+    /// * `auction_type` - 0 for liquidation, 1 for bad debt, or 2 for interest
+    /// * `user` - The borrower for liquidation or the configured backstop otherwise
+    /// * `bid` - Liquidation bid assets; empty for bad debt and interest
+    /// * `lot` - Liquidation lot assets, empty for bad debt, or interest reserve assets
+    /// * `percent` - Liquidation percentage; exactly 100 otherwise
     fn new_auction(
         e: Env,
         auction_type: u32,
@@ -281,35 +276,14 @@ pub trait Pool {
         percent: u32,
     ) -> AuctionData;
 
-    /// Prepare a single-tier bad-debt auction from canonical backstop liabilities.
-    fn new_bad_debt_auction(
-        e: Env,
-        auction_id: BytesN<32>,
-        bid: Vec<Address>,
-    ) -> BadDebtAuctionData;
+    /// Return an auction's v2-compatible base bid, lot, and starting ledger.
+    fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData;
 
-    /// Return the prepared single-tier bad-debt auction.
-    fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData;
+    /// Delete a stale auction after the inherited 500-ledger boundary.
+    fn del_auction(e: Env, auction_type: u32, user: Address);
 
     /// Fill part or all of the prepared single-tier bad-debt auction.
     fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill;
-
-    /// Continue the waterfall or default residual debt after verified exhaustion.
-    fn continue_bad_debt_resolution(e: Env, auction_id: BytesN<32>) -> BadDebtContinuation;
-
-    /// Release a prepared bad-debt auction after the inherited stale boundary.
-    fn delete_stale_bad_debt_auction(e: Env);
-
-    /// Checkpoint a bounded reserve-credit batch and create one tier-specific
-    /// interest auction from the next qualifying cyclic tier.
-    fn new_interest_auction(
-        e: Env,
-        auction_id: BytesN<32>,
-        lot_assets: Vec<Address>,
-    ) -> InterestAuctionData;
-
-    /// Return this pool's active interest auction for one tier.
-    fn get_interest_auction(e: Env, tier: BackstopTier) -> InterestAuctionData;
 
     /// Fill part or all of one active tier-specific interest auction.
     fn fill_interest_auction(
@@ -322,37 +296,11 @@ pub trait Pool {
     /// Return one reserve's pending tier-specific interest-credit state.
     fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState;
 
-    /// Permissionlessly release one tier's interest auction after 500 ledgers.
-    fn delete_stale_interest_auction(e: Env, tier: BackstopTier);
-
-    /// Fetch an auction from the ledger. Returns the base auction. On fill, this will be scaled based on the
-    /// number of blocks that have passed since the auction was created.
-    ///
-    /// ### Arguments
-    /// * `auction_type` - The legacy auction type
-    /// * `user` - The Address involved in the auction
-    ///
-    /// ### Panics
-    /// If the auction does not exist
-    fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData;
-
-    /// Delete a stale auction. A stale auction is one that has been running for 500 blocks
-    /// without being filled. This likely means something went wrong with the auction creation,
-    /// and it should be re-created.
-    ///
-    /// ### Arguments
-    /// * `auction_type` - The legacy auction type
-    /// * `user` - The Address involved in the auction
-    ///
-    /// ### Panics
-    /// * If the auction does not exist
-    /// * If the auction is not stale
-    fn del_auction(e: Env, auction_type: u32, user: Address);
-
     /// Check and handle bad debt for a user.
+    ///
     /// * If the user is not the backstop and they have bad debt, the backstop will take over the debt.
-    /// * If the user is the backstop, the backstop health will be checked, and if it is unhealthy, the backstop will default it's
-    /// remaining debt.
+    /// * If the user is the backstop, residual debt defaults to suppliers only
+    ///   after all three tiers are verified to have no usable value.
     ///
     /// ### Arguments
     /// * `user` - The address of the user to check for bad debt
@@ -612,26 +560,59 @@ impl Pool for PoolContract {
         percent: u32,
     ) -> AuctionData {
         storage::extend_instance(&e);
-
-        let auction_data = auctions::create_auction(&e, auction_type, &user, &bid, &lot, percent);
+        let kind = auctions::AuctionType::from_u32(&e, auction_type);
+        let auction_data = match kind {
+            auctions::AuctionType::UserLiquidation => {
+                auctions::create_user_liquidation_auction(&e, &user, &bid, &lot, percent)
+            }
+            auctions::AuctionType::BadDebtAuction => {
+                require_backstop_auction_args(&e, &user, &bid, &lot, percent, true);
+                let auction = auctions::create_bad_debt_auction(&e);
+                auctions::bad_debt_auction_data(&e, &auction)
+            }
+            auctions::AuctionType::InterestAuction => {
+                require_backstop_auction_args(&e, &user, &bid, &lot, percent, false);
+                auctions::create_interest_auction(&e, &lot).auction
+            }
+        };
 
         PoolEvents::new_auction(&e, auction_type, user, percent, auction_data.clone());
         auction_data
     }
 
-    fn new_bad_debt_auction(
-        e: Env,
-        auction_id: BytesN<32>,
-        bid: Vec<Address>,
-    ) -> BadDebtAuctionData {
-        storage::extend_instance(&e);
-        let auction = auctions::create_prepared_bad_debt_auction(&e, &auction_id, &bid);
-        PoolEvents::new_bad_debt_auction(&e, auction.clone());
-        auction
+    fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {
+        match auctions::AuctionType::from_u32(&e, auction_type) {
+            auctions::AuctionType::UserLiquidation => {
+                storage::get_auction(&e, &auction_type, &user)
+            }
+            auctions::AuctionType::BadDebtAuction => {
+                require_backstop_auction_user(&e, &user);
+                let auction = auctions::get_prepared_bad_debt_auction(&e);
+                auctions::bad_debt_auction_data(&e, &auction)
+            }
+            auctions::AuctionType::InterestAuction => {
+                require_backstop_auction_user(&e, &user);
+                auctions::get_interest_auction(&e).auction
+            }
+        }
     }
 
-    fn get_bad_debt_auction(e: Env) -> BadDebtAuctionData {
-        auctions::get_prepared_bad_debt_auction(&e)
+    fn del_auction(e: Env, auction_type: u32, user: Address) {
+        storage::extend_instance(&e);
+        match auctions::AuctionType::from_u32(&e, auction_type) {
+            auctions::AuctionType::UserLiquidation => {
+                auctions::del_user_liquidation_auction(&e, &user)
+            }
+            auctions::AuctionType::BadDebtAuction => {
+                require_backstop_auction_user(&e, &user);
+                auctions::del_prepared_bad_debt_auction(&e);
+            }
+            auctions::AuctionType::InterestAuction => {
+                require_backstop_auction_user(&e, &user);
+                auctions::del_interest_auction(&e);
+            }
+        }
+        PoolEvents::delete_auction(&e, auction_type, user);
     }
 
     fn fill_bad_debt_auction(e: Env, filler: Address, percent: u32) -> BadDebtAuctionFill {
@@ -639,36 +620,6 @@ impl Pool for PoolContract {
         let fill = auctions::fill_prepared_bad_debt_auction(&e, &filler, percent);
         PoolEvents::fill_bad_debt_auction(&e, filler, percent, fill.clone());
         fill
-    }
-
-    fn continue_bad_debt_resolution(e: Env, auction_id: BytesN<32>) -> BadDebtContinuation {
-        storage::extend_instance(&e);
-        let continuation = auctions::continue_bad_debt_resolution(&e, &auction_id);
-        if continuation.auction_created {
-            PoolEvents::new_bad_debt_auction(&e, auctions::get_prepared_bad_debt_auction(&e));
-        }
-        continuation
-    }
-
-    fn delete_stale_bad_debt_auction(e: Env) {
-        storage::extend_instance(&e);
-        let auction_id = auctions::delete_stale_prepared_bad_debt_auction(&e);
-        PoolEvents::delete_bad_debt_auction(&e, auction_id);
-    }
-
-    fn new_interest_auction(
-        e: Env,
-        auction_id: BytesN<32>,
-        lot_assets: Vec<Address>,
-    ) -> InterestAuctionData {
-        storage::extend_instance(&e);
-        let auction = auctions::create_interest_auction(&e, &auction_id, &lot_assets);
-        PoolEvents::new_interest_auction(&e, auction.clone());
-        auction
-    }
-
-    fn get_interest_auction(e: Env, tier: BackstopTier) -> InterestAuctionData {
-        auctions::get_interest_auction(&e, tier)
     }
 
     fn fill_interest_auction(
@@ -687,33 +638,29 @@ impl Pool for PoolContract {
         auctions::interest_reserve_state(&e, &asset)
     }
 
-    fn delete_stale_interest_auction(e: Env, tier: BackstopTier) {
-        storage::extend_instance(&e);
-        let auction_id = auctions::delete_stale_interest_auction(&e, tier);
-        PoolEvents::delete_interest_auction(&e, auction_id);
-    }
-
-    fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {
-        if auction_type == auctions::AuctionType::InterestAuction as u32 {
-            panic_with_error!(&e, PoolError::BadRequest);
-        }
-        storage::get_auction(&e, &auction_type, &user)
-    }
-
-    fn del_auction(e: Env, auction_type: u32, user: Address) {
-        storage::extend_instance(&e);
-        if auction_type == auctions::AuctionType::InterestAuction as u32 {
-            panic_with_error!(&e, PoolError::BadRequest);
-        }
-
-        auctions::delete_stale_auction(&e, auction_type, &user);
-
-        PoolEvents::delete_auction(&e, auction_type, user);
-    }
-
     fn bad_debt(e: Env, user: Address) {
         storage::extend_instance(&e);
 
         pool::bad_debt(&e, &user);
+    }
+}
+
+fn require_backstop_auction_user(e: &Env, user: &Address) {
+    if user != &storage::get_backstop(e) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+}
+
+fn require_backstop_auction_args(
+    e: &Env,
+    user: &Address,
+    bid: &Vec<Address>,
+    lot: &Vec<Address>,
+    percent: u32,
+    require_empty_lot: bool,
+) {
+    require_backstop_auction_user(e, user);
+    if percent != 100 || !bid.is_empty() || (require_empty_lot && !lot.is_empty()) {
+        panic_with_error!(e, PoolError::BadRequest);
     }
 }

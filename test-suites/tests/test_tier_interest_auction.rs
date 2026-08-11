@@ -2,8 +2,8 @@
 #![allow(clippy::zero_prefixed_literal)]
 
 use backstop::BackstopTier;
-use pool::{BackstopTier as PoolBackstopTier, ReserveConfig};
-use soroban_sdk::{testutils::Ledger, vec, BytesN, String};
+use pool::{AuctionType, BackstopTier as PoolBackstopTier, ReserveConfig};
+use soroban_sdk::{testutils::Ledger, vec, String};
 use test_suites::{
     liquidity_pool::LPClient,
     test_fixture::{TestFixture, TokenIndex, SCALAR_7},
@@ -104,26 +104,88 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     );
     pool.set_status(&0);
 
-    let credit = 450 * SCALAR_7;
+    let credit = 1_800 * SCALAR_7;
     fixture.tokens[TokenIndex::USDC].mint(&pool_address, &credit);
     assert_eq!(pool.gulp(&fixture.tokens[TokenIndex::USDC].address), credit);
     fixture
         .oracle
         .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
 
-    let expected = [
-        (PoolBackstopTier::BlndUsdc, 150 * SCALAR_7, 144 * SCALAR_7),
-        (PoolBackstopTier::BlndXlm, 200 * SCALAR_7, 192 * SCALAR_7),
-        (PoolBackstopTier::Usdc, 100 * SCALAR_7, 120 * SCALAR_7),
-    ];
+    let expected_lots = [600 * SCALAR_7, 800 * SCALAR_7, 400 * SCALAR_7];
+    let expected_bids = [576 * SCALAR_7, 768 * SCALAR_7, 480 * SCALAR_7];
     // The BLND:XLM auction fills 100 ledgers into the declining-bid half of
     // the v2 curve, so realized donations intentionally diverge from the
     // BLND:XLM=4, BLND:USDC=3, USDC=2 credit-allocation weights.
-    let realized_donations = [144 * SCALAR_7, 96 * SCALAR_7, 120 * SCALAR_7];
+    let realized_donations = [576 * SCALAR_7, 384 * SCALAR_7, 480 * SCALAR_7];
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
-    let first_id = BytesN::from_array(&e, &[1; 32]);
-    let first = pool.new_interest_auction(&first_id, &lot_assets);
+    let empty = vec![&e];
+    assert!(pool
+        .try_new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &operator,
+            &empty,
+            &lot_assets,
+            &100,
+        )
+        .is_err());
+    assert!(pool
+        .try_new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+            &lot_assets,
+            &lot_assets,
+            &100,
+        )
+        .is_err());
+    assert!(pool
+        .try_new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+            &empty,
+            &lot_assets,
+            &99,
+        )
+        .is_err());
+    assert!(pool
+        .try_new_auction(
+            &(AuctionType::BadDebtAuction as u32),
+            &fixture.backstop.address,
+            &empty,
+            &lot_assets,
+            &100,
+        )
+        .is_err());
+    assert!(pool
+        .try_new_auction(&3, &fixture.backstop.address, &empty, &lot_assets, &100)
+        .is_err());
+    let first = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &lot_assets,
+        &100,
+    );
+    assert!(
+        pool.try_new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+            &empty,
+            &lot_assets,
+            &100,
+        )
+        .is_err(),
+        "one active interest auction must cap pool concurrency at one"
+    );
+    assert!(pool
+        .try_get_auction(&(AuctionType::InterestAuction as u32), &operator)
+        .is_err());
+    assert!(pool
+        .try_del_auction(&(AuctionType::InterestAuction as u32), &operator)
+        .is_err());
+    assert!(pool
+        .try_fill_interest_auction(&PoolBackstopTier::BlndXlm, &operator, &100)
+        .is_err());
     assert!(
         fixture.backstop.deposit(
             &backstop::BackstopTier::BlndUsdc,
@@ -138,21 +200,6 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &pool_address,
         &SCALAR_7,
     );
-    assert!(
-        pool.try_new_interest_auction(&first_id, &lot_assets)
-            .is_err(),
-        "active auction identifiers must remain unique within one pool"
-    );
-    let auctions = [
-        first,
-        pool.new_interest_auction(&BytesN::from_array(&e, &[2; 32]), &lot_assets),
-        pool.new_interest_auction(&BytesN::from_array(&e, &[3; 32]), &lot_assets),
-    ];
-    assert!(
-        pool.try_new_interest_auction(&BytesN::from_array(&e, &[4; 32]), &lot_assets)
-            .is_err(),
-        "one active auction per tier must cap pool concurrency at three"
-    );
     let starting_data = fixture.backstop.pool_data(&pool_address);
     let starting_states = [
         starting_data.blnd_usdc,
@@ -160,99 +207,130 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         starting_data.usdc,
     ];
 
-    for (index, (tier, lot, bid)) in expected.iter().enumerate() {
-        let auction = &auctions[index];
-        assert_eq!(auction.tier, *tier);
-        assert_eq!(
-            auction
-                .auction
-                .lot
-                .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-            Some(*lot)
-        );
-        assert_eq!(auction.auction.bid.values().get(0), Some(*bid));
-        assert_eq!(pool.get_interest_auction(tier), *auction);
-    }
+    let blnd_usdc_token = fixture.backstop.backstop_token(&BackstopTier::BlndUsdc);
+    let usdc_token = fixture.backstop.backstop_token(&BackstopTier::Usdc);
+    assert_eq!(
+        first
+            .lot
+            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
+        Some(expected_lots[0])
+    );
+    assert_eq!(first.bid.get(blnd_usdc_token), Some(expected_bids[0]));
+    assert_eq!(
+        pool.get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address
+        ),
+        first
+    );
 
     e.ledger()
-        .set_sequence_number(auctions[0].auction.block.saturating_add(100));
+        .set_sequence_number(first.block.saturating_add(100));
     let partial = pool.fill_interest_auction(&PoolBackstopTier::BlndUsdc, &operator, &50);
     assert!(!partial.complete);
     assert_eq!(
         partial
             .base_lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(75 * SCALAR_7)
+        Some(300 * SCALAR_7)
     );
     assert_eq!(
         partial
             .lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(37_5000000)
+        Some(150 * SCALAR_7)
     );
     assert_eq!(
         partial
             .returned_lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(37_5000000)
+        Some(150 * SCALAR_7)
     );
-    assert_eq!(partial.base_bid_amount, 72 * SCALAR_7);
-    assert_eq!(partial.bid_amount, 72 * SCALAR_7);
+    assert_eq!(partial.base_bid_amount, 288 * SCALAR_7);
+    assert_eq!(partial.bid_amount, 288 * SCALAR_7);
 
     e.ledger()
-        .set_sequence_number(auctions[0].auction.block.saturating_add(200));
+        .set_sequence_number(first.block.saturating_add(200));
     let blnd_usdc_fill = pool.fill_interest_auction(&PoolBackstopTier::BlndUsdc, &operator, &100);
     assert!(blnd_usdc_fill.complete);
     assert_eq!(
         blnd_usdc_fill
             .lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(75 * SCALAR_7)
+        Some(300 * SCALAR_7)
     );
-    assert_eq!(blnd_usdc_fill.bid_amount, 72 * SCALAR_7);
+    assert_eq!(blnd_usdc_fill.bid_amount, 288 * SCALAR_7);
     assert!(pool
-        .try_get_interest_auction(&PoolBackstopTier::BlndUsdc)
+        .try_get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address
+        )
         .is_err());
-    assert_eq!(
-        pool.get_interest_auction(&PoolBackstopTier::BlndXlm),
-        auctions[1]
-    );
-    assert_eq!(
-        pool.get_interest_auction(&PoolBackstopTier::Usdc),
-        auctions[2]
-    );
 
-    let usdc_fill = pool.fill_interest_auction(&PoolBackstopTier::Usdc, &operator, &100);
-    assert!(usdc_fill.complete);
+    let second = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &lot_assets,
+        &100,
+    );
     assert_eq!(
-        usdc_fill
+        second
             .lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(expected[2].1)
+        Some(expected_lots[1])
     );
-    assert_eq!(usdc_fill.bid_amount, realized_donations[2]);
+    assert_eq!(
+        second.bid.get(blnd_xlm_token.clone()),
+        Some(expected_bids[1])
+    );
 
     e.ledger()
-        .set_sequence_number(auctions[1].auction.block.saturating_add(300));
+        .set_sequence_number(second.block.saturating_add(300));
     let blnd_xlm_fill = pool.fill_interest_auction(&PoolBackstopTier::BlndXlm, &operator, &100);
     assert!(blnd_xlm_fill.complete);
     assert_eq!(
         blnd_xlm_fill
             .lot
             .get(fixture.tokens[TokenIndex::USDC].address.clone()),
-        Some(expected[1].1)
+        Some(expected_lots[1])
     );
     assert_eq!(blnd_xlm_fill.bid_amount, realized_donations[1]);
-    for tier in [
-        PoolBackstopTier::BlndUsdc,
-        PoolBackstopTier::BlndXlm,
-        PoolBackstopTier::Usdc,
-    ] {
-        assert!(pool.try_get_interest_auction(&tier).is_err());
-    }
+
+    let third = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &lot_assets,
+        &100,
+    );
+    assert_eq!(
+        third
+            .lot
+            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
+        Some(expected_lots[2])
+    );
+    assert_eq!(third.bid.get(usdc_token), Some(expected_bids[2]));
+    e.ledger()
+        .set_sequence_number(third.block.saturating_add(200));
+    let usdc_fill = pool.fill_interest_auction(&PoolBackstopTier::Usdc, &operator, &100);
+    assert!(usdc_fill.complete);
+    assert_eq!(
+        usdc_fill
+            .lot
+            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
+        Some(expected_lots[2])
+    );
+    assert_eq!(usdc_fill.bid_amount, realized_donations[2]);
+    assert!(pool
+        .try_get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address
+        )
+        .is_err());
 
     let pending = pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
-    assert_eq!(pending.blnd_usdc, 37_5000000);
+    assert_eq!(pending.blnd_usdc, 150 * SCALAR_7);
     assert_eq!(pending.blnd_xlm, 0);
     assert_eq!(pending.usdc, 0);
     assert_eq!(pending.carry, 0);
@@ -260,7 +338,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         pool.get_reserve(&fixture.tokens[TokenIndex::USDC].address)
             .data
             .backstop_credit,
-        37_5000000
+        150 * SCALAR_7
     );
 
     for (index, tier) in [
@@ -293,16 +371,23 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         pool.gulp(&fixture.tokens[TokenIndex::USDC].address),
         additional_credit
     );
-    let stale_id = BytesN::from_array(&e, &[9; 32]);
-    let stale = pool.new_interest_auction(
-        &stale_id,
-        &vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()],
+    let stale_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
+    let stale = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &stale_assets,
+        &100,
     );
-    assert_eq!(stale.tier, PoolBackstopTier::BlndUsdc);
     let pending_before_stale =
         pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
-    assert_eq!(stale.lot_value, pending_before_stale.blnd_usdc);
-    assert!(stale.lot_value >= 100 * SCALAR_7);
+    assert_eq!(
+        stale
+            .lot
+            .get(fixture.tokens[TokenIndex::USDC].address.clone()),
+        Some(pending_before_stale.blnd_usdc)
+    );
+    assert!(pending_before_stale.blnd_usdc >= 200 * SCALAR_7);
 
     // Like v2, the pool owns the auction lifecycle, so an active auction does
     // not lock ordinary backstop share operations.
@@ -328,9 +413,17 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     );
 
     e.ledger()
-        .set_sequence_number(stale.auction.block.saturating_add(500));
-    pool.delete_stale_interest_auction(&stale.tier);
-    assert!(pool.try_get_interest_auction(&stale.tier).is_err());
+        .set_sequence_number(stale.block.saturating_add(500));
+    pool.del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
+    assert!(pool
+        .try_get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address
+        )
+        .is_err());
     let pending_after_stale =
         pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(pending_after_stale, pending_before_stale);
@@ -339,13 +432,13 @@ fn exercise_tier_interest_auctions(wasm: bool) {
             + pending_after_stale.blnd_xlm
             + pending_after_stale.usdc
             + pending_after_stale.carry,
-        597_5000000
+        710 * SCALAR_7
     );
     assert_eq!(
         pool.get_reserve(&fixture.tokens[TokenIndex::USDC].address)
             .data
             .backstop_credit,
-        597_5000000
+        710 * SCALAR_7
     );
 
     // Exercise the maximum four-reserve batch against both native and
@@ -363,11 +456,20 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         assert_eq!(pool.gulp(&fixture.tokens[token_index].address), amount);
         batch_assets.push_back(fixture.tokens[token_index].address.clone());
     }
-    let batch = pool.new_interest_auction(&BytesN::from_array(&e, &[10; 32]), &batch_assets);
-    assert_eq!(batch.auction.lot.len(), 4);
+    let batch = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &batch_assets,
+        &100,
+    );
+    assert_eq!(batch.lot.len(), 4);
     e.ledger()
-        .set_sequence_number(batch.auction.block.saturating_add(500));
-    pool.delete_stale_interest_auction(&batch.tier);
+        .set_sequence_number(batch.block.saturating_add(500));
+    pool.del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
 }
 
 #[test]

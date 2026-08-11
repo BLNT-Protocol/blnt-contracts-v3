@@ -19,11 +19,11 @@ pub enum AuctionType {
 }
 
 impl AuctionType {
-    pub fn from_u32(e: &Env, value: u32) -> Self {
+    pub(crate) fn from_u32(e: &Env, value: u32) -> Self {
         match value {
-            0 => AuctionType::UserLiquidation,
-            1 => AuctionType::BadDebtAuction,
-            2 => AuctionType::InterestAuction,
+            0 => Self::UserLiquidation,
+            1 => Self::BadDebtAuction,
+            2 => Self::InterestAuction,
             _ => panic_with_error!(e, PoolError::BadRequest),
         }
     }
@@ -53,12 +53,11 @@ pub struct AuctionData {
     pub block: u32,
 }
 
-/// Create a new auction. Stores the resulting auction to the ledger to begin on the next block.
+/// Create a user-liquidation auction that begins on the next ledger.
 ///
 /// Returns the AuctionData object created
 ///
 /// ### Arguments
-/// * `auction_type` - The type of auction being created
 /// * `user` - The user involved in the auction
 /// * `bid` - The assets being bid on
 /// * `lot` - The assets being auctioned off
@@ -66,11 +65,10 @@ pub struct AuctionData {
 ///
 /// ### Panics
 /// * If the max positions are exceeded
-/// * If the user and percent are invalid for the auction type
+/// * If the user or percentage is invalid
 /// * If the auction is unable to be created
-pub fn create_auction(
+pub fn create_user_liquidation_auction(
     e: &Env,
-    auction_type: u32,
     user: &Address,
     bid: &Vec<Address>,
     lot: &Vec<Address>,
@@ -78,21 +76,19 @@ pub fn create_auction(
 ) -> AuctionData {
     require_unique_addresses(e, bid);
     require_unique_addresses(e, lot);
-    // panics if auction_type parameter is not valid
-    let auction_type_enum = AuctionType::from_u32(e, auction_type);
-    let auction_data = match auction_type_enum {
-        AuctionType::UserLiquidation => create_user_liq_auction_data(e, user, bid, lot, percent),
-        // V3 bad debt requires the pool-owned single-tier lifecycle.
-        AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
-        // V3 interest auctions use a dedicated pool-owned tier lifecycle.
-        AuctionType::InterestAuction => panic_with_error!(e, PoolError::BadRequest),
-    };
-    storage::set_auction(e, &auction_type, user, &auction_data);
+    let auction_data = create_user_liq_auction_data(e, user, bid, lot, percent);
+    storage::set_auction(
+        e,
+        &(AuctionType::UserLiquidation as u32),
+        user,
+        &auction_data,
+    );
     auction_data
 }
 
-/// Delete an auction if it is stale
-pub fn delete_stale_auction(e: &Env, auction_type: u32, user: &Address) {
+/// Delete a user-liquidation auction if it is stale.
+pub fn del_user_liquidation_auction(e: &Env, user: &Address) {
+    let auction_type = AuctionType::UserLiquidation as u32;
     if !storage::has_auction(e, &auction_type, user) {
         panic_with_error!(e, PoolError::BadRequest);
     }
@@ -123,11 +119,10 @@ pub fn delete_liquidation(e: &Env, user: &Address) {
     storage::del_auction(e, &(AuctionType::UserLiquidation as u32), user);
 }
 
-/// Fills the auction from the invoker.
+/// Fill a user-liquidation auction from the invoker.
 ///
 /// ### Arguments
 /// * `pool` - The pool
-/// * `auction_type` - The type of auction to fill
 /// * `user` - The user involved in the auction
 /// * `filler_state` - The Address filling the auction
 /// * `percent_filled` - The percentage being filled as a number (i.e. 15 => 15%)
@@ -135,10 +130,9 @@ pub fn delete_liquidation(e: &Env, user: &Address) {
 /// ### Panics
 /// If the auction does not exist, or if the pool is unable to fulfill either side
 /// of the auction quote
-pub fn fill(
+pub fn fill_user_liquidation_auction(
     e: &Env,
     pool: &mut Pool,
-    auction_type: u32,
     user: &Address,
     filler_state: &mut User,
     percent_filled: u64,
@@ -146,17 +140,11 @@ pub fn fill(
     if user.clone() == filler_state.address {
         panic_with_error!(e, PoolError::InvalidLiquidation);
     }
+    let auction_type = AuctionType::UserLiquidation as u32;
     let auction_data = storage::get_auction(e, &auction_type, user);
     let (to_fill_auction, remaining_auction) = scale_auction(e, &auction_data, percent_filled);
     let is_full_fill = remaining_auction.is_none();
-    match AuctionType::from_u32(e, auction_type) {
-        AuctionType::UserLiquidation => {
-            fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill)
-        }
-        // Legacy v2 bad-debt auctions are not a valid v3 settlement path.
-        AuctionType::BadDebtAuction => panic_with_error!(e, PoolError::BadRequest),
-        AuctionType::InterestAuction => panic_with_error!(e, PoolError::BadRequest),
-    };
+    fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill);
 
     if let Some(auction_to_store) = remaining_auction {
         storage::set_auction(e, &auction_type, user, &auction_to_store);
@@ -290,262 +278,6 @@ mod tests {
     };
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_create_bad_debt_auction_rejects_legacy_entrypoint() {
-        let e = Env::default();
-        e.mock_all_auths_allowing_non_root_auth();
-        e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
-
-        e.ledger().set(LedgerInfo {
-            timestamp: 12345,
-            protocol_version: 27,
-            sequence_number: 50,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 10,
-            min_persistent_entry_ttl: 10,
-            max_entry_ttl: 3110400,
-        });
-
-        let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-        let pool_address = create_pool(&e);
-
-        let (blnd, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &bombadil);
-        let (usdc, usdc_client) = testutils::create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) =
-            testutils::create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
-        // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        usdc_client.mint(&samwise, &12_501_0000000);
-        usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        lp_token_client.join_pool(
-            &50_000_0000000,
-            &vec![&e, 500_001_0000000, 12_501_0000000],
-            &samwise,
-        );
-        backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
-            &samwise,
-            &pool_address,
-            &50_000_0000000,
-        );
-
-        let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
-
-        let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
-        reserve_data_0.d_rate = 1_100_000_000_000;
-        reserve_data_0.last_time = 12345;
-        reserve_config_0.index = 0;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_0,
-            &reserve_config_0,
-            &reserve_data_0,
-        );
-
-        let (underlying_1, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_1, mut reserve_data_1) = testutils::default_reserve_meta();
-        reserve_data_1.d_rate = 1_200_000_000_000;
-        reserve_data_1.last_time = 12345;
-        reserve_config_1.index = 1;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_1,
-            &reserve_config_1,
-            &reserve_data_1,
-        );
-
-        let (underlying_2, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_2, mut reserve_data_2) = testutils::default_reserve_meta();
-        reserve_data_2.b_rate = 1_100_000_000_000;
-        reserve_data_2.last_time = 12345;
-        reserve_config_2.index = 1;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_2,
-            &reserve_config_2,
-            &reserve_data_2,
-        );
-        oracle_client.set_data(
-            &bombadil,
-            &Asset::Other(Symbol::new(&e, "USD1")),
-            &vec![
-                &e,
-                Asset::Stellar(underlying_0.clone()),
-                Asset::Stellar(underlying_1.clone()),
-                Asset::Stellar(underlying_2.clone()),
-                Asset::Stellar(usdc),
-                Asset::Stellar(blnd),
-            ],
-            &7,
-            &300,
-        );
-        oracle_client.set_price_stable(&vec![
-            &e,
-            2_0000000,
-            4_0000000,
-            100_0000000,
-            1_0000000,
-            0_1000000,
-        ]);
-
-        let positions: Positions = Positions {
-            collateral: map![&e],
-            liabilities: map![
-                &e,
-                (reserve_config_0.index, 10_0000000),
-                (reserve_config_1.index, 2_5000000)
-            ],
-            supply: map![&e],
-        };
-
-        let pool_config = PoolConfig {
-            oracle: oracle_id,
-            min_collateral: 1_0000000,
-            bstop_rate: 0_1000000,
-            status: 0,
-            max_positions: 4,
-        };
-        e.as_contract(&pool_address, || {
-            storage::set_pool_config(&e, &pool_config);
-            storage::set_user_positions(&e, &backstop_address, &positions);
-
-            create_auction(
-                &e,
-                1,
-                &backstop_address,
-                &vec![&e, underlying_0, underlying_1],
-                &vec![&e, lp_token],
-                100,
-            );
-            assert!(storage::has_auction(&e, &1, &backstop_address));
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_create_interest_auction_rejects_legacy_entrypoint() {
-        let e = Env::default();
-        e.mock_all_auths();
-        e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
-
-        e.ledger().set(LedgerInfo {
-            timestamp: 12345,
-            protocol_version: 27,
-            sequence_number: 50,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 10,
-            min_persistent_entry_ttl: 10,
-            max_entry_ttl: 3110400,
-        });
-
-        let bombadil = Address::generate(&e);
-
-        let pool_address = create_pool(&e);
-        let (usdc_id, _) = testutils::create_token_contract(&e, &bombadil);
-        let (blnd_id, _) = testutils::create_blnd_token(&e, &pool_address, &bombadil);
-
-        let (backstop_token_id, _) = create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
-        let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
-            &bombadil,
-            &pool_address,
-            &(50 * SCALAR_7),
-        );
-        let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
-
-        let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
-        reserve_data_0.last_time = 12345;
-        reserve_data_0.backstop_credit = 100_0000000;
-        reserve_data_0.b_supply = 1000_0000000;
-        reserve_data_0.d_supply = 750_0000000;
-        reserve_config_0.index = 0;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_0,
-            &reserve_config_0,
-            &reserve_data_0,
-        );
-
-        let (underlying_1, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_1, mut reserve_data_1) = testutils::default_reserve_meta();
-        reserve_data_1.last_time = 12345;
-        reserve_data_1.backstop_credit = 25_0000000;
-        reserve_data_1.b_supply = 250_0000000;
-        reserve_data_1.d_supply = 187_5000000;
-        reserve_config_1.index = 1;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_1,
-            &reserve_config_1,
-            &reserve_data_1,
-        );
-
-        let (underlying_2, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_2, mut reserve_data_2) = testutils::default_reserve_meta();
-        reserve_data_2.b_rate = 1_100_000_000_000;
-        reserve_data_2.last_time = 12345;
-        reserve_config_2.index = 1;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_2,
-            &reserve_config_2,
-            &reserve_data_2,
-        );
-
-        oracle_client.set_data(
-            &bombadil,
-            &Asset::Other(Symbol::new(&e, "USD")),
-            &vec![
-                &e,
-                Asset::Stellar(underlying_0.clone()),
-                Asset::Stellar(underlying_1.clone()),
-                Asset::Stellar(underlying_2),
-                Asset::Stellar(usdc_id),
-            ],
-            &7,
-            &300,
-        );
-        oracle_client.set_price_stable(&vec![&e, 2_0000000, 4_0000000, 100_0000000, 1_0000000]);
-
-        let pool_config = PoolConfig {
-            oracle: oracle_id,
-            min_collateral: 1_0000000,
-            bstop_rate: 0_1000000,
-            status: 0,
-            max_positions: 4,
-        };
-        e.as_contract(&pool_address, || {
-            storage::set_pool_config(&e, &pool_config);
-
-            create_auction(
-                &e,
-                2,
-                &backstop_address,
-                &vec![&e, backstop_token_id],
-                &vec![&e, underlying_0, underlying_1],
-                100,
-            );
-            assert!(storage::has_auction(&e, &2, &backstop_address));
-        });
-    }
-
-    #[test]
     fn test_create_liquidation() {
         let e = Env::default();
 
@@ -649,9 +381,8 @@ mod tests {
             storage::set_pool_config(&e, &pool_config);
 
             e.cost_estimate().budget().reset_unlimited();
-            create_auction(
+            create_user_liquidation_auction(
                 &e,
-                0,
                 &samwise,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -762,9 +493,8 @@ mod tests {
             storage::set_user_positions(&e, &pool_address, &positions);
             storage::set_pool_config(&e, &pool_config);
 
-            create_auction(
+            create_user_liquidation_auction(
                 &e,
-                0,
                 &pool_address,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -875,9 +605,8 @@ mod tests {
             storage::set_user_positions(&e, &backstop, &positions);
             storage::set_pool_config(&e, &pool_config);
 
-            create_auction(
+            create_user_liquidation_auction(
                 &e,
-                0,
                 &backstop,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -888,91 +617,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_create_auction_invalid_type() {
-        let e = Env::default();
-        e.mock_all_auths();
-        e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
-
-        e.ledger().set(LedgerInfo {
-            timestamp: 12345,
-            protocol_version: 27,
-            sequence_number: 50,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 10,
-            min_persistent_entry_ttl: 10,
-            max_entry_ttl: 3110400,
-        });
-
-        let bombadil = Address::generate(&e);
-
-        let pool_address = create_pool(&e);
-        let (usdc_id, _) = testutils::create_token_contract(&e, &bombadil);
-        let (blnd_id, _) = testutils::create_blnd_token(&e, &pool_address, &bombadil);
-
-        let (backstop_token_id, _) = create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
-        let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
-            &bombadil,
-            &pool_address,
-            &(50 * SCALAR_7),
-        );
-        let (oracle_id, oracle_client) = testutils::create_mock_oracle(&e);
-
-        let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
-        let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
-        reserve_data_0.last_time = 12345;
-        reserve_data_0.backstop_credit = 200_0000000;
-        reserve_data_0.b_supply = 1000_0000000;
-        reserve_data_0.d_supply = 750_0000000;
-        reserve_config_0.index = 0;
-        testutils::create_reserve(
-            &e,
-            &pool_address,
-            &underlying_0,
-            &reserve_config_0,
-            &reserve_data_0,
-        );
-
-        oracle_client.set_data(
-            &bombadil,
-            &Asset::Other(Symbol::new(&e, "USD")),
-            &vec![
-                &e,
-                Asset::Stellar(underlying_0.clone()),
-                Asset::Stellar(usdc_id),
-            ],
-            &7,
-            &300,
-        );
-        oracle_client.set_price_stable(&vec![&e, 2_0000000, 1_0000000]);
-
-        let pool_config = PoolConfig {
-            oracle: oracle_id,
-            min_collateral: 1_0000000,
-            bstop_rate: 0_1000000,
-            status: 0,
-            max_positions: 4,
-        };
-        e.as_contract(&pool_address, || {
-            storage::set_pool_config(&e, &pool_config);
-
-            create_auction(
-                &e,
-                3,
-                &backstop_address,
-                &vec![&e, backstop_token_id],
-                &vec![&e, underlying_0],
-                100,
-            );
-        });
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_create_auction_duplicate_bid() {
+    fn test_create_user_liquidation_auction_duplicate_bid() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
@@ -1099,9 +744,8 @@ mod tests {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &positions);
 
-            create_auction(
+            create_user_liquidation_auction(
                 &e,
-                1,
                 &backstop_address,
                 &vec![&e, underlying_0.clone(), underlying_1, underlying_0],
                 &vec![&e, lp_token],
@@ -1112,7 +756,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_create_auction_duplicate_lot() {
+    fn test_create_user_liquidation_auction_duplicate_lot() {
         let e = Env::default();
         e.mock_all_auths();
         e.cost_estimate().budget().reset_unlimited(); // setup exhausts budget
@@ -1213,9 +857,8 @@ mod tests {
         e.as_contract(&pool_address, || {
             storage::set_pool_config(&e, &pool_config);
 
-            create_auction(
+            create_user_liquidation_auction(
                 &e,
-                2,
                 &backstop_address,
                 &vec![&e, backstop_token_id],
                 &vec![&e, underlying_0.clone(), underlying_1, underlying_0],
@@ -1371,7 +1014,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 100);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 100);
             let has_auction = storage::has_auction(&e, &0, &samwise);
             assert_eq!(has_auction, false);
         });
@@ -1480,7 +1123,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 25);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 25);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -1602,7 +1245,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 25);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 25);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 75_000_0000)],
@@ -1632,7 +1275,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 67);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 67);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 24_7500000)],
@@ -1661,7 +1304,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 100);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 100);
             let new_auction = storage::has_auction(&e, &0, &samwise);
             assert_eq!(new_auction, false);
             let samwise_positions = storage::get_user_positions(&e, &samwise);
@@ -1792,7 +1435,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 101);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 101);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -1915,7 +1558,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 0);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 0);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -2036,12 +1679,12 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut samwise_state = User::load(&e, &samwise);
-            fill(&e, &mut pool, 0, &samwise, &mut samwise_state, 100);
+            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut samwise_state, 100);
         });
     }
 
     #[test]
-    fn test_delete_stale_auction() {
+    fn test_del_user_liquidation_auction() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -2057,7 +1700,7 @@ mod tests {
         });
 
         let pool_address = create_pool(&e);
-        let auction_type: u32 = 2;
+        let auction_type = AuctionType::UserLiquidation as u32;
         let user = Address::generate(&e);
         let underlying_0 = Address::generate(&e);
         let underlying_1 = Address::generate(&e);
@@ -2072,7 +1715,7 @@ mod tests {
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, true);
 
-            delete_stale_auction(&e, auction_type, &user);
+            del_user_liquidation_auction(&e, &user);
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, false);
         });
@@ -2509,7 +2152,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_delete_stale_auction_not_stale() {
+    fn test_del_user_liquidation_auction_not_stale() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -2529,7 +2172,7 @@ mod tests {
         let underlying_0 = Address::generate(&e);
         let underlying_1 = Address::generate(&e);
 
-        let auction_type: u32 = 2;
+        let auction_type = AuctionType::UserLiquidation as u32;
         let auction_data = AuctionData {
             bid: map![&e, (underlying_0.clone(), 100_0000000)],
             lot: map![&e, (underlying_1.clone(), 100_0000000)],
@@ -2541,13 +2184,13 @@ mod tests {
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, true);
 
-            delete_stale_auction(&e, auction_type, &user);
+            del_user_liquidation_auction(&e, &user);
         });
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_delete_stale_auction_does_not_exist() {
+    fn test_del_user_liquidation_auction_does_not_exist() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -2563,23 +2206,10 @@ mod tests {
         });
 
         let pool_address = create_pool(&e);
-        let auction_type: u32 = 2;
         let user = Address::generate(&e);
-        let underlying_0 = Address::generate(&e);
-        let underlying_1 = Address::generate(&e);
-
-        let auction_data = AuctionData {
-            bid: map![&e, (underlying_0.clone(), 100_0000000)],
-            lot: map![&e, (underlying_1.clone(), 100_0000000)],
-            block: 1001,
-        };
 
         e.as_contract(&pool_address, || {
-            storage::set_auction(&e, &auction_type, &user, &auction_data);
-            let has_auction = storage::has_auction(&e, &auction_type, &user);
-            assert_eq!(has_auction, true);
-
-            delete_stale_auction(&e, 0, &user);
+            del_user_liquidation_auction(&e, &user);
         });
     }
 

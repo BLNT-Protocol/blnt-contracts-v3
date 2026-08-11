@@ -1,18 +1,17 @@
 #![cfg(test)]
 
 use backstop::{BackstopDataKey, BackstopTier as BackstopContractTier, PoolBalance};
-use pool::{BackstopTier, PoolDataKey, Positions, Request, RequestType, ReserveData};
+use pool::{PoolDataKey, Positions, Request, RequestType, ReserveData};
 use sep_40_oracle::testutils::Asset;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     contracttype, map,
     testutils::{Address as _, Ledger},
-    vec, Address, BytesN, Map, Symbol,
+    vec, Address, Map, Symbol,
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
     create_fixture_with_data,
-    liquidity_pool::LPClient,
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
 };
 
@@ -50,13 +49,17 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
             .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
-    let auction_id = BytesN::from_array(&fixture.env, &[9; 32]);
-    let auction = pool_fixture
-        .pool
-        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable.clone()]);
-    assert_eq!(auction.auction_id, auction_id);
-    assert_eq!(auction.lot_quote.tier, BackstopTier::BlndUsdc);
-    assert!(auction.lot_quote.lot_amount > 0);
+    let auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    let blnd_usdc_token = fixture
+        .backstop
+        .backstop_token(&BackstopContractTier::BlndUsdc);
+    assert!(auction.lot.get(blnd_usdc_token).unwrap() > 0);
     assert!(!pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)
@@ -67,8 +70,11 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         .env
         .ledger()
         .set_sequence_number(auction.block + 500);
-    pool_fixture.pool.delete_stale_bad_debt_auction();
-    assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
+    pool_fixture.pool.del_auction(&1, &fixture.backstop.address);
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
     assert!(!pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)
@@ -106,10 +112,17 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
             .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
-    let auction_id = BytesN::from_array(&fixture.env, &[10; 32]);
-    let auction = pool_fixture
-        .pool
-        .new_bad_debt_auction(&auction_id, &vec![&fixture.env, stable.clone()]);
+    let auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    let blnd_usdc_token = fixture
+        .backstop
+        .backstop_token(&BackstopContractTier::BlndUsdc);
+    let base_lot_amount = auction.lot.get(blnd_usdc_token.clone()).unwrap();
     let filler_positions_before = pool_fixture.pool.get_positions(&filler);
     let filler_lp_before = fixture.lp.balance(&filler);
     let tier_assets_before = fixture
@@ -127,14 +140,17 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .pool
         .try_fill_bad_debt_auction(&unhealthy_filler, &50)
         .is_err());
-    assert_eq!(pool_fixture.pool.get_bad_debt_auction(), auction);
+    assert_eq!(
+        pool_fixture.pool.get_auction(&1, &fixture.backstop.address),
+        auction
+    );
     assert_eq!(fixture.lp.balance(&unhealthy_filler), 0);
 
     let first = pool_fixture.pool.fill_bad_debt_auction(&filler, &50);
     let first_bid = first.bid.get(stable.clone()).unwrap();
     assert!(!first.complete);
     assert_eq!(first_bid, (debt + 1) / 2);
-    assert_eq!(first.base_lot_amount, auction.lot_quote.lot_amount / 2);
+    assert_eq!(first.base_lot_amount, base_lot_amount / 2);
     assert_eq!(first.lot_amount, first.base_lot_amount / 2);
     assert_eq!(
         fixture.lp.balance(&filler),
@@ -173,10 +189,11 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
     assert_eq!(
         pool_fixture
             .pool
-            .get_bad_debt_auction()
-            .lot_quote
-            .lot_amount,
-        auction.lot_quote.lot_amount - first.base_lot_amount
+            .get_auction(&1, &fixture.backstop.address)
+            .lot
+            .get(blnd_usdc_token)
+            .unwrap(),
+        base_lot_amount - first.base_lot_amount
     );
 
     fixture
@@ -189,7 +206,10 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         fixture.lp.balance(&filler),
         filler_lp_before + first.lot_amount + second.lot_amount
     );
-    assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
     let remaining_debt = pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)
@@ -198,15 +218,14 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .unwrap();
     assert!(remaining_debt > 0);
 
-    let continuation_id = BytesN::from_array(&fixture.env, &[11; 32]);
-    let continuation = pool_fixture
-        .pool
-        .continue_bad_debt_resolution(&continuation_id);
-    assert!(continuation.auction_created);
-    assert!(continuation.defaulted.is_empty());
-    let continued_auction = pool_fixture.pool.get_bad_debt_auction();
-    assert_eq!(continued_auction.auction_id, continuation_id);
-    assert_eq!(continued_auction.lot_quote.tier, BackstopTier::BlndUsdc);
+    let continued_auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    assert_eq!(continued_auction.lot.len(), 1);
     assert_eq!(
         continued_auction.bid.get(stable.clone()),
         Some(remaining_debt)
@@ -262,8 +281,8 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             .assets,
         0
     );
-    // Force the supplier-loss path to obtain a valuation quote while keeping
-    // the tier below its 100-USDC bad-debt eligibility minimum.
+    // Force the supplier-loss path to obtain a valuation quote from a positive
+    // tier before the test explicitly exhausts it.
     fixture.backstop.deposit(
         &BackstopContractTier::BlndUsdc,
         &frodo,
@@ -318,10 +337,9 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             },
         );
     });
-    let auction_id = BytesN::from_array(&fixture.env, &[12; 32]);
     assert!(pool_fixture
         .pool
-        .try_continue_bad_debt_resolution(&auction_id)
+        .try_bad_debt(&fixture.backstop.address)
         .is_err());
     let positions_after_failure = pool_fixture.pool.get_positions(&fixture.backstop.address);
     assert_eq!(
@@ -348,15 +366,20 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         reserve_after_failure.last_time,
         reserve_before_failure.last_time
     );
-    assert!(pool_fixture.pool.try_get_bad_debt_auction().is_err());
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
 
+    // Restore a valid, exhausted tier. Supplier default is allowed only once
+    // no positively valued tier remains.
     fixture.env.as_contract(&fixture.backstop.address, || {
         fixture.env.storage().persistent().set(
             &tier_key,
             &PoolBalance {
-                q4w: tier_state.queued_shares,
-                shares: tier_state.shares,
-                tokens: tier_state.assets,
+                q4w: 0,
+                shares: 0,
+                tokens: 0,
             },
         );
     });
@@ -364,9 +387,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     let pool_stable_before = fixture.tokens[TokenIndex::STABLE].balance(&pool_fixture.pool.address);
     let backstop_stable_before =
         fixture.tokens[TokenIndex::STABLE].balance(&fixture.backstop.address);
-    let continuation = pool_fixture.pool.continue_bad_debt_resolution(&auction_id);
-    assert!(!continuation.auction_created);
-    assert_eq!(continuation.defaulted.get(stable.clone()), Some(debt));
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
 
     let default_underlying = debt
         .fixed_mul_ceil(accrued_reserve.data.d_rate, SCALAR_12)
@@ -424,11 +445,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         1,
     ]);
 
-    let dust_continuation = pool_fixture
-        .pool
-        .continue_bad_debt_resolution(&BytesN::from_array(&fixture.env, &[14; 32]));
-    assert!(!dust_continuation.auction_created);
-    assert_eq!(dust_continuation.defaulted.get(stable), Some(dust));
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
     assert!(pool_fixture
         .pool
         .get_positions(&fixture.backstop.address)
@@ -458,43 +475,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         &pool_fixture.pool.address,
         &deposited_shares,
         &frodo,
-    );
-
-    // Each fixture LP share is worth $1.25. Keep every tier one base unit
-    // below the $100 operational minimum so supplier default is the next
-    // bounded continuation step.
-    let dusty_lp_assets = 80 * SCALAR_7 - 1;
-    let dusty_usdc_assets = 100 * SCALAR_7 - 1;
-    fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
-        &frodo,
-        &pool_fixture.pool.address,
-        &dusty_lp_assets,
-    );
-    let dust_provider = Address::generate(&fixture.env);
-    let blnd_xlm_address = fixture
-        .backstop
-        .backstop_token(&BackstopContractTier::BlndXlm);
-    let blnd_xlm = LPClient::new(&fixture.env, &blnd_xlm_address);
-    fixture.tokens[TokenIndex::BLND].mint(&dust_provider, &(1_000 * SCALAR_7));
-    fixture.tokens[TokenIndex::XLM].mint(&dust_provider, &(25 * SCALAR_7));
-    blnd_xlm.join_pool(
-        &dusty_lp_assets,
-        &vec![&fixture.env, 1_000 * SCALAR_7, 25 * SCALAR_7],
-        &dust_provider,
-    );
-    fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndXlm,
-        &dust_provider,
-        &pool_fixture.pool.address,
-        &dusty_lp_assets,
-    );
-    fixture.tokens[TokenIndex::USDC].mint(&dust_provider, &dusty_usdc_assets);
-    fixture.backstop.deposit(
-        &backstop::BackstopTier::Usdc,
-        &dust_provider,
-        &pool_fixture.pool.address,
-        &dusty_usdc_assets,
     );
 
     let mut reserve_assets = pool_fixture.pool.get_reserve_list();
@@ -598,13 +578,9 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         30
     );
     fixture.env.cost_estimate().budget().reset_unlimited();
-    let continuation = pool_fixture
-        .pool
-        .continue_bad_debt_resolution(&BytesN::from_array(&fixture.env, &[13; 32]));
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
     let resources = fixture.env.cost_estimate().resources();
 
-    assert!(!continuation.auction_created);
-    assert_eq!(continuation.defaulted.len(), 30);
     assert!(resources.instructions <= 600_000_000);
     assert!(resources.mem_bytes <= 41_943_040);
     assert!(resources.disk_read_entries <= 100);

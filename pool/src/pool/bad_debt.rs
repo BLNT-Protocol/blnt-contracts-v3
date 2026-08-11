@@ -6,27 +6,23 @@ use super::{Pool, User};
 
 /// Handles any bad debt that exists for "user"
 pub fn bad_debt(e: &Env, user: &Address) {
-    let mut pool = Pool::load(e);
-    let mut user_state = User::load(e, user);
-
     let backstop = storage::get_backstop(e);
-
-    let had_bad_debt = if user == &backstop {
-        // Backstop liabilities must use the v3 tier waterfall. The inherited
-        // v2 threshold default would bypass verified exhaustion of all tiers.
-        panic_with_error!(e, PoolError::BadRequest);
+    if user == &backstop {
+        crate::auctions::default_backstop_bad_debt(e);
     } else {
-        if storage::has_auction(e, &(AuctionType::UserLiquidation as u32), &user) {
+        let mut pool = Pool::load(e);
+        let mut user_state = User::load(e, user);
+        if storage::has_auction(e, &(AuctionType::UserLiquidation as u32), user) {
             panic_with_error!(e, PoolError::AuctionInProgress);
         }
-        check_and_handle_user_bad_debt(e, &mut pool, user, &mut user_state)
-    };
+        let had_bad_debt = check_and_handle_user_bad_debt(e, &mut pool, user, &mut user_state);
 
-    if had_bad_debt {
-        user_state.store(e);
-        pool.store_cached_reserves(e);
-    } else {
-        panic_with_error!(e, PoolError::BadRequest);
+        if had_bad_debt {
+            user_state.store(e);
+            pool.store_cached_reserves(e);
+        } else {
+            panic_with_error!(e, PoolError::BadRequest);
+        }
     }
 }
 
@@ -81,6 +77,7 @@ mod tests {
     use super::*;
     use crate::{
         auctions::AuctionData,
+        pool::sync_backstop_liabilities,
         storage::PoolConfig,
         testutils::{
             self, create_backstop, create_blnd_token, create_comet_lp_pool, create_pool,
@@ -435,45 +432,24 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
+            sync_backstop_liabilities(&e, &backstop_positions);
 
             bad_debt(&e, &backstop_address);
         });
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_bad_debt_backstop_rejects_legacy_default() {
+    fn test_bad_debt_backstop_defaults_after_verified_tier_exhaustion() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths();
 
         let pool = create_pool(&e);
         let bombadil = Address::generate(&e);
-        let frodo = Address::generate(&e);
-
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
-        let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
-
-        // mint lp tokens and deposit them into the pool's backstop
-        let backstop_tokens = 1_000_0000000; // under 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
-        usdc_client.mint(&frodo, &12_501_0000000);
-        usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
-        lp_token_client.join_pool(
-            &backstop_tokens,
-            &vec![&e, 500_001_0000000, 12_501_0000000],
-            &frodo,
-        );
-        backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
-            &frodo,
-            &pool,
-            &backstop_tokens,
-        );
+        let (blnd, _) = create_blnd_token(&e, &pool, &bombadil);
+        let (usdc, _) = create_token_contract(&e, &bombadil);
+        let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (backstop_address, _) = create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -508,6 +484,7 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
+            sync_backstop_liabilities(&e, &backstop_positions);
 
             bad_debt(&e, &backstop_address);
 
@@ -537,8 +514,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_bad_debt_backstop_ongoing_auction_rejects_legacy_default() {
+    #[should_panic(expected = "Error(Contract, #1212)")]
+    fn test_bad_debt_backstop_ongoing_auction_rejects_default() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths();
@@ -609,6 +586,7 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
+            sync_backstop_liabilities(&e, &backstop_positions);
             storage::set_auction(
                 &e,
                 &(AuctionType::BadDebtAuction as u32),

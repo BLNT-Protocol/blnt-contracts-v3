@@ -71,8 +71,9 @@ first:
 - Exactly three immutable backstop tiers: BLND:USDC LP, BLND:XLM LP, and plain
   USDC.
 - Strict loss order: BLND:XLM LP, BLND:USDC LP, plain USDC, then suppliers.
-- One tier per auction, at most one active interest auction per pool and tier,
-  and a 100-USDC tier eligibility minimum.
+- One tier per auction and at most one active interest auction per pool.
+  Interest requires at least 200 USDC; bad debt uses every positively valued
+  tier before suppliers.
 - Activation entry at 12,500 USDC and maintenance at 10,000 USDC.
 - Take-rate weighting of `4:3:2` in loss order.
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
