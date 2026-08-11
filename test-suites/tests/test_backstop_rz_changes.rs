@@ -85,16 +85,16 @@ fn test_backstop_rz_changes_handle_emissions() {
     // stream already started by the pool remains claimable through expiry.
     fixture.jump(60 * 60 * 24 * 3);
     let accrued = fixture.backstop.claimable(
-        &sam,
-        &pool_fixture.pool.address,
         &backstop::BackstopTier::BlndUsdc,
+        &sam,
+        &vec![&fixture.env, pool_fixture.pool.address.clone()],
     );
     assert!(accrued > 0);
     assert!(
         fixture.backstop.claim(
             &backstop::BackstopTier::BlndUsdc,
             &sam,
-            &pool_fixture.pool.address,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
         ) > 0
     );
@@ -104,7 +104,7 @@ fn test_backstop_rz_changes_handle_emissions() {
         fixture.backstop.claim(
             &backstop::BackstopTier::BlndUsdc,
             &sam,
-            &pool_fixture.pool.address,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
         ) > 0
     );

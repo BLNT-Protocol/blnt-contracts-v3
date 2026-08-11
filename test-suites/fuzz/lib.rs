@@ -253,7 +253,7 @@ impl ClaimBackstop {
         let r = fixture.backstop.try_claim(
             &backstop::BackstopTier::BlndUsdc,
             &user,
-            &pool_fixture.pool.address,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
         );
         verify_contract_result(&fixture.env, &r);

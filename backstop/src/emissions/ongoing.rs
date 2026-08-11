@@ -1,7 +1,7 @@
 use sep_41_token::TokenClient;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contracttype, panic_with_error, vec, Address, Env, IntoVal, Symbol, Val, Vec, I256,
+    contracttype, panic_with_error, vec, Address, Env, IntoVal, Map, Symbol, Val, Vec, I256,
 };
 
 use crate::{
@@ -42,9 +42,8 @@ pub struct OngoingDistribution {
 }
 
 pub(crate) struct OngoingClaim {
-    pub blnd_amount: i128,
     pub lp_amount: i128,
-    pub shares: i128,
+    pub allocations: Vec<(Address, i128, i128, i128)>,
 }
 
 pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
@@ -340,6 +339,34 @@ pub(crate) fn preview_user_ongoing_emissions(
     )
 }
 
+pub(crate) fn preview_user_ongoing_blnd(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool_addresses: &Vec<Address>,
+) -> i128 {
+    require_emission_tier(e, tier);
+    if pool_addresses.is_empty() {
+        panic_with_error!(e, BackstopError::BadRequest);
+    }
+
+    let mut claimable = 0_i128;
+    let mut pools = Map::<Address, ()>::new(e);
+    for pool in pool_addresses.iter() {
+        if pools.contains_key(pool.clone()) {
+            panic_with_error!(e, BackstopError::BadRequest);
+        }
+        require_registered_pool(e, &pool);
+        pools.set(pool.clone(), ());
+        claimable = checked_add(
+            e,
+            claimable,
+            preview_user_ongoing_emissions(e, tier, user, &pool).accrued,
+        );
+    }
+    claimable
+}
+
 pub(crate) fn checkpoint_user_ongoing_for_weight_change(
     e: &Env,
     tier: BackstopTier,
@@ -354,31 +381,51 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
 pub(crate) fn claim_user_ongoing_blnd(
     e: &Env,
     tier: BackstopTier,
-    user: &Address,
-    pool: &Address,
+    from: &Address,
+    pool_addresses: &Vec<Address>,
     min_lp_tokens_out: i128,
 ) -> OngoingClaim {
     migration::require_backfill_funded(e);
-    user.require_auth();
-    require_registered_pool(e, pool);
+    from.require_auth();
     require_emission_tier(e, tier);
+    if pool_addresses.is_empty() {
+        panic_with_error!(e, BackstopError::BadRequest);
+    }
     if min_lp_tokens_out < 0 {
         panic_with_error!(e, BackstopError::NegativeAmountError);
     }
-    prepare_pool_weight_change(e, tier, pool);
 
-    let mut user_emissions = checkpoint_user_ongoing_emissions(e, tier, user, pool);
-    let blnd_amount = user_emissions.accrued;
-    if blnd_amount <= 0 {
-        panic_with_error!(e, BackstopError::NoOngoingEmissions);
+    let mut blnd_amount = 0_i128;
+    let mut claims = Map::<Address, i128>::new(e);
+    for pool in pool_addresses.iter() {
+        if claims.contains_key(pool.clone()) {
+            panic_with_error!(e, BackstopError::BadRequest);
+        }
+        require_registered_pool(e, &pool);
+        prepare_pool_weight_change(e, tier, &pool);
+
+        let mut user_emissions = checkpoint_user_ongoing_emissions(e, tier, from, &pool);
+        let pool_claim = user_emissions.accrued;
+        claims.set(pool.clone(), pool_claim);
+        blnd_amount = checked_add(e, blnd_amount, pool_claim);
+        if pool_claim == 0 {
+            continue;
+        }
+
+        user_emissions.accrued = 0;
+        set_user_ongoing_emissions(e, tier, from, &pool, &user_emissions);
+
+        let mut pool_state = get_pool_ongoing_emissions(e, &pool);
+        pool_state.accrued_backstop = checked_sub(e, pool_state.accrued_backstop, pool_claim);
+        set_pool_ongoing_emissions(e, &pool, &pool_state);
     }
 
-    user_emissions.accrued = 0;
-    set_user_ongoing_emissions(e, tier, user, pool, &user_emissions);
-
-    let mut pool_state = get_pool_ongoing_emissions(e, pool);
-    pool_state.accrued_backstop = checked_sub(e, pool_state.accrued_backstop, blnd_amount);
-    set_pool_ongoing_emissions(e, pool, &pool_state);
+    if blnd_amount == 0 {
+        return OngoingClaim {
+            lp_amount: 0,
+            allocations: vec![e],
+        };
+    }
 
     let mut ongoing = get_ongoing_emission_state(e);
     ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnd_amount);
@@ -431,12 +478,20 @@ pub(crate) fn claim_user_ongoing_blnd(
         panic_with_error!(e, BackstopError::BalanceError);
     }
 
-    let shares = credit_tier_shares(e, tier, user, pool, lp_amount);
-    finish_pool_weight_change(e, tier, pool);
+    let mut allocations = vec![e];
+    for pool in pool_addresses.iter() {
+        let pool_claim = claims.get(pool.clone()).unwrap_or(0);
+        let pool_lp_amount = proportional_floor(e, lp_amount, pool_claim, blnd_amount);
+        if pool_lp_amount == 0 {
+            continue;
+        }
+        let shares = credit_tier_shares(e, tier, from, &pool, pool_lp_amount);
+        finish_pool_weight_change(e, tier, &pool);
+        allocations.push_back((pool, pool_claim, pool_lp_amount, shares));
+    }
     OngoingClaim {
-        blnd_amount,
         lp_amount,
-        shares,
+        allocations,
     }
 }
 
@@ -1164,9 +1219,11 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             0
         );
         assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
@@ -1179,9 +1236,11 @@ mod tests {
             storage::get_user_ongoing_emissions(&fixture.e, BackstopTier::BlndUsdc, &user, &pool)
         });
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             7 * SCALAR_7
         );
         assert!(fixture.e.auths().is_empty());
@@ -1191,14 +1250,26 @@ mod tests {
         assert_eq!(stored_after, stored_before);
         assert!(fixture
             .client()
-            .try_claimable(&user, &pool, &BackstopTier::Usdc)
+            .try_claimable(&BackstopTier::Usdc, &user, &vec![&fixture.e, pool.clone()],)
             .is_err());
         assert!(fixture
             .client()
             .try_claimable(
-                &user,
-                &Address::generate(&fixture.e),
                 &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, Address::generate(&fixture.e)],
+            )
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claimable(&BackstopTier::BlndUsdc, &user, &vec![&fixture.e])
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claimable(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone(), pool],
             )
             .is_err());
     }
@@ -1226,15 +1297,19 @@ mod tests {
             .ledger()
             .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &blnd_usdc_user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             35_000_000
         );
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm),
+            fixture.client().claimable(
+                &BackstopTier::BlndXlm,
+                &blnd_xlm_user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             35_000_000
         );
 
@@ -1247,26 +1322,34 @@ mod tests {
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
         let blnd_xlm_before =
             TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop);
-        let blnd_usdc_out =
-            fixture
-                .client()
-                .claim(&BackstopTier::BlndUsdc, &blnd_usdc_user, &pool, &0);
+        let blnd_usdc_out = fixture.client().claim(
+            &BackstopTier::BlndUsdc,
+            &blnd_usdc_user,
+            &vec![&fixture.e, pool.clone()],
+            &0,
+        );
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&blnd_usdc_user, &pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &blnd_usdc_user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             0
         );
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&blnd_xlm_user, &pool, &BackstopTier::BlndXlm),
+            fixture.client().claimable(
+                &BackstopTier::BlndXlm,
+                &blnd_xlm_user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             35_000_000
         );
-        let blnd_xlm_out =
-            fixture
-                .client()
-                .claim(&BackstopTier::BlndXlm, &blnd_xlm_user, &pool, &0);
+        let blnd_xlm_out = fixture.client().claim(
+            &BackstopTier::BlndXlm,
+            &blnd_xlm_user,
+            &vec![&fixture.e, pool.clone()],
+            &0,
+        );
         assert!(blnd_usdc_out > 0);
         assert!(blnd_xlm_out > 0);
         assert_eq!(
@@ -1301,9 +1384,11 @@ mod tests {
             .ledger()
             .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
         fixture.client().distribute();
-        let accrued = fixture
-            .client()
-            .claimable(&user, &pool, &BackstopTier::BlndUsdc);
+        let accrued = fixture.client().claimable(
+            &BackstopTier::BlndUsdc,
+            &user,
+            &vec![&fixture.e, pool.clone()],
+        );
         let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
         let shares_before = fixture
             .client()
@@ -1312,12 +1397,19 @@ mod tests {
 
         assert!(fixture
             .client()
-            .try_claim(&BackstopTier::BlndUsdc, &user, &pool, &i128::MAX,)
+            .try_claim(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone()],
+                &i128::MAX,
+            )
             .is_err());
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&user, &pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone()],
+            ),
             accrued
         );
         assert_eq!(
@@ -1332,6 +1424,100 @@ mod tests {
             shares_before
         );
         assert_eq!(fixture.ongoing_state().backstop_claimed, 0);
+    }
+
+    #[test]
+    fn claim_batches_pool_addresses_for_one_tier() {
+        let fixture = Fixture::create();
+        let first = fixture.pool(10 * SCALAR_7, 0);
+        let second = fixture.pool(20 * SCALAR_7, 0);
+        let user = Address::generate(&fixture.e);
+        fixture.user_position(BackstopTier::BlndUsdc, &user, &first, 10 * SCALAR_7);
+        fixture.user_position(BackstopTier::BlndUsdc, &user, &second, 20 * SCALAR_7);
+        fixture.set_reward_zone(&vec![&fixture.e, first.clone(), second.clone()]);
+
+        fixture.e.ledger().set_timestamp(1_010);
+        fixture.client().distribute();
+        assert!(fixture.client().gulp_emissions(&first) > 0);
+        assert!(fixture.client().gulp_emissions(&second) > 0);
+        fixture
+            .e
+            .ledger()
+            .set_timestamp(1_010 + BACKSTOP_EMISSION_STREAM_SECONDS);
+        fixture.client().distribute();
+
+        let pool_addresses = vec![&fixture.e, first.clone(), second.clone()];
+        let aggregate_claim =
+            fixture
+                .client()
+                .claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses);
+        assert!(aggregate_claim > 0);
+        let first_shares = fixture
+            .client()
+            .user_balance(&BackstopTier::BlndUsdc, &first, &user)
+            .shares;
+        let second_shares = fixture
+            .client()
+            .user_balance(&BackstopTier::BlndUsdc, &second, &user)
+            .shares;
+        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
+        let lp_before = TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
+
+        let lp_out = fixture
+            .client()
+            .claim(&BackstopTier::BlndUsdc, &user, &pool_addresses, &0);
+
+        assert!(lp_out > 0);
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
+            blnd_before - aggregate_claim
+        );
+        assert_eq!(
+            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
+            lp_before + lp_out
+        );
+        assert_eq!(
+            fixture
+                .client()
+                .claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses,),
+            0
+        );
+        assert!(
+            fixture
+                .client()
+                .user_balance(&BackstopTier::BlndUsdc, &first, &user)
+                .shares
+                > first_shares
+        );
+        assert!(
+            fixture
+                .client()
+                .user_balance(&BackstopTier::BlndUsdc, &second, &user)
+                .shares
+                > second_shares
+        );
+        assert_eq!(fixture.ongoing_state().backstop_claimed, aggregate_claim);
+    }
+
+    #[test]
+    fn claim_rejects_empty_and_duplicate_pool_addresses() {
+        let fixture = Fixture::create();
+        let pool = fixture.pool(10 * SCALAR_7, 0);
+        let user = Address::generate(&fixture.e);
+
+        assert!(fixture
+            .client()
+            .try_claim(&BackstopTier::BlndUsdc, &user, &vec![&fixture.e], &0,)
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claim(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, pool.clone(), pool],
+                &0,
+            )
+            .is_err());
     }
 
     #[test]

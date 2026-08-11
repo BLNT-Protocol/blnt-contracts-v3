@@ -493,12 +493,17 @@ fn test_backstop() {
         .backstop
         .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
         .shares;
-    let claimable = fixture
-        .backstop
-        .claimable(&sam, &pool.address, &BackstopTier::BlndUsdc);
-    let lp_compounded = fixture
-        .backstop
-        .claim(&BackstopTier::BlndUsdc, &sam, &pool.address, &0);
+    let claimable = fixture.backstop.claimable(
+        &BackstopTier::BlndUsdc,
+        &sam,
+        &vec![&fixture.env, pool.address.clone()],
+    );
+    let lp_compounded = fixture.backstop.claim(
+        &BackstopTier::BlndUsdc,
+        &sam,
+        &vec![&fixture.env, pool.address.clone()],
+        &0,
+    );
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -511,7 +516,7 @@ fn test_backstop() {
                         &fixture.env,
                         BackstopTier::BlndUsdc.into_val(&fixture.env),
                         sam.to_val(),
-                        pool.address.to_val(),
+                        vec![&fixture.env, pool.address.clone()].to_val(),
                         0_i128.into_val(&fixture.env),
                     ]
                 )),

@@ -488,20 +488,29 @@ mod tests {
         assert!(pool_state.pending_blnd_usdc > 0);
         assert_eq!(pool_state.pending_blnd_xlm, 0);
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+            ),
             0
         );
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm),
+            fixture.client().claimable(
+                &BackstopTier::BlndXlm,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+            ),
             0
         );
         assert!(fixture
             .client()
-            .try_claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
+            .try_claim(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+                &0,
+            )
             .is_err());
         assert_eq!(fixture.client().gulp_emissions(&fixture.pool), 3 * SCALAR_7);
 
@@ -515,14 +524,21 @@ mod tests {
             .set_timestamp(fixture.client().migration_state().activated_at.unwrap() + 10);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndXlm),
+            fixture.client().claimable(
+                &BackstopTier::BlndXlm,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+            ),
             0
         );
         assert!(fixture
             .client()
-            .try_claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
+            .try_claim(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+                &0,
+            )
             .is_err());
         assert!(fixture.client().gulp_emissions(&fixture.pool) > 0);
 
@@ -542,10 +558,12 @@ mod tests {
         );
         assert!(fixture.client().try_drop().is_err());
         assert!(
-            fixture
-                .client()
-                .claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
-                > 0
+            fixture.client().claim(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+                &0,
+            ) > 0
         );
         assert!(
             TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop)
@@ -571,9 +589,11 @@ mod tests {
 
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+            ),
             0
         );
         assert_eq!(
@@ -618,10 +638,11 @@ mod tests {
         assert_eq!(fixture.client().gulp_emissions(&fixture.pool), 3 * SCALAR_7);
         fixture.e.ledger().set_timestamp(1_010 + DAY_IN_SECONDS);
         fixture.client().distribute();
-        let accrued_before_queue =
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc);
+        let accrued_before_queue = fixture.client().claimable(
+            &BackstopTier::BlndUsdc,
+            &fixture.user,
+            &vec![&fixture.e, fixture.pool.clone()],
+        );
         fixture.client().queue_withdrawal(
             &BackstopTier::BlndUsdc,
             &fixture.user,
@@ -666,16 +687,20 @@ mod tests {
         );
         fixture.client().drop();
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&fixture.user, &fixture.pool, &BackstopTier::BlndUsdc),
+            fixture.client().claimable(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+            ),
             accrued_before_queue
         );
         assert!(
-            fixture
-                .client()
-                .claim(&BackstopTier::BlndUsdc, &fixture.user, &fixture.pool, &0,)
-                > 0
+            fixture.client().claim(
+                &BackstopTier::BlndUsdc,
+                &fixture.user,
+                &vec![&fixture.e, fixture.pool.clone()],
+                &0,
+            ) > 0
         );
         assert!(
             fixture

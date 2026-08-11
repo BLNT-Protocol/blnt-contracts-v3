@@ -595,18 +595,20 @@ balance or composition changes, membership, and pool status never rewrite
 prior allocation. A position MUST NOT earn through two tiers or both eligible
 and ineligible accounting.
 
-The read-only `claimable(owner, pool, tier)` view returns the owner's currently
-accrued BLND without requiring authorization or changing its checkpoint. It
-rejects plain USDC and unregistered pools without exposing internal indexes or
-carries.
+The read-only `claimable(tier, user, pool_addresses)` view returns the user's
+aggregate currently accrued BLND for one eligible tier over a nonempty list of
+unique registered pools, without requiring authorization or changing any
+checkpoint. It rejects plain USDC without exposing internal indexes or carries.
 
-The owner authorizes a claim for one eligible tier and supplies a minimum LP
-output. The claim checkpoints that tier for one pool, reduces only its accrued
-70% tranche, deposits the BLND single-sided into that tier's Comet, and credits
-the resulting LP shares to the same owner, pool, and tier. Exact BLND and LP
-balance deltas govern settlement. A failed or zero-output conversion leaves the
-accrual unchanged. A successful claim updates the backstop-claimed counter by
-the BLND consumed and returns the LP amount received.
+The owner authorizes a claim for one eligible tier over a nonempty list of
+unique registered pool addresses and supplies a minimum LP output. The claim
+checkpoints that tier in each pool, aggregates its accrued 70% tranches, and
+deposits the BLND single-sided into that tier's Comet once. Resulting LP tokens
+are credited proportionally to the same owner's selected pool-tier positions,
+using v2 floor rounding. Exact aggregate BLND and LP balance deltas govern
+settlement. A failed or zero-output conversion leaves every accrual unchanged.
+A successful claim updates the backstop-claimed counter by the BLND consumed
+and returns the aggregate LP amount received.
 
 BLND:USDC accrual compounds into BLND:USDC and BLND:XLM accrual compounds into
 BLND:XLM. Claims are separate so one impaired Comet cannot block the other.

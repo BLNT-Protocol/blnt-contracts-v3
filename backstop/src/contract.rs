@@ -87,15 +87,15 @@ pub trait Backstop {
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
 
-    /// Return one user's claimable BLND for an eligible tier and pool.
-    fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128;
+    /// Return one user's aggregate claimable BLND for an eligible tier and list of pools.
+    fn claimable(e: Env, tier: BackstopTier, user: Address, pool_addresses: Vec<Address>) -> i128;
 
-    /// Compound one eligible tier's accrued BLND into that tier's Comet LP.
+    /// Compound one eligible tier's accrued BLND across a list of pools.
     fn claim(
         e: Env,
         tier: BackstopTier,
-        user: Address,
-        pool: Address,
+        from: Address,
+        pool_addresses: Vec<Address>,
         min_lp_tokens_out: i128,
     ) -> i128;
 
@@ -298,30 +298,24 @@ impl Backstop for BackstopContract {
         distribution.distributed
     }
 
-    fn claimable(e: Env, user: Address, pool: Address, tier: BackstopTier) -> i128 {
+    fn claimable(e: Env, tier: BackstopTier, user: Address, pool_addresses: Vec<Address>) -> i128 {
         storage::extend_instance(&e);
-        backstop::require_registered_pool(&e, &pool);
-        emissions::preview_user_ongoing_emissions(&e, tier, &user, &pool).accrued
+        emissions::preview_user_ongoing_blnd(&e, tier, &user, &pool_addresses)
     }
 
     fn claim(
         e: Env,
         tier: BackstopTier,
-        user: Address,
-        pool: Address,
+        from: Address,
+        pool_addresses: Vec<Address>,
         min_lp_tokens_out: i128,
     ) -> i128 {
         storage::extend_instance(&e);
-        let claim = emissions::claim_user_ongoing_blnd(&e, tier, &user, &pool, min_lp_tokens_out);
-        BackstopEvents::claim(
-            &e,
-            tier,
-            user,
-            pool,
-            claim.blnd_amount,
-            claim.lp_amount,
-            claim.shares,
-        );
+        let claim =
+            emissions::claim_user_ongoing_blnd(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
+        for (pool, blnd_amount, lp_amount, shares) in claim.allocations.iter() {
+            BackstopEvents::claim(&e, tier, from.clone(), pool, blnd_amount, lp_amount, shares);
+        }
         claim.lp_amount
     }
 

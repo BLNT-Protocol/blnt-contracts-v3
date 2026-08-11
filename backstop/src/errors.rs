@@ -40,7 +40,6 @@ pub enum BackstopError {
     DistributionTooSoon = 1030,
     InvalidOngoingBalance = 1031,
     EmitterDidNotMigrate = 1032,
-    NoOngoingEmissions = 1033,
     PoolEmissionGulpTooSoon = 1034,
     AlreadyFinalized = 1035,
     InvalidQueuedSwap = 1037,

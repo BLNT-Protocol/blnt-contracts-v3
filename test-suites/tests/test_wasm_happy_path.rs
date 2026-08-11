@@ -837,15 +837,15 @@ fn test_wasm_happy_path() {
     );
     backstop_blnd_balance += fixture.backstop.distribute();
     let backstop_accrual = fixture.backstop.claimable(
-        &frodo,
-        &pool_fixture.pool.address,
         &BackstopContractTier::BlndUsdc,
+        &frodo,
+        &vec![&fixture.env, pool_fixture.pool.address.clone()],
     );
     assert!(backstop_accrual > 0);
     let compounded_lp = fixture.backstop.claim(
         &BackstopContractTier::BlndUsdc,
         &frodo,
-        &pool_fixture.pool.address,
+        &vec![&fixture.env, pool_fixture.pool.address.clone()],
         &0,
     );
     assert!(compounded_lp > 0);
@@ -1041,16 +1041,16 @@ fn test_wasm_happy_path() {
     );
 
     let backstop_accrual = fixture.backstop.claimable(
-        &frodo,
-        &pool_fixture.pool.address,
         &BackstopContractTier::BlndUsdc,
+        &frodo,
+        &vec![&fixture.env, pool_fixture.pool.address.clone()],
     );
     assert_approx_eq_rel(backstop_accrual, 4233600000000, 0_0100000);
     assert!(
         fixture.backstop.claim(
             &BackstopContractTier::BlndUsdc,
             &frodo,
-            &pool_fixture.pool.address,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
         ) > 0
     );
@@ -1093,16 +1093,16 @@ fn test_wasm_happy_path() {
     let mut backstop_blnd_balance =
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let backstop_accrual = fixture.backstop.claimable(
-        &frodo,
-        &pool_fixture.pool.address,
         &BackstopContractTier::BlndUsdc,
+        &frodo,
+        &vec![&fixture.env, pool_fixture.pool.address.clone()],
     );
     assert_approx_eq_rel(backstop_accrual, 22_014_720_0000000, 0_0100000);
     assert!(
         fixture.backstop.claim(
             &BackstopContractTier::BlndUsdc,
             &frodo,
-            &pool_fixture.pool.address,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
         ) > 0
     );
