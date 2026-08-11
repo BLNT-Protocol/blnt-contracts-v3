@@ -32,7 +32,7 @@ pub fn require_registered_pool(e: &Env, address: &Address) {
 
 /// The pool's backstop balances
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolBalance {
     pub shares: i128, // the amount of shares the pool has issued
     pub tokens: i128, // the number of tokens the pool holds in the backstop

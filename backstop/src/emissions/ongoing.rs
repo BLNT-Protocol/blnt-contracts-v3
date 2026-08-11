@@ -27,7 +27,7 @@ const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
 
 /// Result of one completed permissionless BLND distribution checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct OngoingDistribution {
     pub backstop_allocated: i128,
     pub backstop_carry: i128,

@@ -7,7 +7,7 @@ use crate::{
 };
 use soroban_sdk::{panic_with_error, Address, Env, String};
 
-use super::{initialize_loss_records, pool::Pool, Reserve};
+use super::{pool::Pool, Reserve};
 
 /// Initialize the pool
 ///
@@ -36,7 +36,6 @@ pub fn execute_initialize(
     storage::set_admin(e, admin);
     storage::set_name(e, name);
     storage::set_backstop(e, backstop_address);
-    initialize_loss_records(e);
     storage::set_pool_config(e, &pool_config);
     storage::set_blnd_token(e, blnd_id);
 }

@@ -77,7 +77,6 @@ mod tests {
     use super::*;
     use crate::{
         auctions::AuctionData,
-        pool::sync_backstop_liabilities,
         storage::PoolConfig,
         testutils::{
             self, create_backstop, create_blnd_token, create_comet_lp_pool, create_pool,
@@ -432,7 +431,6 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
-            sync_backstop_liabilities(&e, &backstop_positions);
 
             bad_debt(&e, &backstop_address);
         });
@@ -484,7 +482,6 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
-            sync_backstop_liabilities(&e, &backstop_positions);
 
             bad_debt(&e, &backstop_address);
 
@@ -586,7 +583,6 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
-            sync_backstop_liabilities(&e, &backstop_positions);
             storage::set_auction(
                 &e,
                 &(AuctionType::BadDebtAuction as u32),

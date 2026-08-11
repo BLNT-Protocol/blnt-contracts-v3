@@ -232,7 +232,7 @@ exhausts collateral while liabilities remain, the same transaction MUST:
   backstop without changing reserve dToken supply.
 - Accumulate each amount with any liability the backstop already holds in that
   reserve.
-- Update every affected canonical reserve-keyed liability record.
+- Update the configured backstop's canonical v2-style liability map.
 - Clear the liquidatee's residual liabilities.
 - Emit one handoff event per affected reserve.
 
@@ -308,8 +308,8 @@ debt, target, and unfilled target remain creation metadata.
 
 When no bad-debt auction is active, permissionless
 `new_auction(1, backstop, [], [], 100)` performs one bounded step. It validates
-every reserve-keyed backstop liability and fails on unknown, missing,
-negative, or inconsistent records. The next batch follows immutable reserve
+every backstop liability against the immutable reserve-index mapping and fails
+on unknown or non-positive entries. The next batch follows immutable reserve
 order and contains at most `min(max_positions - 1, 4)` reserves. The pool MUST
 use canonical `pool_data` to select the first qualifying tier, and each call
 restarts the strict tier search. It returns the v2-compatible `AuctionData`

@@ -2,7 +2,7 @@ use crate::{
     constants::SCALAR_7,
     dependencies::{BackstopClient, BackstopContractTier, BackstopPoolData},
     errors::PoolError,
-    pool::{backstop_liabilities, backstop_liability, sync_backstop_liabilities, Pool, User},
+    pool::{Pool, User},
     storage,
 };
 use cast::i128;
@@ -26,7 +26,7 @@ const MAX_BAD_DEBT_BID_ASSETS: u32 = 4;
 
 /// The fixed v3 backstop tier identifiers.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub enum BackstopTier {
     BlndUsdc,
     BlndXlm,
@@ -35,7 +35,7 @@ pub enum BackstopTier {
 
 /// Canonical single-tier lot selected by the pool from backstop data.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct BadDebtLotQuote {
     pub committed_value: i128,
     pub debt_value: i128,
@@ -47,7 +47,7 @@ pub struct BadDebtLotQuote {
 
 /// Prepared or partially filled single-tier bad-debt auction data.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct BadDebtAuctionData {
     pub bid: Map<Address, i128>,
     pub block: u32,
@@ -130,7 +130,7 @@ fn build_bad_debt_bid(e: &Env, pool: &mut Pool, bid: &Vec<Address>) -> (Map<Addr
             .liabilities
             .get(reserve.config.index)
             .unwrap_or(0);
-        if liability_balance <= 0 || backstop_liability(e, &reserve.asset) != liability_balance {
+        if liability_balance <= 0 {
             panic_with_error!(e, PoolError::InvalidBid);
         }
         let asset_to_base = pool.load_price(e, &reserve.asset);
@@ -196,7 +196,6 @@ fn quote_bad_debt_lot(e: &Env, debt_value_usdc: i128) -> Option<BadDebtLotQuote>
 fn canonical_bad_debt_bid(e: &Env, pool: &Pool) -> Vec<Address> {
     let backstop = storage::get_backstop(e);
     let backstop_positions = storage::get_user_positions(e, &backstop);
-    let recorded = backstop_liabilities(e);
     let position_bound = pool
         .config
         .max_positions
@@ -212,7 +211,7 @@ fn canonical_bad_debt_bid(e: &Env, pool: &Pool) -> Vec<Address> {
             .liabilities
             .get(reserve_config.index)
             .unwrap_or(0);
-        if amount < 0 || backstop_liability(e, &asset) != amount {
+        if amount < 0 {
             panic_with_error!(e, PoolError::InvalidBid);
         }
         if amount > 0 {
@@ -224,10 +223,7 @@ fn canonical_bad_debt_bid(e: &Env, pool: &Pool) -> Vec<Address> {
             }
         }
     }
-    if liability_count == 0
-        || recorded.len() != liability_count
-        || backstop_positions.liabilities.len() != liability_count
-    {
+    if liability_count == 0 || backstop_positions.liabilities.len() != liability_count {
         panic_with_error!(e, PoolError::InvalidBid);
     }
     bid
@@ -254,7 +250,6 @@ fn default_all_backstop_liabilities(e: &Env, mut pool: Pool) {
     if backstop_state.has_liabilities() || !defaulted {
         panic_with_error!(e, PoolError::InvalidBid);
     }
-    sync_backstop_liabilities(e, &backstop_state.positions);
     backstop_state.store(e);
     pool.store_cached_reserves(e);
 }
@@ -297,13 +292,6 @@ pub fn fill_prepared_bad_debt_auction(
         scale_prepared_bad_debt_auction(e, &auction, percent);
     let mut backstop_state = User::load(e, &backstop);
 
-    for (asset, _) in auction.bid.iter() {
-        let reserve = pool.load_reserve(e, &asset, false);
-        if backstop_liability(e, &asset) != backstop_state.get_liabilities(reserve.config.index) {
-            panic_with_error!(e, PoolError::InvalidBid);
-        }
-    }
-
     backstop_state.rm_positions(e, pool, map![e], fill.bid.clone());
     filler_state.add_positions(e, pool, map![e], fill.bid.clone());
 
@@ -340,7 +328,6 @@ pub fn fill_prepared_bad_debt_auction(
             .remove(&PreparedBadDebtDataKey::PreparedBadDebtAuction);
     }
 
-    sync_backstop_liabilities(e, &backstop_state.positions);
     backstop_state.store(e);
     let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(fill.tier));
     let lot = if fill.lot_amount > 0 {
@@ -971,7 +958,6 @@ mod tests {
                 },
             );
             storage::set_user_positions(&e, &backstop_address, &backstop_positions);
-            sync_backstop_liabilities(&e, &backstop_positions);
         });
 
         let pool_client = crate::PoolClient::new(&e, &pool_address);
@@ -1082,7 +1068,6 @@ mod tests {
                 },
             );
             storage::set_user_positions(&e, &backstop_address, &positions);
-            sync_backstop_liabilities(&e, &positions);
         });
 
         let pool_client = crate::PoolClient::new(&e, &pool_address);

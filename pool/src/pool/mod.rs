@@ -15,11 +15,6 @@ pub use health_factor::PositionData;
 
 mod interest;
 
-mod loss;
-pub(crate) use loss::{
-    backstop_liabilities, backstop_liability, initialize_loss_records, sync_backstop_liabilities,
-};
-
 mod submit;
 
 pub use submit::{execute_submit, execute_submit_with_flash_loan};

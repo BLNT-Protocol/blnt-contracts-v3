@@ -24,7 +24,7 @@ pub struct BlndEmissionQuote {
 ///
 /// `carry` remains at this scope for the next split.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct OngoingBlndSplit {
     pub backstop: i128,
     pub carry: i128,

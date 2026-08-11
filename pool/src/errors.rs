@@ -53,9 +53,6 @@ pub enum PoolError {
     ReserveDisabled = 1223,
     MinCollateralNotMet = 1224,
 
-    // Backstop Loss Record Errors
-    InvalidLossAmount = 1225,
-
     // Tier-specific interest auction errors
     InvalidInterestAuction = 1227,
     NoInterestAuctionCapacity = 1228,

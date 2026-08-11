@@ -5,9 +5,9 @@ use pool::{PoolDataKey, Positions, Request, RequestType, ReserveData};
 use sep_40_oracle::testutils::Asset;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    contracttype, map,
+    map,
     testutils::{Address as _, Ledger},
-    vec, Address, Map, Symbol,
+    vec, Address, Symbol,
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
@@ -15,17 +15,10 @@ use test_suites::{
     test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
 };
 
-#[derive(Clone)]
-#[contracttype]
-struct CanonicalBackstopLossRecords {
-    liabilities: Map<Address, i128>,
-}
-
 #[test]
 fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];
-    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
     let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
     let debt = 50 * 10i128.pow(6);
     let positions = Positions {
@@ -33,20 +26,11 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         collateral: map![&fixture.env],
         supply: map![&fixture.env],
     };
-    let records = CanonicalBackstopLossRecords {
-        liabilities: map![&fixture.env, (stable.clone(), debt)],
-    };
-
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         fixture.env.storage().persistent().set(
             &PoolDataKey::Positions(fixture.backstop.address.clone()),
             &positions,
         );
-        fixture
-            .env
-            .storage()
-            .instance()
-            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
     let auction = pool_fixture.pool.new_auction(
@@ -96,20 +80,11 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         collateral: map![&fixture.env],
         supply: map![&fixture.env],
     };
-    let records = CanonicalBackstopLossRecords {
-        liabilities: map![&fixture.env, (stable.clone(), debt)],
-    };
-
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         fixture.env.storage().persistent().set(
             &PoolDataKey::Positions(fixture.backstop.address.clone()),
             &positions,
         );
-        fixture
-            .env
-            .storage()
-            .instance()
-            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
     let auction = pool_fixture.pool.new_auction(
@@ -348,9 +323,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         collateral: map![&fixture.env],
         supply: map![&fixture.env],
     };
-    let records = CanonicalBackstopLossRecords {
-        liabilities: map![&fixture.env, (stable.clone(), debt)],
-    };
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         fixture
             .env
@@ -361,11 +333,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             &PoolDataKey::Positions(fixture.backstop.address.clone()),
             &backstop_positions,
         );
-        fixture
-            .env
-            .storage()
-            .instance()
-            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
     let reserve_before_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
@@ -466,9 +433,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         collateral: map![&fixture.env],
         supply: map![&fixture.env],
     };
-    let dust_records = CanonicalBackstopLossRecords {
-        liabilities: map![&fixture.env, (stable.clone(), dust)],
-    };
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         let key = PoolDataKey::ResData(stable.clone());
         let mut reserve: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
@@ -478,11 +442,6 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             &PoolDataKey::Positions(fixture.backstop.address.clone()),
             &dust_positions,
         );
-        fixture
-            .env
-            .storage()
-            .instance()
-            .set(&Symbol::new(&fixture.env, "LossRec"), &dust_records);
     });
     fixture.oracle.set_price_stable(&vec![
         &fixture.env,
@@ -548,9 +507,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
         collateral: map![&fixture.env],
         supply: map![&fixture.env],
     };
-    let mut records = CanonicalBackstopLossRecords {
-        liabilities: map![&fixture.env],
-    };
     let mut pool_config = pool_fixture.pool.get_config();
     pool_config.max_positions = 60;
     let template_config = fixture.read_reserve_config(0, TokenIndex::XLM);
@@ -572,7 +528,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
             let index = index as u32;
             let debt = 1_i128;
             positions.liabilities.set(index, debt);
-            records.liabilities.set(asset.clone(), debt);
 
             if index < 3 {
                 let key = PoolDataKey::ResData(asset);
@@ -609,11 +564,6 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
             &PoolDataKey::Positions(fixture.backstop.address.clone()),
             &positions,
         );
-        fixture
-            .env
-            .storage()
-            .instance()
-            .set(&Symbol::new(&fixture.env, "LossRec"), &records);
     });
 
     assert_eq!(

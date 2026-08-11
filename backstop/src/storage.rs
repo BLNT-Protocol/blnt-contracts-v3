@@ -23,7 +23,7 @@ pub(crate) const LEDGER_BUMP_USER: u32 = ONE_DAY_LEDGERS * 180 - 1; // ~ 180 day
 
 /// V2-style emission stream and index for one pool tier.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct BackstopEmissionData {
     pub expiration: u64,
     pub eps: u64,
@@ -35,7 +35,7 @@ pub struct BackstopEmissionData {
 
 /// V2-style user emission checkpoint for one pool tier.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct UserEmissionData {
     pub accrued: i128,
     pub carry: i128,
@@ -44,7 +44,7 @@ pub struct UserEmissionData {
 
 /// Pool-local ongoing BLND allocation and cached active LP-token amounts.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolOngoingEmissions {
     pub accrued_pool: i128,
     pub active_blnd_usdc: i128,
@@ -56,7 +56,7 @@ pub struct PoolOngoingEmissions {
 
 /// Aggregate accounting for migration-backfill and ongoing BLND obligations.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct OngoingEmissionState {
     pub backstop_allocated: i128,
     pub backstop_carry: i128,
@@ -86,21 +86,21 @@ const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolUserKey {
     pool: Address,
     user: Address,
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolTierKey {
     pool: Address,
     tier: BackstopTier,
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolUserTierKey {
     pool: Address,
     tier: BackstopTier,
@@ -108,7 +108,7 @@ pub struct PoolUserTierKey {
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub enum BackstopDataKey {
     UserBalance(PoolUserKey),
     PoolBalance(Address),

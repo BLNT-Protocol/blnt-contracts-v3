@@ -73,7 +73,7 @@ impl InterestReserveState {
 
 /// One active tier-specific interest auction.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct InterestAuctionData {
     pub auction: AuctionData,
     pub lot_value: i128,

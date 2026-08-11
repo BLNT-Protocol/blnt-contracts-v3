@@ -33,7 +33,7 @@ pub struct PoolConfig {
 
 /// The pool's emission config
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolEmissionConfig {
     pub config: u128,
     pub last_time: u64,
@@ -59,7 +59,7 @@ pub struct ReserveConfig {
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct QueuedReserveInit {
     pub new_config: ReserveConfig,
     pub unlock_time: u64,
@@ -98,7 +98,7 @@ pub struct UserEmissionData {
 
 /// Exact carry retained alongside v2-compatible reserve emission data.
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct ReserveEmissionCarry {
     /// Exact division numerator not yet represented by the reserve index.
     pub index_carry: i128,
@@ -140,21 +140,21 @@ const POOL_EMIS_CARRY_KEY: &str = "PoolEmisC";
 const RES_EMIS_CONFIGURED_KEY: &str = "ResEmisSet";
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct UserReserveKey {
     user: Address,
     reserve_id: u32,
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct AuctionKey {
     user: Address,  // the Address whose assets are involved in the auction
     auct_type: u32, // the type of auction taking place
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub enum PoolDataKey {
     // A map of underlying asset's contract address to reserve config
     ResConfig(Address),
@@ -222,13 +222,6 @@ pub fn get_user_positions(e: &Env, user: &Address) -> Positions {
 /// * `user` - The address of the user
 /// * `positions` - The new positions for the user
 pub fn set_user_positions(e: &Env, user: &Address, positions: &Positions) {
-    if e.storage()
-        .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BACKSTOP_KEY))
-        .is_some_and(|backstop| backstop == *user)
-    {
-        crate::pool::sync_backstop_liabilities(e, positions);
-    }
     let key = PoolDataKey::Positions(user.clone());
     e.storage()
         .persistent()

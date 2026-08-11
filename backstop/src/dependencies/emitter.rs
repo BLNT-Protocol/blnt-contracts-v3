@@ -1,7 +1,7 @@
 use soroban_sdk::{contractclient, contracttype, Address, Env, Vec};
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct Swap {
     pub new_backstop: Address,
     pub new_backstop_token: Address,
