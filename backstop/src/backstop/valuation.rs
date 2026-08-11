@@ -20,7 +20,6 @@ const TOKEN_DECIMALS: u32 = 7;
 pub struct AssetValuation {
     pub underlying_blnd: i128,
     pub usdc_value: i128,
-    pub valid_until: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,7 +52,6 @@ pub(crate) struct PoolValuation {
     pub active_values: ActivationValues,
     pub queued_values: ActivationValues,
     pub total_values: ActivationValues,
-    pub valid_until: u64,
 }
 
 struct PoolTierValuation {
@@ -91,8 +89,6 @@ pub struct PoolBackstopData {
     /// Queued value divided by total active-plus-queued value, rounded up.
     pub q4w_percentage: i128,
     pub usdc: PoolTierData,
-    /// Earliest expiry shared by the tier valuations in this snapshot.
-    pub valuation_valid_until: u64,
 }
 
 pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolBackstopData {
@@ -128,7 +124,6 @@ pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolBackstopData {
             &valuation.active_values,
             &valuation.queued_values,
         ),
-        valuation_valid_until: valuation.valid_until,
     }
 }
 
@@ -187,14 +182,6 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
             blnd_xlm: blnd_xlm_quotes.total.usdc_value,
             usdc: usdc_total,
         },
-        valid_until: blnd_usdc_quotes
-            .active
-            .valid_until
-            .min(blnd_usdc_quotes.queued.valid_until)
-            .min(blnd_usdc_quotes.total.valid_until)
-            .min(blnd_xlm_quotes.active.valid_until)
-            .min(blnd_xlm_quotes.queued.valid_until)
-            .min(blnd_xlm_quotes.total.valid_until),
     }
 }
 
@@ -284,7 +271,6 @@ fn quote_from_composition(
             composition.total_supply,
         ),
         usdc_value: mul_div_floor(e, amount, total_value, composition.total_supply),
-        valid_until: u64::MAX,
     }
 }
 
@@ -300,7 +286,6 @@ fn unit_asset_valuation(amount: i128) -> AssetValuation {
     AssetValuation {
         underlying_blnd: amount,
         usdc_value: amount,
-        valid_until: u64::MAX,
     }
 }
 
@@ -546,7 +531,6 @@ mod tests {
             AssetValuation {
                 underlying_blnd: 200 * SCALAR_7,
                 usdc_value: 25 * SCALAR_7,
-                valid_until: u64::MAX,
             }
         );
         assert_eq!(
@@ -554,7 +538,6 @@ mod tests {
             AssetValuation {
                 underlying_blnd: 100 * SCALAR_7,
                 usdc_value: 125_000_000,
-                valid_until: u64::MAX,
             }
         );
     }
@@ -659,8 +642,6 @@ mod tests {
             }
         );
         assert_eq!(pool_data.q4w_percentage, 1_935_484);
-        assert_eq!(pool_data.valuation_valid_until, u64::MAX);
-
         let quote = e.as_contract(&backstop, || {
             let valuation = build_pool_valuation(&e, &pool);
             quote_activation(&e, &valuation.active_values, false)

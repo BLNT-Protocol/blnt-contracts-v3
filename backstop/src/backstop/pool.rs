@@ -3,53 +3,6 @@ use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Addre
 
 use crate::{dependencies::PoolFactoryClient, errors::BackstopError, storage};
 
-#[cfg(test)]
-use crate::{constants::SCALAR_7, dependencies::CometClient};
-
-#[cfg(test)]
-pub struct LegacyPoolBackstopData {
-    pub blnd: i128,
-    pub tokens: i128,
-    pub usdc: i128,
-}
-
-/// Preserve the frozen v2 reward-zone test model without exposing its
-/// BLND:USDC-only view in the v3 contract ABI.
-#[cfg(test)]
-pub fn load_legacy_pool_backstop_data(e: &Env, address: &Address) -> LegacyPoolBackstopData {
-    let pool_balance = storage::get_pool_balance(e, address);
-    let comet = CometClient::new(e, &storage::get_blnd_usdc_token(e));
-    let total_supply = comet.get_total_supply();
-    let blnd_per_token = comet
-        .get_balance(&storage::get_blnd_token(e))
-        .fixed_div_floor(total_supply, SCALAR_7)
-        .unwrap_optimized();
-    let usdc_per_token = comet
-        .get_balance(&storage::get_usdc_token(e))
-        .fixed_div_floor(total_supply, SCALAR_7)
-        .unwrap_optimized();
-
-    LegacyPoolBackstopData {
-        blnd: pool_balance
-            .tokens
-            .fixed_mul_floor(blnd_per_token, SCALAR_7)
-            .unwrap_optimized(),
-        tokens: pool_balance.tokens,
-        usdc: pool_balance
-            .tokens
-            .fixed_mul_floor(usdc_per_token, SCALAR_7)
-            .unwrap_optimized(),
-    }
-}
-
-#[cfg(test)]
-pub fn is_pool_above_threshold(pool_data: &LegacyPoolBackstopData) -> bool {
-    let threshold = 10_000_000_000_000_000_000_000_000i128;
-    let blnd = pool_data.blnd / SCALAR_7;
-    let usdc = pool_data.usdc / SCALAR_7;
-    blnd.saturating_pow(4).saturating_mul(usdc) >= threshold
-}
-
 /// Verify the pool address was deployed by the Pool Factory.
 ///
 /// If the pool has an outstanding balance, it is assumed that it was verified before.

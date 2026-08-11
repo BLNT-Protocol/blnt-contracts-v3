@@ -32,7 +32,6 @@ pub enum BackstopError {
     AssetConfigurationCollision = 1013,
     InvalidBackstopValuation = 1014,
     InvalidValuation = 1015,
-    StaleValuation = 1016,
     InvalidActivationValue = 1017,
     InvalidEmissionValue = 1027,
     DistributionCheckpointRequired = 1028,

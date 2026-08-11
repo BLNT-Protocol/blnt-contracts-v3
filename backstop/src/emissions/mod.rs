@@ -1,13 +1,4 @@
-#[cfg(test)]
-mod claim;
-
-#[cfg(test)]
 mod distributor;
-#[cfg(test)]
-pub use distributor::update_emissions;
-
-#[cfg(test)]
-mod manager;
 
 mod ongoing;
 #[cfg(test)]

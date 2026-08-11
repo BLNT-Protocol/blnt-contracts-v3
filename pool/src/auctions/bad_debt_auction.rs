@@ -7,10 +7,12 @@ use crate::{
 };
 use cast::i128;
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec, I256};
+use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
-use super::AuctionData;
-use super::AuctionType;
+use super::{
+    math::{auction_modifiers, proportional_ceil, proportional_floor},
+    AuctionData, AuctionType,
+};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -41,7 +43,6 @@ pub struct BadDebtLotQuote {
     pub lot_amount: i128,
     pub unfilled_target_value: i128,
     pub target_value: i128,
-    pub valid_until: u64,
 }
 
 /// Prepared or partially filled single-tier bad-debt auction data.
@@ -168,7 +169,6 @@ fn commit_prepared_bad_debt_auction(
     if lot_quote.debt_value != debt_value_usdc
         || lot_quote.committed_value <= 0
         || lot_quote.lot_amount <= 0
-        || lot_quote.valid_until < e.ledger().timestamp()
     {
         panic_with_error!(e, PoolError::InvalidLot);
     }
@@ -331,7 +331,6 @@ pub fn fill_prepared_bad_debt_auction(
                     lot_amount: remaining_lot_amount,
                     unfilled_target_value: auction.lot_quote.unfilled_target_value,
                     target_value: auction.lot_quote.target_value,
-                    valid_until: auction.lot_quote.valid_until,
                 },
             },
         );
@@ -396,7 +395,12 @@ fn scale_prepared_bad_debt_auction(
     if percent == 0 || percent > 100 {
         panic_with_error!(e, PoolError::InvalidLiquidation);
     }
-    let (bid_modifier, lot_modifier) = auction_modifiers(e, auction.block);
+    let elapsed = e
+        .ledger()
+        .sequence()
+        .checked_sub(auction.block)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
+    let (bid_modifier, lot_modifier) = auction_modifiers(e, elapsed);
     let percent_scaled = i128::from(percent)
         .checked_mul(100_000)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
@@ -441,36 +445,6 @@ fn scale_prepared_bad_debt_auction(
     )
 }
 
-#[allow(clippy::zero_prefixed_literal)]
-fn auction_modifiers(e: &Env, block: u32) -> (i128, i128) {
-    let current_ledger = e.ledger().sequence();
-    let elapsed = current_ledger
-        .checked_sub(block)
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
-    let per_ledger = 0_0050000_i128;
-    if elapsed > 200 {
-        let bid_modifier = if elapsed < 400 {
-            SCALAR_7
-                .checked_sub(
-                    i128::from(elapsed - 200)
-                        .checked_mul(per_ledger)
-                        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
-                )
-                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
-        } else {
-            0
-        };
-        (bid_modifier, SCALAR_7)
-    } else {
-        (
-            SCALAR_7,
-            i128::from(elapsed)
-                .checked_mul(per_ledger)
-                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
-        )
-    }
-}
-
 fn select_bad_debt_lot(
     e: &Env,
     pool_data: &BackstopPoolData,
@@ -510,7 +484,6 @@ fn select_bad_debt_lot(
             lot_amount,
             unfilled_target_value,
             target_value,
-            valid_until: pool_data.valuation_valid_until,
         });
     }
     None
@@ -544,31 +517,6 @@ fn allocate_bad_debt_tier(
         panic_with_error!(e, PoolError::InvalidLot);
     }
     (lot_amount, committed_value, 0)
-}
-
-fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, PoolError::OverflowError);
-    }
-    I256::from_i128(e, value)
-        .mul(&I256::from_i128(e, numerator))
-        .div(&I256::from_i128(e, denominator))
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
-}
-
-fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, PoolError::OverflowError);
-    }
-    let denominator = I256::from_i128(e, denominator);
-    I256::from_i128(e, value)
-        .mul(&I256::from_i128(e, numerator))
-        .add(&denominator)
-        .sub(&I256::from_i32(e, 1))
-        .div(&denominator)
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
 }
 
 fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
@@ -675,7 +623,6 @@ mod tests {
             blnd_xlm,
             q4w_percentage: 0,
             usdc,
-            valuation_valid_until: u64::MAX,
         }
     }
 

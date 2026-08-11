@@ -1,5 +1,6 @@
 mod auction;
 mod bad_debt_auction;
+mod math;
 mod tier_interest_auction;
 mod user_liquidation_auction;
 

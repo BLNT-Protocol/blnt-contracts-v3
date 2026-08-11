@@ -68,9 +68,8 @@ three immutable assets through the `BackstopTier` discriminator.
 Pool-authorized donation selects a tier and adds its token to that pool-tier
 without minting shares, appreciating its active and queued positions.
 The public `pool_data` view returns all three tiers' accounting, active and
-queued valuation, active underlying BLND, aggregate value-weighted Q4W, and
-the common valuation-validity bound in one snapshot. V3 exposes no separate
-pool-tier-state or pool-valuation view.
+queued valuation, active underlying BLND, and aggregate value-weighted Q4W in
+one snapshot. V3 exposes no separate pool-tier-state or pool-valuation view.
 
 The public backstop surface is limited to user operations, pool callbacks,
 consolidated operational views, and a narrow claimable-BLND view. Internal
@@ -305,7 +304,7 @@ assets, impairing active and queued shares without burning them. Untransferred
 base returns to ordinary capacity. Residual dTokens after a complete
 late-discount fill remain liabilities and block withdrawal. A partial fill
 reduces selected value in proportion to the remaining base lot; original
-debt, target, unfilled target, and valuation validity remain creation metadata.
+debt, target, and unfilled target remain creation metadata.
 
 When no bad-debt auction is active, permissionless
 `new_auction(1, backstop, [], [], 100)` performs one bounded step. It validates

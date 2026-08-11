@@ -268,49 +268,6 @@ pub(crate) fn create_comet_lp_pool<'a>(
     (contract_address, client)
 }
 
-/// Deploy a test Comet LP pool of 80% BLND / 20% USDC and set it as the backstop token.
-///
-/// Initializes the pool with the following settings:
-/// - Swap fee: 0.3%
-/// - BLND: 100 * blnd_per_share
-/// - USDC: 100 * usdc_per_share
-/// - Shares: 100
-pub(crate) fn create_comet_lp_pool_with_tokens_per_share<'a>(
-    e: &Env,
-    backstop: &Address,
-    admin: &Address,
-    blnd_token: &Address,
-    blnd_per_share: i128,
-    usdc_token: &Address,
-    usdc_per_share: i128,
-) -> (Address, CometClient<'a>) {
-    let contract_address = Address::generate(e);
-    e.register_at(&contract_address, COMET_WASM, ());
-    let client = CometClient::new(e, &contract_address);
-
-    let blnd_client = MockTokenClient::new(e, blnd_token);
-    let usdc_client = MockTokenClient::new(e, usdc_token);
-    let blnd_total = 100 * blnd_per_share;
-    let usdc_total = 100 * usdc_per_share;
-    blnd_client.mint(&admin, &blnd_total);
-    usdc_client.mint(&admin, &usdc_total);
-
-    // init seeds pool with 100 shares
-    client.init(
-        admin,
-        &vec![e, blnd_token.clone(), usdc_token.clone()],
-        &vec![e, 0_8000000, 0_2000000],
-        &vec![e, blnd_total, usdc_total],
-        &0_0030000,
-    );
-
-    e.as_contract(backstop, || {
-        storage::set_blnd_usdc_token(e, &contract_address);
-    });
-
-    (contract_address, client)
-}
-
 pub(crate) fn create_mock_pool<'a>(e: &Env, _backstop: &Address) -> (Address, MockPoolClient<'a>) {
     let contract_address = Address::generate(e);
     (

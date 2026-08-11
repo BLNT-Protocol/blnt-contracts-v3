@@ -7,9 +7,12 @@ use crate::{
 };
 use sep_41_token::TokenClient;
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, Map, Vec, I256};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env, Map, Vec};
 
-use super::AuctionData;
+use super::{
+    math::{auction_modifiers, proportional_ceil, proportional_floor},
+    AuctionData,
+};
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
@@ -73,7 +76,6 @@ impl InterestReserveState {
 #[contracttype]
 pub struct InterestAuctionData {
     pub auction: AuctionData,
-    pub bid_valid_until: u64,
     pub lot_value: i128,
     pub target_value: i128,
     pub tier: super::BackstopTier,
@@ -156,7 +158,7 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
     }
 
     let mut tier_values = [0_i128; 3];
-    let mut valid_until = pool_data.valuation_valid_until;
+    let mut valid_until = u64::MAX;
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
         let reserve = pool.load_reserve(e, &asset, false);
@@ -187,12 +189,8 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
         panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
     }
 
-    let (bid_token, bid_amount, target_value, bid_valid_until) =
+    let (bid_token, bid_amount, target_value) =
         build_interest_bid(e, &backstop, &pool_data, tier, lot_value);
-    if bid_valid_until < e.ledger().timestamp() {
-        panic_with_error!(e, PoolError::InvalidLot);
-    }
-    valid_until = valid_until.min(bid_valid_until);
     let block = e
         .ledger()
         .sequence()
@@ -204,7 +202,6 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
             lot,
             block,
         },
-        bid_valid_until,
         lot_value,
         target_value,
         tier,
@@ -418,7 +415,7 @@ fn build_interest_bid(
     pool_data: &BackstopPoolData,
     tier: super::BackstopTier,
     lot_value: i128,
-) -> (Address, i128, i128, u64) {
+) -> (Address, i128, i128) {
     let (assets, shares, total_value) = match tier {
         super::BackstopTier::BlndUsdc => (
             pool_data.blnd_usdc.assets,
@@ -449,12 +446,7 @@ fn build_interest_bid(
     if bid_amount <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    let valid_until = if tier == super::BackstopTier::Usdc {
-        u64::MAX
-    } else {
-        pool_data.valuation_valid_until
-    };
-    (bid_token, bid_amount, target_value, valid_until)
+    (bid_token, bid_amount, target_value)
 }
 
 fn value_reserve_amount(
@@ -500,7 +492,6 @@ fn store_remaining_interest_auction(
                 lot: remaining_lot,
                 block: auction.auction.block,
             },
-            bid_valid_until: auction.bid_valid_until,
             lot_value: remaining_lot_value,
             target_value: auction.target_value,
             tier: auction.tier,
@@ -517,7 +508,12 @@ fn scale_interest_auction(
     if percent == 0 || percent > 100 || auction.auction.bid.len() != 1 {
         panic_with_error!(e, PoolError::InvalidInterestAuction);
     }
-    let (bid_modifier, lot_modifier) = auction_modifiers(e, auction.auction.block);
+    let elapsed = e
+        .ledger()
+        .sequence()
+        .checked_sub(auction.auction.block)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidInterestAuction));
+    let (bid_modifier, lot_modifier) = auction_modifiers(e, elapsed);
     let percent_scaled = i128::from(percent)
         .checked_mul(100_000)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
@@ -557,37 +553,6 @@ fn scale_interest_auction(
         lot,
         returned_lot,
         tier: auction.tier,
-    }
-}
-
-#[allow(clippy::zero_prefixed_literal)]
-fn auction_modifiers(e: &Env, block: u32) -> (i128, i128) {
-    let elapsed = e
-        .ledger()
-        .sequence()
-        .checked_sub(block)
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidInterestAuction));
-    let per_ledger = 0_0050000_i128;
-    if elapsed > 200 {
-        let bid_modifier = if elapsed < 400 {
-            checked_sub(
-                e,
-                SCALAR_7,
-                i128::from(elapsed - 200)
-                    .checked_mul(per_ledger)
-                    .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
-            )
-        } else {
-            0
-        };
-        (bid_modifier, SCALAR_7)
-    } else {
-        (
-            SCALAR_7,
-            i128::from(elapsed)
-                .checked_mul(per_ledger)
-                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
-        )
     }
 }
 
@@ -660,31 +625,6 @@ fn checked_mul(e: &Env, left: i128, right: i128) -> i128 {
 fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_sub(right)
         .filter(|result| *result >= 0)
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
-}
-
-fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, PoolError::OverflowError);
-    }
-    let denominator = I256::from_i128(e, denominator);
-    I256::from_i128(e, value)
-        .mul(&I256::from_i128(e, numerator))
-        .add(&denominator)
-        .sub(&I256::from_i32(e, 1))
-        .div(&denominator)
-        .to_i128()
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
-}
-
-fn proportional_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
-    if value < 0 || numerator < 0 || denominator <= 0 {
-        panic_with_error!(e, PoolError::OverflowError);
-    }
-    I256::from_i128(e, value)
-        .mul(&I256::from_i128(e, numerator))
-        .div(&I256::from_i128(e, denominator))
-        .to_i128()
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
 }
 
@@ -768,7 +708,6 @@ mod tests {
                 lot: soroban_sdk::map![&e, (asset, 10)],
                 block: 1,
             },
-            bid_valid_until: u64::MAX,
             lot_value: 10,
             target_value: 12,
             tier: super::super::BackstopTier::BlndUsdc,

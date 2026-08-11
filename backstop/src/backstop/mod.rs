@@ -12,8 +12,6 @@ pub use withdrawal::{
 };
 
 mod pool;
-#[cfg(test)]
-pub use pool::{is_pool_above_threshold, load_legacy_pool_backstop_data};
 pub use pool::{require_is_from_pool_factory, require_registered_pool, PoolBalance};
 
 mod user;

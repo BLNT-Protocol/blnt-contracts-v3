@@ -8,7 +8,10 @@ use cast::i128;
 use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
-use super::user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction};
+use super::{
+    math::auction_modifiers,
+    user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction},
+};
 
 #[derive(Clone, PartialEq)]
 #[repr(u32)]
@@ -168,7 +171,6 @@ pub fn fill_user_liquidation_auction(
 ///
 /// ### Panics
 /// If the percent filled is greater than 100 or less than 0
-#[allow(clippy::zero_prefixed_literal)]
 fn scale_auction(
     e: &Env,
     auction_data: &AuctionData,
@@ -189,24 +191,10 @@ fn scale_auction(
         block: auction_data.block,
     };
 
-    // determine block based auction modifiers
-    let bid_modifier: i128;
-    let lot_modifier: i128;
-    let per_block_scalar: i128 = 0_0050000; // modifier moves 0.5% every block
-    let block_dif = i128(e.ledger().sequence() - auction_data.block);
-    if block_dif > 200 {
-        // lot 100%, bid scaling down from 100% to 0%
-        lot_modifier = SCALAR_7;
-        if block_dif < 400 {
-            bid_modifier = SCALAR_7 - (block_dif - 200) * per_block_scalar;
-        } else {
-            bid_modifier = 0;
-        }
-    } else {
-        // lot scaling from 0% to 100%, bid 100%
-        lot_modifier = block_dif * per_block_scalar;
-        bid_modifier = SCALAR_7;
-    }
+    // Preserve v2's checked-arithmetic VM trap when a fill is attempted
+    // before its start ledger.
+    let elapsed = e.ledger().sequence() - auction_data.block;
+    let (bid_modifier, lot_modifier) = auction_modifiers(e, elapsed);
 
     // scale the auction
     let percent_filled_i128 = i128(percent_filled) * 1_00000; // scale to decimal form in 7 decimals from percentage
