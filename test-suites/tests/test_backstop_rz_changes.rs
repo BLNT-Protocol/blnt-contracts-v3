@@ -84,12 +84,6 @@ fn test_backstop_rz_changes_handle_emissions() {
     // A reward-zone removal prevents new allocations, but the seven-day
     // stream already started by the pool remains claimable through expiry.
     fixture.jump(60 * 60 * 24 * 3);
-    let accrued = fixture.backstop.claimable(
-        &backstop::BackstopTier::BlndUsdc,
-        &sam,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-    );
-    assert!(accrued > 0);
     assert!(
         fixture.backstop.claim(
             &backstop::BackstopTier::BlndUsdc,

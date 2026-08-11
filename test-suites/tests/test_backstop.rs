@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use backstop::{BackstopClient, BackstopContract, BackstopTier, MigrationStatus};
+use backstop::{BackstopClient, BackstopContract, BackstopTier};
 use mock_pool_factory::{MockPoolFactory, PoolInitMeta};
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
@@ -493,11 +493,6 @@ fn test_backstop() {
         .backstop
         .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
         .shares;
-    let claimable = fixture.backstop.claimable(
-        &BackstopTier::BlndUsdc,
-        &sam,
-        &vec![&fixture.env, pool.address.clone()],
-    );
     let lp_compounded = fixture.backstop.claim(
         &BackstopTier::BlndUsdc,
         &sam,
@@ -551,7 +546,7 @@ fn test_backstop() {
         ]
     );
 
-    assert_eq!(blnd_compounded, claimable);
+    assert!(blnd_compounded > 0);
     assert_eq!(
         bstop_token.balance(&fixture.backstop.address),
         bstop_lp_balance + lp_compounded
@@ -654,11 +649,6 @@ fn test_backstop_constructor() {
         backstop_client.backstop_token(&BackstopTier::BlndUsdc),
         backstop_token
     );
-    let migration = backstop_client.migration_state();
-    assert_eq!(migration.status, MigrationStatus::Pending);
-    assert_eq!(migration.migration_epoch_start, None);
-    assert_eq!(migration.activated_at, None);
-    assert_eq!(migration.scheduled_backfill, 0);
 }
 
 #[test]

@@ -25,7 +25,8 @@ enum MigrationDataKey {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
-pub enum MigrationStatus {
+#[cfg(test)]
+pub(crate) enum MigrationStatus {
     Pending,
     Open,
     Active,
@@ -34,7 +35,8 @@ pub enum MigrationStatus {
 /// Complete observable state for the incumbent-emitter migration lifecycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
-pub struct MigrationState {
+#[cfg(test)]
+pub(crate) struct MigrationState {
     pub activated_at: Option<u64>,
     pub backfill_end: Option<u64>,
     pub blnd_binding_verified: bool,
@@ -79,6 +81,7 @@ pub(crate) fn require_backfill_funded(e: &Env) {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn status(e: &Env) -> MigrationStatus {
     if is_active(e) {
         MigrationStatus::Active
@@ -89,6 +92,7 @@ pub(crate) fn status(e: &Env) -> MigrationStatus {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn state(e: &Env) -> MigrationState {
     MigrationState {
         activated_at: activated_at(e),
@@ -118,6 +122,7 @@ pub(crate) fn activated_at(e: &Env) -> Option<u64> {
     e.storage().instance().get(&MigrationDataKey::ActivatedAt)
 }
 
+#[cfg(test)]
 pub(crate) fn backfill_end(e: &Env) -> Option<u64> {
     e.storage().instance().get(&MigrationDataKey::BackfillEnd)
 }
@@ -129,6 +134,7 @@ pub(crate) fn scheduled_backfill(e: &Env) -> i128 {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
 pub(crate) fn funded_backfill(e: &Env) -> Option<i128> {
     storage::get_backfill_funded_amount(e)
 }
@@ -427,6 +433,16 @@ mod tests {
             BackstopClient::new(&self.e, &self.backstop)
         }
 
+        fn claimable(&self, tier: &BackstopTier, user: &Address, pools: &Vec<Address>) -> i128 {
+            self.e.as_contract(&self.backstop, || {
+                emissions::preview_user_ongoing_blnd(&self.e, *tier, user, pools)
+            })
+        }
+
+        fn migration_state(&self) -> MigrationState {
+            self.e.as_contract(&self.backstop, || super::state(&self.e))
+        }
+
         fn unlock(&self) -> u64 {
             self.emitter().get_queued_swap().unwrap().unlock_time
         }
@@ -436,19 +452,10 @@ mod tests {
         }
 
         fn queue(&self) -> u64 {
-            if self
-                .client()
-                .migration_state()
-                .migration_epoch_start
-                .is_none()
-            {
+            if self.migration_state().migration_epoch_start.is_none() {
                 assert_eq!(self.client().distribute(), 0);
             }
-            let epoch_start = self
-                .client()
-                .migration_state()
-                .migration_epoch_start
-                .unwrap();
+            let epoch_start = self.migration_state().migration_epoch_start.unwrap();
             self.emitter()
                 .queue_swap_backstop(&self.backstop, &self.blnd_xlm);
             assert_eq!(self.client().distribute(), 0);
@@ -488,7 +495,7 @@ mod tests {
         assert!(pool_state.pending_blnd_usdc > 0);
         assert_eq!(pool_state.pending_blnd_xlm, 0);
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
@@ -496,7 +503,7 @@ mod tests {
             0
         );
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndXlm,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
@@ -515,16 +522,16 @@ mod tests {
         assert_eq!(fixture.client().gulp_emissions(&fixture.pool), 3 * SCALAR_7);
 
         fixture.swap_and_sync();
-        let scheduled = fixture.client().migration_state().scheduled_backfill;
+        let scheduled = fixture.migration_state().scheduled_backfill;
         assert_eq!(scheduled, QUEUE_SECONDS as i128 * SCALAR_7);
-        assert_eq!(fixture.client().migration_state().funded_backfill, None);
+        assert_eq!(fixture.migration_state().funded_backfill, None);
         fixture
             .e
             .ledger()
-            .set_timestamp(fixture.client().migration_state().activated_at.unwrap() + 10);
+            .set_timestamp(fixture.migration_state().activated_at.unwrap() + 10);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndXlm,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
@@ -543,11 +550,8 @@ mod tests {
         assert!(fixture.client().gulp_emissions(&fixture.pool) > 0);
 
         fixture.client().drop();
-        assert_eq!(
-            fixture.client().migration_state().funded_backfill,
-            Some(scheduled)
-        );
-        assert!(fixture.client().migration_state().blnd_binding_verified);
+        assert_eq!(fixture.migration_state().funded_backfill, Some(scheduled));
+        assert!(fixture.migration_state().blnd_binding_verified);
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             scheduled + 10 * SCALAR_7
@@ -589,7 +593,7 @@ mod tests {
 
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
@@ -619,10 +623,10 @@ mod tests {
 
         fixture.queue();
         fixture.swap_and_sync();
-        assert_eq!(fixture.client().migration_state().scheduled_backfill, 0);
+        assert_eq!(fixture.migration_state().scheduled_backfill, 0);
 
         fixture.client().drop();
-        assert_eq!(fixture.client().migration_state().funded_backfill, Some(0));
+        assert_eq!(fixture.migration_state().funded_backfill, Some(0));
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&recipient),
             amount
@@ -638,7 +642,7 @@ mod tests {
         assert_eq!(fixture.client().gulp_emissions(&fixture.pool), 3 * SCALAR_7);
         fixture.e.ledger().set_timestamp(1_010 + DAY_IN_SECONDS);
         fixture.client().distribute();
-        let accrued_before_queue = fixture.client().claimable(
+        let accrued_before_queue = fixture.claimable(
             &BackstopTier::BlndUsdc,
             &fixture.user,
             &vec![&fixture.e, fixture.pool.clone()],
@@ -682,12 +686,12 @@ mod tests {
 
         fixture.swap_and_sync();
         assert_eq!(
-            fixture.client().migration_state().scheduled_backfill,
+            fixture.migration_state().scheduled_backfill,
             i128::from(10 + DAY_IN_SECONDS) * SCALAR_7
         );
         fixture.client().drop();
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
@@ -722,7 +726,7 @@ mod tests {
             .set_timestamp(unlock - QUEUE_ATTESTATION_WINDOW_SECONDS);
         fixture.client().distribute();
         assert_eq!(
-            fixture.client().migration_state().verified_queue_unlock,
+            fixture.migration_state().verified_queue_unlock,
             Some(unlock)
         );
         fixture.e.ledger().set_timestamp(unlock);
@@ -754,12 +758,9 @@ mod tests {
         );
 
         assert_eq!(fixture.client().distribute(), 0);
+        assert_eq!(fixture.migration_state().status, MigrationStatus::Active);
         assert_eq!(
-            fixture.client().migration_state().status,
-            MigrationStatus::Active
-        );
-        assert_eq!(
-            fixture.client().migration_state().backfill_end,
+            fixture.migration_state().backfill_end,
             Some(unlock - QUEUE_ATTESTATION_WINDOW_SECONDS)
         );
         assert_eq!(
@@ -785,10 +786,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(unlock);
         fixture.emitter().swap_backstop();
         assert!(fixture.client().try_distribute().is_err());
-        assert_eq!(
-            fixture.client().migration_state().status,
-            MigrationStatus::Open
-        );
+        assert_eq!(fixture.migration_state().status, MigrationStatus::Open);
     }
 
     #[test]
@@ -809,10 +807,7 @@ mod tests {
             .set_timestamp(unlock + ACTIVATION_GRACE_SECONDS + 1);
 
         assert!(fixture.client().try_distribute().is_err());
-        assert_eq!(
-            fixture.client().migration_state().status,
-            MigrationStatus::Open
-        );
+        assert_eq!(fixture.migration_state().status, MigrationStatus::Open);
     }
 
     #[test]
@@ -823,7 +818,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(unlock);
         fixture.client().distribute();
         assert_eq!(
-            fixture.client().migration_state().verified_queue_unlock,
+            fixture.migration_state().verified_queue_unlock,
             Some(unlock)
         );
 
@@ -832,10 +827,7 @@ mod tests {
             .ledger()
             .set_timestamp(unlock + ACTIVATION_GRACE_SECONDS + 1);
         fixture.client().distribute();
-        assert_eq!(
-            fixture.client().migration_state().verified_queue_unlock,
-            None
-        );
+        assert_eq!(fixture.migration_state().verified_queue_unlock, None);
     }
 
     #[test]
@@ -863,14 +855,14 @@ mod tests {
             (original_unlock + 10 * DAY_IN_SECONDS - epoch_start) as i128 * SCALAR_7
         );
         assert_eq!(
-            fixture.client().migration_state().scheduled_backfill,
+            fixture.migration_state().scheduled_backfill,
             (original_unlock + 10 * DAY_IN_SECONDS - epoch_start) as i128 * SCALAR_7
         );
 
         fixture.e.ledger().set_timestamp(replacement_unlock);
         fixture.swap_and_sync();
         assert_eq!(
-            fixture.client().migration_state().backfill_end,
+            fixture.migration_state().backfill_end,
             Some(replacement_unlock)
         );
     }
@@ -893,12 +885,12 @@ mod tests {
         assert_eq!(fixture.client().distribute(), 0);
 
         fixture.swap_and_sync();
-        let state = fixture.client().migration_state();
+        let state = fixture.migration_state();
         assert_eq!(state.scheduled_backfill, MAX_BACKFILLED_EMISSIONS);
         assert_eq!(state.backfill_end, Some(epoch_start + MAX_BACKFILL_SECONDS));
         fixture.client().drop();
         assert_eq!(
-            fixture.client().migration_state().funded_backfill,
+            fixture.migration_state().funded_backfill,
             Some(MAX_BACKFILLED_EMISSIONS)
         );
     }
@@ -908,11 +900,7 @@ mod tests {
         let fixture = Fixture::create();
         fixture.e.ledger().set_timestamp(1_000 + QUEUE_SECONDS + 1);
         assert_eq!(fixture.client().distribute(), 0);
-        let epoch_start = fixture
-            .client()
-            .migration_state()
-            .migration_epoch_start
-            .unwrap();
+        let epoch_start = fixture.migration_state().migration_epoch_start.unwrap();
 
         fixture
             .e
@@ -924,7 +912,7 @@ mod tests {
             .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
         assert_eq!(fixture.client().distribute(), 0);
         assert_eq!(
-            fixture.client().migration_state().scheduled_backfill,
+            fixture.migration_state().scheduled_backfill,
             MAX_BACKFILLED_EMISSIONS
         );
     }

@@ -71,9 +71,9 @@ The public `pool_data` view returns all three tiers' accounting, active and
 queued valuation, active underlying BLND, and aggregate value-weighted Q4W in
 one snapshot. V3 exposes no separate pool-tier-state or pool-valuation view.
 
-The public backstop surface is limited to user operations, pool callbacks,
-consolidated operational views, and a narrow claimable-BLND view. Internal
-pool and user emission indexes and carries are not separate entry points.
+The public backstop surface is limited to user operations, pool callbacks, and
+consolidated operational views. Internal pool and user emission indexes,
+carries, and migration fields are not separate entry points.
 
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
@@ -400,9 +400,9 @@ queue must be attested no earlier than its final seven days and no later than
 the end of the post-unlock grace period.
 
 As in v2, public `distribute` returns the allocated BLND amount and public
-`drop` returns no value. One read-only `migration_state` snapshot exposes the
-complete lifecycle state; persistent accounting records the detailed split
-without adding replacement mutating APIs.
+`drop` returns no value. The SDK reconstructs the exact lifecycle snapshot from
+the contract-instance storage; the contract adds no migration view or
+replacement mutating APIs.
 
 Before replacement, the first `distribute` initializes the accounting epoch at
 its invocation time and returns zero; later calls checkpoint backfill whether
@@ -594,10 +594,12 @@ balance or composition changes, membership, and pool status never rewrite
 prior allocation. A position MUST NOT earn through two tiers or both eligible
 and ineligible accounting.
 
-The read-only `claimable(tier, user, pool_addresses)` view returns the user's
-aggregate currently accrued BLND for one eligible tier over a nonempty list of
-unique registered pools, without requiring authorization or changing any
-checkpoint. It rejects plain USDC without exposing internal indexes or carries.
+As in v2, the contract exposes no claimable-emissions view. Clients MAY
+estimate one eligible tier's aggregate claim by reading its pool balance, user
+balance, pool emission, and user emission records. The estimate omits
+contract-internal rounding carries and is non-authoritative; `claim` performs
+the authoritative checkpoint and includes every retained carry. Plain USDC is
+ineligible.
 
 The owner authorizes a claim for one eligible tier over a nonempty list of
 unique registered pool addresses and supplies a minimum LP output. The claim

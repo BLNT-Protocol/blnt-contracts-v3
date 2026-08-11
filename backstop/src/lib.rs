@@ -26,5 +26,4 @@ pub use emissions::{OngoingBlndSplit, OngoingDistribution};
 pub use errors::BackstopError;
 #[cfg(any(test, feature = "testutils"))]
 pub use migration::activate_for_test;
-pub use migration::{MigrationState, MigrationStatus};
 pub use storage::{BackstopDataKey, BackstopEmissionData, PoolUserKey, UserEmissionData};

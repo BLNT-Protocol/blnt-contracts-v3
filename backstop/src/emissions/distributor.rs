@@ -32,6 +32,7 @@ pub(crate) fn checkpoint_user_emissions(
     user_data
 }
 
+#[cfg(test)]
 pub(crate) fn preview_user_emissions(
     e: &Env,
     tier: BackstopTier,

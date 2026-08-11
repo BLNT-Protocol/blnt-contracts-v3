@@ -12,8 +12,10 @@ use crate::{
     dependencies::{CometClient, EmitterClient},
     errors::BackstopError,
     migration,
-    storage::{self, OngoingEmissionState, PoolOngoingEmissions, UserEmissionData},
+    storage::{self, OngoingEmissionState, PoolOngoingEmissions},
 };
+#[cfg(test)]
+use crate::storage::UserEmissionData;
 
 use super::distributor;
 use super::policy::{
@@ -314,6 +316,7 @@ pub(crate) fn refresh_pool_ongoing_assets(e: &Env, pool: &Address) {
     set_pool_ongoing_emissions(e, pool, &state);
 }
 
+#[cfg(test)]
 pub(crate) fn preview_user_ongoing_emissions(
     e: &Env,
     tier: BackstopTier,
@@ -324,6 +327,7 @@ pub(crate) fn preview_user_ongoing_emissions(
     distributor::preview_user_emissions(e, tier, pool, user)
 }
 
+#[cfg(test)]
 pub(crate) fn preview_user_ongoing_blnd(
     e: &Env,
     tier: BackstopTier,
@@ -719,6 +723,12 @@ mod tests {
             BackstopClient::new(&self.e, &self.backstop)
         }
 
+        fn claimable(&self, tier: &BackstopTier, user: &Address, pools: &Vec<Address>) -> i128 {
+            self.e.as_contract(&self.backstop, || {
+                preview_user_ongoing_blnd(&self.e, *tier, user, pools)
+            })
+        }
+
         fn pool_emissions(&self, pool: &Address) -> PoolOngoingEmissions {
             self.e
                 .as_contract(&self.backstop, || get_pool_ongoing_emissions(&self.e, pool))
@@ -727,6 +737,12 @@ mod tests {
         fn ongoing_state(&self) -> OngoingEmissionState {
             self.e
                 .as_contract(&self.backstop, || get_ongoing_emission_state(&self.e))
+        }
+
+        fn blnd_binding_verified(&self) -> bool {
+            self.e.as_contract(&self.backstop, || {
+                storage::get_blnd_binding_verified(&self.e)
+            })
         }
 
         fn distribution(&self) -> OngoingDistribution {
@@ -898,7 +914,7 @@ mod tests {
                 }
             );
         }
-        assert!(fixture.client().migration_state().blnd_binding_verified);
+        assert!(fixture.blnd_binding_verified());
 
         MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
@@ -927,9 +943,9 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, pool]);
         fixture.e.ledger().set_timestamp(1_005);
 
-        assert!(!fixture.client().migration_state().blnd_binding_verified);
+        assert!(!fixture.blnd_binding_verified());
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
-        assert!(fixture.client().migration_state().blnd_binding_verified);
+        assert!(fixture.blnd_binding_verified());
         assert_eq!(
             TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
             5 * SCALAR_7
@@ -950,7 +966,7 @@ mod tests {
         assert_eq!(emitter.distribute(), 5 * SCALAR_7);
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
-        assert!(fixture.client().migration_state().blnd_binding_verified);
+        assert!(fixture.blnd_binding_verified());
 
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
@@ -958,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn claimable_is_read_only_and_validates_scope() {
+    fn claim_preview_is_read_only() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
@@ -967,7 +983,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &user,
                 &vec![&fixture.e, pool.clone()],
@@ -984,7 +1000,7 @@ mod tests {
             storage::get_user_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
         });
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &user,
                 &vec![&fixture.e, pool.clone()],
@@ -996,30 +1012,6 @@ mod tests {
             storage::get_user_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
         });
         assert_eq!(stored_after, stored_before);
-        assert!(fixture
-            .client()
-            .try_claimable(&BackstopTier::Usdc, &user, &vec![&fixture.e, pool.clone()],)
-            .is_err());
-        assert!(fixture
-            .client()
-            .try_claimable(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, Address::generate(&fixture.e)],
-            )
-            .is_err());
-        assert!(fixture
-            .client()
-            .try_claimable(&BackstopTier::BlndUsdc, &user, &vec![&fixture.e])
-            .is_err());
-        assert!(fixture
-            .client()
-            .try_claimable(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, pool.clone(), pool],
-            )
-            .is_err());
     }
 
     #[test]
@@ -1045,7 +1037,7 @@ mod tests {
             .ledger()
             .set_timestamp(1_010 + distributor::STREAM_SECONDS);
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &blnd_usdc_user,
                 &vec![&fixture.e, pool.clone()],
@@ -1053,7 +1045,7 @@ mod tests {
             35_000_000
         );
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndXlm,
                 &blnd_xlm_user,
                 &vec![&fixture.e, pool.clone()],
@@ -1077,7 +1069,7 @@ mod tests {
             &0,
         );
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &blnd_usdc_user,
                 &vec![&fixture.e, pool.clone()],
@@ -1085,7 +1077,7 @@ mod tests {
             0
         );
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndXlm,
                 &blnd_xlm_user,
                 &vec![&fixture.e, pool.clone()],
@@ -1132,7 +1124,7 @@ mod tests {
             .ledger()
             .set_timestamp(1_010 + distributor::STREAM_SECONDS);
         fixture.client().distribute();
-        let accrued = fixture.client().claimable(
+        let accrued = fixture.claimable(
             &BackstopTier::BlndUsdc,
             &user,
             &vec![&fixture.e, pool.clone()],
@@ -1153,7 +1145,7 @@ mod tests {
             )
             .is_err());
         assert_eq!(
-            fixture.client().claimable(
+            fixture.claimable(
                 &BackstopTier::BlndUsdc,
                 &user,
                 &vec![&fixture.e, pool.clone()],
@@ -1195,10 +1187,7 @@ mod tests {
         fixture.client().distribute();
 
         let pool_addresses = vec![&fixture.e, first.clone(), second.clone()];
-        let aggregate_claim =
-            fixture
-                .client()
-                .claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses);
+        let aggregate_claim = fixture.claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses);
         assert!(aggregate_claim > 0);
         let first_shares = fixture
             .client()
@@ -1225,9 +1214,7 @@ mod tests {
             lp_before + lp_out
         );
         assert_eq!(
-            fixture
-                .client()
-                .claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses,),
+            fixture.claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses,),
             0
         );
         assert!(
@@ -1248,7 +1235,7 @@ mod tests {
     }
 
     #[test]
-    fn claim_rejects_empty_and_duplicate_pool_addresses() {
+    fn claim_rejects_invalid_scope() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
@@ -1256,6 +1243,24 @@ mod tests {
         assert!(fixture
             .client()
             .try_claim(&BackstopTier::BlndUsdc, &user, &vec![&fixture.e], &0,)
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claim(
+                &BackstopTier::Usdc,
+                &user,
+                &vec![&fixture.e, pool.clone()],
+                &0,
+            )
+            .is_err());
+        assert!(fixture
+            .client()
+            .try_claim(
+                &BackstopTier::BlndUsdc,
+                &user,
+                &vec![&fixture.e, Address::generate(&fixture.e)],
+                &0,
+            )
             .is_err());
         assert!(fixture
             .client()
@@ -1316,7 +1321,7 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_005);
 
         assert!(fixture.client().try_distribute().is_err());
-        assert!(!fixture.client().migration_state().blnd_binding_verified);
+        assert!(!fixture.blnd_binding_verified());
         assert_eq!(
             fixture.ongoing_state(),
             OngoingEmissionState {

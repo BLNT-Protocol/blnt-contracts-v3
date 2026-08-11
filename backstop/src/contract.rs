@@ -7,8 +7,7 @@ use crate::{
     emissions,
     errors::BackstopError,
     events::BackstopEvents,
-    migration::{self, MigrationState},
-    storage,
+    migration, storage,
 };
 use soroban_sdk::{contract, contractclient, contractimpl, panic_with_error, Address, Env, Vec};
 
@@ -73,9 +72,6 @@ pub trait Backstop {
     /// Fetch one user's active shares and bounded withdrawal queue in a tier.
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
 
-    /// Return the complete incumbent-emitter migration state.
-    fn migration_state(e: Env) -> MigrationState;
-
     /// Execute the configured initial drop and fund any scheduled migration backfill.
     fn drop(e: Env);
 
@@ -86,9 +82,6 @@ pub trait Backstop {
 
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
-
-    /// Return one user's aggregate claimable BLND for an eligible tier and list of pools.
-    fn claimable(e: Env, tier: BackstopTier, user: Address, pool_addresses: Vec<Address>) -> i128;
 
     /// Compound one eligible tier's accrued BLND across a list of pools.
     fn claim(
@@ -273,11 +266,6 @@ impl Backstop for BackstopContract {
         storage::get_user_balance_for_tier(&e, tier, &pool, &user)
     }
 
-    fn migration_state(e: Env) -> MigrationState {
-        storage::extend_instance(&e);
-        migration::state(&e)
-    }
-
     fn drop(e: Env) {
         storage::extend_instance(&e);
         migration::drop(&e)
@@ -296,11 +284,6 @@ impl Backstop for BackstopContract {
 
         BackstopEvents::distribute(&e, distribution.distributed);
         distribution.distributed
-    }
-
-    fn claimable(e: Env, tier: BackstopTier, user: Address, pool_addresses: Vec<Address>) -> i128 {
-        storage::extend_instance(&e);
-        emissions::preview_user_ongoing_blnd(&e, tier, &user, &pool_addresses)
     }
 
     fn claim(
