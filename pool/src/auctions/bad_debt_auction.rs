@@ -33,25 +33,14 @@ pub enum BackstopTier {
     Usdc,
 }
 
-/// Canonical single-tier lot selected by the pool from backstop data.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct BadDebtLotQuote {
-    pub committed_value: i128,
-    pub debt_value: i128,
-    pub tier: BackstopTier,
-    pub lot_amount: i128,
-    pub unfilled_target_value: i128,
-    pub target_value: i128,
-}
-
 /// Prepared or partially filled single-tier bad-debt auction data.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 pub struct BadDebtAuctionData {
     pub bid: Map<Address, i128>,
     pub block: u32,
-    pub lot_quote: BadDebtLotQuote,
+    pub lot_amount: i128,
+    pub tier: BackstopTier,
 }
 
 /// Exact amounts processed by one bad-debt auction fill.
@@ -89,10 +78,10 @@ pub fn create_bad_debt_auction(e: &Env) -> BadDebtAuctionData {
 pub fn bad_debt_auction_data(e: &Env, auction: &BadDebtAuctionData) -> AuctionData {
     let backstop = storage::get_backstop(e);
     let lot_token =
-        BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(auction.lot_quote.tier));
+        BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(auction.tier));
     AuctionData {
         bid: auction.bid.clone(),
-        lot: map![e, (lot_token, auction.lot_quote.lot_amount)],
+        lot: map![e, (lot_token, auction.lot_amount)],
         block: auction.block,
     }
 }
@@ -165,11 +154,8 @@ fn commit_prepared_bad_debt_auction(
     bid_amounts: &Map<Address, i128>,
     debt_value_usdc: i128,
 ) -> Option<BadDebtAuctionData> {
-    let lot_quote = quote_bad_debt_lot(e, debt_value_usdc)?;
-    if lot_quote.debt_value != debt_value_usdc
-        || lot_quote.committed_value <= 0
-        || lot_quote.lot_amount <= 0
-    {
+    let (tier, lot_amount) = quote_bad_debt_lot(e, debt_value_usdc)?;
+    if lot_amount <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
     let block = e
@@ -180,13 +166,14 @@ fn commit_prepared_bad_debt_auction(
     let auction = BadDebtAuctionData {
         bid: bid_amounts.clone(),
         block,
-        lot_quote,
+        lot_amount,
+        tier,
     };
     set_prepared_bad_debt_auction(e, &auction);
     Some(auction)
 }
 
-fn quote_bad_debt_lot(e: &Env, debt_value_usdc: i128) -> Option<BadDebtLotQuote> {
+fn quote_bad_debt_lot(e: &Env, debt_value_usdc: i128) -> Option<(BackstopTier, i128)> {
     let backstop = storage::get_backstop(e);
     let pool_address = e.current_contract_address();
     let pool_data = BackstopClient::new(e, &backstop).pool_data(&pool_address);
@@ -302,24 +289,13 @@ pub fn fill_prepared_bad_debt_auction(
         &filler_state.address,
     );
     if !fill.complete {
-        let expected_committed_value = auction.lot_quote.committed_value.fixed_mul_floor(
-            e,
-            &remaining_lot_amount,
-            &auction.lot_quote.lot_amount,
-        );
         set_prepared_bad_debt_auction(
             e,
             &BadDebtAuctionData {
                 bid: remaining_bid,
                 block: auction.block,
-                lot_quote: BadDebtLotQuote {
-                    committed_value: expected_committed_value,
-                    debt_value: auction.lot_quote.debt_value,
-                    tier: auction.lot_quote.tier,
-                    lot_amount: remaining_lot_amount,
-                    unfilled_target_value: auction.lot_quote.unfilled_target_value,
-                    target_value: auction.lot_quote.target_value,
-                },
+                lot_amount: remaining_lot_amount,
+                tier: auction.tier,
             },
         );
     } else {
@@ -406,13 +382,10 @@ fn scale_prepared_bad_debt_auction(
             filled_bid.set(asset, scaled);
         }
     }
-    let base_lot_amount =
-        auction
-            .lot_quote
-            .lot_amount
-            .fixed_mul_floor(e, &percent_scaled, &SCALAR_7);
+    let base_lot_amount = auction
+        .lot_amount
+        .fixed_mul_floor(e, &percent_scaled, &SCALAR_7);
     let remaining_lot_amount = auction
-        .lot_quote
         .lot_amount
         .checked_sub(base_lot_amount)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
@@ -425,7 +398,7 @@ fn scale_prepared_bad_debt_auction(
             block: auction.block,
             complete,
             lot_amount,
-            tier: auction.lot_quote.tier,
+            tier: auction.tier,
         },
         remaining_bid,
         remaining_lot_amount,
@@ -436,7 +409,7 @@ fn select_bad_debt_lot(
     e: &Env,
     pool_data: &BackstopPoolData,
     debt_value: i128,
-) -> Option<BadDebtLotQuote> {
+) -> Option<(BackstopTier, i128)> {
     if debt_value <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
@@ -462,16 +435,8 @@ fn select_bad_debt_lot(
         if tokens == 0 || value == 0 {
             continue;
         }
-        let (lot_amount, committed_value, unfilled_target_value) =
-            allocate_bad_debt_tier(e, tokens, value, target_value);
-        return Some(BadDebtLotQuote {
-            committed_value,
-            debt_value,
-            tier,
-            lot_amount,
-            unfilled_target_value,
-            target_value,
-        });
+        let lot_amount = allocate_bad_debt_tier(e, tokens, value, target_value);
+        return Some((tier, lot_amount));
     }
     None
 }
@@ -481,18 +446,12 @@ fn allocate_bad_debt_tier(
     available_assets: i128,
     available_value: i128,
     target_value: i128,
-) -> (i128, i128, i128) {
+) -> i128 {
     if available_assets <= 0 || available_value <= 0 || target_value <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
     if available_value <= target_value {
-        return (
-            available_assets,
-            available_value,
-            target_value
-                .checked_sub(available_value)
-                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
-        );
+        return available_assets;
     }
 
     let lot_amount = proportional_ceil(e, target_value, available_assets, available_value);
@@ -503,7 +462,7 @@ fn allocate_bad_debt_tier(
     if committed_value < target_value {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    (lot_amount, committed_value, 0)
+    lot_amount
 }
 
 fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
@@ -623,11 +582,9 @@ mod tests {
             test_tier_data(400 * SCALAR_7, 400 * SCALAR_7),
         );
 
-        let quote = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(quote.tier, BackstopTier::BlndXlm);
-        assert_eq!(quote.target_value, 60 * SCALAR_7);
-        assert_eq!(quote.lot_amount, 60 * SCALAR_7);
-        assert_eq!(quote.committed_value, 60 * SCALAR_7);
+        let (tier, lot_amount) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
+        assert_eq!(tier, BackstopTier::BlndXlm);
+        assert_eq!(lot_amount, 60 * SCALAR_7);
     }
 
     #[test]
@@ -639,9 +596,9 @@ mod tests {
             test_tier_data(500 * SCALAR_7, 500 * SCALAR_7),
         );
 
-        let quote = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(quote.tier, BackstopTier::BlndXlm);
-        assert_eq!(quote.lot_amount, 60 * SCALAR_7);
+        let (tier, lot_amount) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
+        assert_eq!(tier, BackstopTier::BlndXlm);
+        assert_eq!(lot_amount, 60 * SCALAR_7);
     }
 
     #[test]
@@ -653,8 +610,8 @@ mod tests {
             test_tier_data(500 * SCALAR_7, 500 * SCALAR_7),
         );
 
-        let quote = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(quote.tier, BackstopTier::Usdc);
+        let (tier, _) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
+        assert_eq!(tier, BackstopTier::Usdc);
     }
 
     #[test]
@@ -679,9 +636,9 @@ mod tests {
             test_tier_data(0, 0),
         );
 
-        let quote = select_bad_debt_lot(&e, &pool_data, 100 * SCALAR_7).unwrap();
-        assert_eq!(quote.lot_amount, 61);
-        assert!(quote.committed_value >= quote.target_value);
+        let (_, lot_amount) = select_bad_debt_lot(&e, &pool_data, 100 * SCALAR_7).unwrap();
+        assert_eq!(lot_amount, 61);
+        assert!(proportional_floor(&e, 200 * SCALAR_7, lot_amount, 101) >= 120 * SCALAR_7);
     }
 
     #[test]

@@ -76,10 +76,7 @@ impl InterestReserveState {
 #[contracttype(export = false)]
 pub struct InterestAuctionData {
     pub auction: AuctionData,
-    pub lot_value: i128,
-    pub target_value: i128,
     pub tier: super::BackstopTier,
-    pub valid_until: u64,
 }
 
 /// Exact base and time-scaled amounts processed by one interest fill.
@@ -92,7 +89,6 @@ pub(crate) struct InterestAuctionFill {
     pub block: u32,
     pub complete: bool,
     pub lot: Map<Address, i128>,
-    pub returned_lot: Map<Address, i128>,
     pub tier: super::BackstopTier,
 }
 
@@ -158,11 +154,10 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
     }
 
     let mut tier_values = [0_i128; 3];
-    let mut valid_until = u64::MAX;
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
         let reserve = pool.load_reserve(e, &asset, false);
-        let (price, price_valid_until) = pool.load_price_with_valid_until(e, &asset);
+        let price = pool.load_price(e, &asset);
         let values = [
             value_reserve_amount(e, price, state.blnd_usdc, reserve.scalar, oracle_scalar),
             value_reserve_amount(e, price, state.blnd_xlm, reserve.scalar, oracle_scalar),
@@ -171,7 +166,6 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
         for index in 0..3 {
             tier_values[index] = checked_add(e, tier_values[index], values[index]);
         }
-        valid_until = valid_until.min(price_valid_until);
     }
 
     let tier = select_interest_tier(e, interest_tier_cursor(e), tier_values);
@@ -189,8 +183,7 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
         panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
     }
 
-    let (bid_token, bid_amount, target_value) =
-        build_interest_bid(e, &backstop, &pool_data, tier, lot_value);
+    let (bid_token, bid_amount) = build_interest_bid(e, &backstop, &pool_data, tier, lot_value);
     let block = e
         .ledger()
         .sequence()
@@ -202,10 +195,7 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
             lot,
             block,
         },
-        lot_value,
-        target_value,
         tier,
-        valid_until,
     };
     set_interest_auction(e, &auction);
     e.storage()
@@ -411,7 +401,7 @@ fn build_interest_bid(
     pool_data: &BackstopPoolData,
     tier: super::BackstopTier,
     lot_value: i128,
-) -> (Address, i128, i128) {
+) -> (Address, i128) {
     let (tokens, shares, value) = match tier {
         super::BackstopTier::BlndUsdc => (
             pool_data.blnd_usdc.tokens,
@@ -442,7 +432,7 @@ fn build_interest_bid(
     if bid_amount <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    (bid_token, bid_amount, target_value)
+    (bid_token, bid_amount)
 }
 
 fn value_reserve_amount(
@@ -470,9 +460,6 @@ fn store_remaining_interest_auction(
     if remaining_bid <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-    let remaining_lot_value = auction
-        .lot_value
-        .fixed_mul_floor(e, &remaining_bid, &previous_bid);
     let mut remaining_lot = Map::new(e);
     for (asset, amount) in auction.auction.lot.iter() {
         let remainder = checked_sub(e, amount, fill.base_lot.get(asset.clone()).unwrap_or(0));
@@ -488,10 +475,7 @@ fn store_remaining_interest_auction(
                 lot: remaining_lot,
                 block: auction.auction.block,
             },
-            lot_value: remaining_lot_value,
-            target_value: auction.target_value,
             tier: auction.tier,
-            valid_until: auction.valid_until,
         },
     );
 }
@@ -520,24 +504,14 @@ fn scale_interest_auction(
     let complete = remaining_bid == 0;
     let mut base_lot = Map::new(e);
     let mut lot = Map::new(e);
-    let mut returned_lot = Map::new(e);
     for (asset, amount) in auction.auction.lot.iter() {
         let base = amount.fixed_mul_floor(e, &percent_scaled, &SCALAR_7);
         let actual = base.fixed_mul_floor(e, &lot_modifier, &SCALAR_7);
-        let remainder = checked_sub(e, amount, base);
-        let returned = checked_add(
-            e,
-            checked_sub(e, base, actual),
-            if complete { remainder } else { 0 },
-        );
         if base > 0 {
             base_lot.set(asset.clone(), base);
         }
         if actual > 0 {
-            lot.set(asset.clone(), actual);
-        }
-        if returned > 0 {
-            returned_lot.set(asset, returned);
+            lot.set(asset, actual);
         }
     }
     InterestAuctionFill {
@@ -547,7 +521,6 @@ fn scale_interest_auction(
         block: auction.auction.block,
         complete,
         lot,
-        returned_lot,
         tier: auction.tier,
     }
 }
@@ -704,10 +677,7 @@ mod tests {
                 lot: soroban_sdk::map![&e, (asset, 10)],
                 block: 1,
             },
-            lot_value: 10,
-            target_value: 12,
             tier: super::super::BackstopTier::BlndUsdc,
-            valid_until: u64::MAX,
         };
         e.as_contract(&contract, || {
             set_interest_auction(&e, &blnd_usdc_auction);
