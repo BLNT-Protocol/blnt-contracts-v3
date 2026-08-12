@@ -1,5 +1,5 @@
 use crate::{
-    auctions::{self, AuctionData, InterestReserveState},
+    auctions::{self, AuctionData},
     emissions::{self, ReserveEmissionMetadata},
     events::PoolEvents,
     pool::{self, FlashLoan, Positions, Request, Reserve},
@@ -281,9 +281,6 @@ pub trait Pool {
 
     /// Delete a stale auction after the inherited 500-ledger boundary.
     fn del_auction(e: Env, auction_type: u32, user: Address);
-
-    /// Return one reserve's pending tier-specific interest-credit state.
-    fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState;
 
     /// Check and handle bad debt for a user.
     ///
@@ -602,10 +599,6 @@ impl Pool for PoolContract {
             }
         }
         PoolEvents::delete_auction(&e, auction_type, user);
-    }
-
-    fn interest_reserve_state(e: Env, asset: Address) -> InterestReserveState {
-        auctions::interest_reserve_state(&e, &asset)
     }
 
     fn bad_debt(e: Env, user: Address) {

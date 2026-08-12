@@ -28,12 +28,12 @@ const TAKE_RATE_WEIGHT_USDC: i128 = 2;
 
 /// Pending reserve credit apportioned to each tier for one reserve asset.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct InterestReserveState {
-    pub blnd_usdc: i128,
-    pub blnd_xlm: i128,
-    pub carry: i128,
-    pub usdc: i128,
+#[contracttype(export = false)]
+struct InterestReserveState {
+    blnd_usdc: i128,
+    blnd_xlm: i128,
+    carry: i128,
+    usdc: i128,
 }
 
 impl InterestReserveState {
@@ -299,10 +299,6 @@ pub fn del_interest_auction(e: &Env) {
     e.storage()
         .temporary()
         .remove(&InterestAuctionDataKey::InterestAuction);
-}
-
-pub fn interest_reserve_state(e: &Env, asset: &Address) -> InterestReserveState {
-    get_interest_reserve_state(e, asset)
 }
 
 fn has_interest_auction(e: &Env) -> bool {

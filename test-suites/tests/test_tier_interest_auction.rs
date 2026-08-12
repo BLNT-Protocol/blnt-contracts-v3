@@ -3,11 +3,40 @@
 
 use backstop::BackstopTier;
 use pool::{AuctionType, PoolClient, Request, RequestType, ReserveConfig};
-use soroban_sdk::{testutils::Ledger, vec, Address, Env, String};
+use soroban_sdk::{contracttype, testutils::Ledger, vec, Address, Env, String};
 use test_suites::{
     liquidity_pool::LPClient,
     test_fixture::{TestFixture, TokenIndex, SCALAR_7},
 };
+
+#[derive(Clone)]
+#[contracttype]
+enum InterestDataKey {
+    Reserve(Address),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct InterestReserveState {
+    blnd_usdc: i128,
+    blnd_xlm: i128,
+    carry: i128,
+    usdc: i128,
+}
+
+fn interest_reserve_state(e: &Env, pool: &Address, asset: &Address) -> InterestReserveState {
+    e.as_contract(pool, || {
+        e.storage()
+            .persistent()
+            .get(&InterestDataKey::Reserve(asset.clone()))
+            .unwrap_or(InterestReserveState {
+                blnd_usdc: 0,
+                blnd_xlm: 0,
+                carry: 0,
+                usdc: 0,
+            })
+    })
+}
 
 fn fill_interest(e: &Env, pool: &PoolClient, backstop: &Address, filler: &Address, percent: i128) {
     pool.submit(
@@ -368,7 +397,8 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         )
         .is_err());
 
-    let pending = pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
+    let pending =
+        interest_reserve_state(&e, &pool_address, &fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(pending.blnd_usdc, 150 * SCALAR_7);
     assert_eq!(pending.blnd_xlm, 0);
     assert_eq!(pending.usdc, 0);
@@ -419,7 +449,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &100,
     );
     let pending_before_stale =
-        pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
+        interest_reserve_state(&e, &pool_address, &fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(
         stale
             .lot
@@ -464,7 +494,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         )
         .is_err());
     let pending_after_stale =
-        pool.interest_reserve_state(&fixture.tokens[TokenIndex::USDC].address);
+        interest_reserve_state(&e, &pool_address, &fixture.tokens[TokenIndex::USDC].address);
     assert_eq!(pending_after_stale, pending_before_stale);
     assert_eq!(
         pending_after_stale.blnd_usdc

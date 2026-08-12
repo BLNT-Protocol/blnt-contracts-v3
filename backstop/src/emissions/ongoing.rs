@@ -4,6 +4,8 @@ use soroban_sdk::{
     contracttype, panic_with_error, vec, Address, Env, IntoVal, Map, Symbol, Val, Vec,
 };
 
+#[cfg(test)]
+use crate::storage::UserEmissionData;
 use crate::{
     backstop::{
         credit_tier_shares, require_registered_pool, tier_token, BackstopTier, BlndEmissionValues,
@@ -14,8 +16,6 @@ use crate::{
     migration,
     storage::{self, OngoingEmissionState, PoolOngoingEmissions},
 };
-#[cfg(test)]
-use crate::storage::UserEmissionData;
 
 use super::distributor;
 use super::policy::{

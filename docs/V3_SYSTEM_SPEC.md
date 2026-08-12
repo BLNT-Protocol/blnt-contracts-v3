@@ -343,6 +343,12 @@ Each pool and reserve stores three pending tier amounts and an isolated carry.
 New credit plus carry is apportioned by the formula; floors and new carry
 conserve the exact input without combining scopes.
 
+As in v2, the pool contract exposes no separate interest-reserve accounting
+view. Clients MAY inspect the persistent per-reserve allocation through the
+SDK's direct ledger reader; the stored key and value encoding are therefore a
+client-compatibility boundary. A direct read does not extend TTL and reports
+whether the persistent entry exists in the RPC server's live-ledger view.
+
 As in v2, the pool owns take-rate and interest-auction policy. It applies the
 immutable weights locally using the backstop's canonical `pool_data` values;
 the backstop exposes no separate weighting or allocation entry point.
