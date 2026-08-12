@@ -7,9 +7,7 @@ use soroban_sdk::{
 #[cfg(test)]
 use crate::storage::UserEmissionData;
 use crate::{
-    backstop::{
-        credit_tier_shares, require_registered_pool, tier_token, BackstopTier, BlndEmissionValues,
-    },
+    backstop::{credit_tier_shares, require_registered_pool, tier_token, BackstopTier},
     constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
     dependencies::{CometClient, EmitterClient},
     errors::BackstopError,
@@ -27,25 +25,12 @@ const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 5;
 const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
 
-/// Result of one completed permissionless BLND distribution checkpoint.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct OngoingDistribution {
-    pub backstop_allocated: i128,
-    pub backstop_carry: i128,
-    pub checkpoint: u64,
-    pub eligible_blnd: i128,
-    pub pool_allocated: i128,
-    pub pool_carry: i128,
-    pub distributed: i128,
-    pub split_carry: i128,
-}
-
 pub(crate) struct OngoingClaim {
     pub lp_amount: i128,
     pub allocations: Vec<(Address, i128, i128, i128)>,
 }
 
-pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
+pub(crate) fn distribute(e: &Env) -> i128 {
     if !migration::is_active(e) {
         return match migration::distribution_transition(e) {
             migration::DistributionTransition::Backfill(checkpoint) => {
@@ -123,7 +108,7 @@ pub(crate) fn distribute(e: &Env) -> OngoingDistribution {
 /// Accrue migration backfill through the ordinary 70/30 emission pipeline.
 /// Before activation, active BLND:USDC LP tokens directly determine pool
 /// weight, and only that tier receives pending backstop emissions.
-pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> OngoingDistribution {
+pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> i128 {
     if migration::is_active(e) {
         panic_with_error!(e, BackstopError::AlreadyFinalized);
     }
@@ -160,7 +145,7 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> OngoingDistributi
 fn collect_weights(
     e: &Env,
     use_underlying_blnd: bool,
-) -> (Vec<(Address, i128, BlndEmissionValues)>, i128) {
+) -> (Vec<(Address, PoolOngoingEmissions, i128, i128)>, i128) {
     let reward_zone = storage::get_reward_zone(e);
     if reward_zone.is_empty() {
         return (Vec::new(e), 0);
@@ -205,14 +190,7 @@ fn collect_weights(
         };
         let pool_weight = checked_add(e, pool_blnd_usdc, pool_blnd_xlm);
         total_eligible_blnd = checked_add(e, total_eligible_blnd, pool_weight);
-        weights.push_back((
-            pool,
-            pool_weight,
-            BlndEmissionValues {
-                blnd_usdc: pool_blnd_usdc,
-                blnd_xlm: pool_blnd_xlm,
-            },
-        ));
+        weights.push_back((pool, pool_state, pool_blnd_usdc, pool_blnd_xlm));
     }
     if use_underlying_blnd
         && (total_blnd_usdc > blnd_usdc_supply || total_blnd_xlm > blnd_xlm_supply)
@@ -227,15 +205,17 @@ fn allocate_distribution(
     state: &mut OngoingEmissionState,
     amount: i128,
     checkpoint: u64,
-    weights: Vec<(Address, i128, BlndEmissionValues)>,
+    weights: Vec<(Address, PoolOngoingEmissions, i128, i128)>,
     total_eligible_blnd: i128,
-) -> OngoingDistribution {
-    let split = quote_ongoing_blnd_split(e, amount, state.split_carry);
-    let backstop_distribution = checked_add(e, split.backstop, state.backstop_carry);
-    let pool_distribution = checked_add(e, split.pool, state.pool_carry);
+) -> i128 {
+    let (backstop_split, pool_split, split_carry) =
+        quote_ongoing_blnd_split(e, amount, state.split_carry);
+    let backstop_distribution = checked_add(e, backstop_split, state.backstop_carry);
+    let pool_distribution = checked_add(e, pool_split, state.pool_carry);
     let mut backstop_allocated = 0_i128;
     let mut pool_allocated = 0_i128;
-    for (pool, weight, values) in weights.iter() {
+    for (pool, mut pool_state, blnd_usdc, blnd_xlm) in weights.iter() {
+        let weight = checked_add(e, blnd_usdc, blnd_xlm);
         let (backstop_allocation, pool_allocation) = if total_eligible_blnd == 0 {
             (0, 0)
         } else {
@@ -244,8 +224,13 @@ fn allocate_distribution(
                 proportional_floor(e, pool_distribution, weight, total_eligible_blnd),
             )
         };
-        let mut pool_state = get_pool_ongoing_emissions(e, &pool);
-        allocate_pool_backstop_emissions(e, &mut pool_state, &values, backstop_allocation);
+        allocate_pool_backstop_emissions(
+            e,
+            &mut pool_state,
+            blnd_usdc,
+            blnd_xlm,
+            backstop_allocation,
+        );
         pool_state.accrued_pool = checked_add(e, pool_state.accrued_pool, pool_allocation);
         set_pool_ongoing_emissions(e, &pool, &pool_state);
         backstop_allocated = checked_add(e, backstop_allocated, backstop_allocation);
@@ -255,7 +240,7 @@ fn allocate_distribution(
     state.total_distributed = checked_add(e, state.total_distributed, amount);
     state.backstop_allocated = checked_add(e, state.backstop_allocated, backstop_allocated);
     state.pool_allocated = checked_add(e, state.pool_allocated, pool_allocated);
-    state.split_carry = split.carry;
+    state.split_carry = split_carry;
     state.backstop_carry = checked_sub(e, backstop_distribution, backstop_allocated);
     state.pool_carry = checked_sub(e, pool_distribution, pool_allocated);
     state.last_distribution = Some(checkpoint);
@@ -263,37 +248,19 @@ fn allocate_distribution(
     storage::set_reward_zone_checkpoint(e, checkpoint);
     storage::set_reward_zone_distribution_started(e);
 
-    OngoingDistribution {
-        backstop_allocated,
-        backstop_carry: state.backstop_carry,
-        checkpoint,
-        eligible_blnd: total_eligible_blnd,
-        pool_allocated,
-        pool_carry: state.pool_carry,
-        distributed: amount,
-        split_carry: state.split_carry,
-    }
+    amount
 }
 
 fn advance_without_distribution(
     e: &Env,
     state: &mut OngoingEmissionState,
     checkpoint: u64,
-) -> OngoingDistribution {
+) -> i128 {
     state.last_distribution = Some(checkpoint);
     set_ongoing_emission_state(e, state);
     storage::set_reward_zone_checkpoint(e, checkpoint);
     storage::set_reward_zone_distribution_started(e);
-    OngoingDistribution {
-        backstop_allocated: 0,
-        backstop_carry: state.backstop_carry,
-        checkpoint,
-        eligible_blnd: 0,
-        pool_allocated: 0,
-        pool_carry: state.pool_carry,
-        distributed: 0,
-        split_carry: state.split_carry,
-    }
+    0
 }
 
 fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
@@ -561,20 +528,21 @@ fn require_emission_tier(e: &Env, tier: BackstopTier) {
 fn allocate_pool_backstop_emissions(
     e: &Env,
     state: &mut PoolOngoingEmissions,
-    values: &BlndEmissionValues,
+    blnd_usdc_weight: i128,
+    blnd_xlm_weight: i128,
     allocation: i128,
 ) {
     if allocation < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
-    let total_weight = checked_add(e, values.blnd_usdc, values.blnd_xlm);
+    let total_weight = checked_add(e, blnd_usdc_weight, blnd_xlm_weight);
     let distribution = checked_add(e, allocation, state.backstop_tier_carry);
     if total_weight == 0 {
         return;
     }
 
-    let blnd_usdc = proportional_floor(e, distribution, values.blnd_usdc, total_weight);
-    let blnd_xlm = proportional_floor(e, distribution, values.blnd_xlm, total_weight);
+    let blnd_usdc = proportional_floor(e, distribution, blnd_usdc_weight, total_weight);
+    let blnd_xlm = proportional_floor(e, distribution, blnd_xlm_weight, total_weight);
     state.backstop_tier_carry = checked_sub(e, distribution, checked_add(e, blnd_usdc, blnd_xlm));
     state.pending_blnd_usdc = checked_add(e, state.pending_blnd_usdc, blnd_usdc);
     state.pending_blnd_xlm = checked_add(e, state.pending_blnd_xlm, blnd_xlm);
@@ -744,7 +712,7 @@ mod tests {
             })
         }
 
-        fn distribution(&self) -> OngoingDistribution {
+        fn distribution(&self) -> i128 {
             self.e
                 .as_contract(&self.backstop, || super::distribute(&self.e))
         }
@@ -820,19 +788,29 @@ mod tests {
                 &fixture.e,
                 (
                     first,
-                    10 * SCALAR_7,
-                    BlndEmissionValues {
-                        blnd_usdc: 10 * SCALAR_7,
-                        blnd_xlm: 0,
+                    PoolOngoingEmissions {
+                        accrued_pool: 0,
+                        active_blnd_usdc: 10 * SCALAR_7,
+                        active_blnd_xlm: 0,
+                        backstop_tier_carry: 0,
+                        pending_blnd_usdc: 0,
+                        pending_blnd_xlm: 0,
                     },
+                    10 * SCALAR_7,
+                    0,
                 ),
                 (
                     second,
-                    20 * SCALAR_7,
-                    BlndEmissionValues {
-                        blnd_usdc: 20 * SCALAR_7,
-                        blnd_xlm: 0,
+                    PoolOngoingEmissions {
+                        accrued_pool: 0,
+                        active_blnd_usdc: 20 * SCALAR_7,
+                        active_blnd_xlm: 20 * SCALAR_7,
+                        backstop_tier_carry: 0,
+                        pending_blnd_usdc: 0,
+                        pending_blnd_xlm: 0,
                     },
+                    20 * SCALAR_7,
+                    0,
                 ),
             ]
         );
@@ -887,19 +865,7 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, first.clone(), second.clone()]);
 
         fixture.e.ledger().set_timestamp(1_010);
-        assert_eq!(
-            fixture.distribution(),
-            OngoingDistribution {
-                backstop_allocated: 7 * SCALAR_7,
-                backstop_carry: 0,
-                checkpoint: 1_010,
-                eligible_blnd: 200 * SCALAR_7,
-                pool_allocated: 3 * SCALAR_7,
-                pool_carry: 0,
-                distributed: 10 * SCALAR_7,
-                split_carry: 0,
-            }
-        );
+        assert_eq!(fixture.distribution(), 10 * SCALAR_7);
         for pool in [first.clone(), second.clone()] {
             assert_eq!(
                 fixture.pool_emissions(&pool),
@@ -917,9 +883,7 @@ mod tests {
 
         MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
-        let second_distribution = fixture.distribution();
-        assert_eq!(second_distribution.distributed, 5 * SCALAR_7);
-        assert_eq!(second_distribution.split_carry, 0);
+        assert_eq!(fixture.distribution(), 5 * SCALAR_7);
         assert_eq!(
             fixture.ongoing_state(),
             OngoingEmissionState {
@@ -1350,9 +1314,7 @@ mod tests {
         fixture.set_reward_zone(&pools);
         fixture.e.ledger().set_timestamp(1_005);
 
-        let distribution = fixture.distribution();
-        assert_eq!(distribution.distributed, 5 * SCALAR_7);
-        assert_eq!(distribution.eligible_blnd, 300 * SCALAR_7);
+        assert_eq!(fixture.distribution(), 5 * SCALAR_7);
         for pool in pools.iter() {
             let emissions = fixture.pool_emissions(&pool);
             assert!(emissions.pending_blnd_usdc > 0 || emissions.pending_blnd_xlm > 0);
@@ -1367,17 +1329,18 @@ mod tests {
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
         fixture.e.ledger().set_timestamp(1_005);
 
+        assert_eq!(fixture.distribution(), 5 * SCALAR_7);
         assert_eq!(
-            fixture.distribution(),
-            OngoingDistribution {
+            fixture.ongoing_state(),
+            OngoingEmissionState {
                 backstop_allocated: 0,
                 backstop_carry: 35_000_000,
-                checkpoint: 1_005,
-                eligible_blnd: 0,
+                backstop_claimed: 0,
+                last_distribution: Some(1_005),
                 pool_allocated: 0,
                 pool_carry: 15_000_000,
-                distributed: 5 * SCALAR_7,
                 split_carry: 0,
+                total_distributed: 5 * SCALAR_7,
             }
         );
 
@@ -1390,19 +1353,7 @@ mod tests {
         assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, SCALAR_7);
 
         fixture.e.ledger().set_timestamp(1_010);
-        assert_eq!(
-            fixture.distribution(),
-            OngoingDistribution {
-                backstop_allocated: 7 * SCALAR_7,
-                backstop_carry: 0,
-                checkpoint: 1_010,
-                eligible_blnd: 10 * SCALAR_7,
-                pool_allocated: 3 * SCALAR_7,
-                pool_carry: 0,
-                distributed: 5 * SCALAR_7,
-                split_carry: 0,
-            }
-        );
+        assert_eq!(fixture.distribution(), 5 * SCALAR_7);
     }
 
     #[test]

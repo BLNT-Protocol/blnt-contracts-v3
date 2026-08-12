@@ -280,10 +280,10 @@ impl Backstop for BackstopContract {
 
     fn distribute(e: Env) -> i128 {
         storage::extend_instance(&e);
-        let distribution = emissions::distribute(&e);
+        let distributed = emissions::distribute(&e);
 
-        BackstopEvents::distribute(&e, distribution.distributed);
-        distribution.distributed
+        BackstopEvents::distribute(&e, distributed);
+        distributed
     }
 
     fn claim(

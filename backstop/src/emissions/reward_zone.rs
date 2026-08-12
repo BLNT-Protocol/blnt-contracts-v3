@@ -8,7 +8,7 @@ use crate::{
 };
 
 use super::{
-    policy::{eligible_blnd, pool_spot_blnd_emission_values},
+    policy::{pool_active_emission_assets, pool_spot_blnd_emission_weight},
     refresh_pool_ongoing_assets,
 };
 
@@ -94,11 +94,10 @@ fn set_reward_zone(e: &Env, reward_zone: &Vec<Address>) {
 }
 
 fn pool_weight(e: &Env, pool: &Address) -> i128 {
-    let values = pool_spot_blnd_emission_values(e, pool);
     if migration::is_active(e) {
-        eligible_blnd(e, &values)
+        pool_spot_blnd_emission_weight(e, pool)
     } else {
-        values.blnd_usdc
+        pool_active_emission_assets(e, crate::backstop::BackstopTier::BlndUsdc, pool)
     }
 }
 

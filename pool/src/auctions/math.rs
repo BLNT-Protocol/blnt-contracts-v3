@@ -1,4 +1,5 @@
 use crate::{constants::SCALAR_7, errors::PoolError};
+use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{panic_with_error, Env, I256};
 
 #[allow(clippy::zero_prefixed_literal)]
@@ -50,4 +51,36 @@ pub(crate) fn proportional_ceil(e: &Env, value: i128, numerator: i128, denominat
         .div(&denominator)
         .to_i128()
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
+/// Return the percentage-selected bid, its time-scaled amount, and the
+/// unselected remainder using the inherited v2 ceiling rules.
+pub(crate) fn scale_bid_amount(
+    e: &Env,
+    amount: i128,
+    percent_scaled: i128,
+    modifier: i128,
+) -> (i128, i128, i128) {
+    let base = amount.fixed_mul_ceil(e, &percent_scaled, &SCALAR_7);
+    let remaining = amount
+        .checked_sub(base)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let actual = base.fixed_mul_ceil(e, &modifier, &SCALAR_7);
+    (base, actual, remaining)
+}
+
+/// Return the percentage-selected lot, its time-scaled amount, and the
+/// unselected remainder using the inherited v2 floor rules.
+pub(crate) fn scale_lot_amount(
+    e: &Env,
+    amount: i128,
+    percent_scaled: i128,
+    modifier: i128,
+) -> (i128, i128, i128) {
+    let base = amount.fixed_mul_floor(e, &percent_scaled, &SCALAR_7);
+    let remaining = amount
+        .checked_sub(base)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let actual = base.fixed_mul_floor(e, &modifier, &SCALAR_7);
+    (base, actual, remaining)
 }

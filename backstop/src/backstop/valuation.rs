@@ -17,7 +17,6 @@ const TOKEN_DECIMALS: u32 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct AssetValuation {
-    pub underlying_blnd: i128,
     pub usdc_value: i128,
 }
 
@@ -36,15 +35,7 @@ pub(crate) struct ActivationQuote {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub(crate) struct BlndEmissionValues {
-    pub blnd_usdc: i128,
-    pub blnd_xlm: i128,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PoolValuation {
-    pub active_blnd: BlndEmissionValues,
     pub active_values: ActivationValues,
     pub queued_values: ActivationValues,
     pub total_values: ActivationValues,
@@ -122,10 +113,6 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     );
 
     PoolValuation {
-        active_blnd: BlndEmissionValues {
-            blnd_usdc: blnd_usdc_quotes.active.underlying_blnd,
-            blnd_xlm: blnd_xlm_quotes.active.underlying_blnd,
-        },
         active_values: ActivationValues {
             blnd_usdc: blnd_usdc_quotes.active.usdc_value,
             blnd_xlm: blnd_xlm_quotes.active.usdc_value,
@@ -223,12 +210,6 @@ fn quote_from_composition(
     composition: &CometComposition,
 ) -> AssetValuation {
     AssetValuation {
-        underlying_blnd: mul_div_floor(
-            e,
-            amount,
-            composition.blnd_reserve,
-            composition.total_supply,
-        ),
         usdc_value: mul_div_floor(e, amount, total_value, composition.total_supply),
     }
 }
@@ -242,10 +223,7 @@ fn unit_pool_tier_valuation(amounts: (i128, i128, i128)) -> PoolTierValuation {
 }
 
 fn unit_asset_valuation(amount: i128) -> AssetValuation {
-    AssetValuation {
-        underlying_blnd: amount,
-        usdc_value: amount,
-    }
+    AssetValuation { usdc_value: amount }
 }
 
 pub fn quote_activation(
@@ -488,14 +466,12 @@ mod tests {
         assert_eq!(
             blnd_usdc,
             AssetValuation {
-                underlying_blnd: 200 * SCALAR_7,
                 usdc_value: 25 * SCALAR_7,
             }
         );
         assert_eq!(
             blnd_xlm,
             AssetValuation {
-                underlying_blnd: 100 * SCALAR_7,
                 usdc_value: 125_000_000,
             }
         );

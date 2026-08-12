@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, Address, Env, I256};
 
 use crate::{
-    backstop::{tier_token, BackstopTier, BlndEmissionValues},
+    backstop::{tier_token, BackstopTier},
     dependencies::CometClient,
     errors::BackstopError,
     storage,
@@ -19,15 +19,11 @@ struct BlndEmissionQuote {
     eligible_blnd: i128,
 }
 
-/// Immutable top-level split of ongoing BLND received from the emitter.
-///
-/// `carry` remains at this scope for the next split.
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct OngoingBlndSplit {
-    pub backstop: i128,
-    pub carry: i128,
-    pub pool: i128,
-    pub total: i128,
+struct BlndEmissionValues {
+    blnd_usdc: i128,
+    blnd_xlm: i128,
 }
 
 #[cfg(test)]
@@ -87,26 +83,25 @@ fn quote_user_blnd_emissions(
     }
 }
 
-pub(crate) fn pool_spot_blnd_emission_values(e: &Env, pool: &Address) -> BlndEmissionValues {
-    BlndEmissionValues {
-        blnd_usdc: spot_underlying_blnd(
-            e,
-            BackstopTier::BlndUsdc,
-            pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool),
-        ),
-        blnd_xlm: spot_underlying_blnd(
-            e,
-            BackstopTier::BlndXlm,
-            pool_active_emission_assets(e, BackstopTier::BlndXlm, pool),
-        ),
-    }
+pub(crate) fn pool_spot_blnd_emission_weight(e: &Env, pool: &Address) -> i128 {
+    let blnd_usdc = spot_underlying_blnd(
+        e,
+        BackstopTier::BlndUsdc,
+        pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool),
+    );
+    let blnd_xlm = spot_underlying_blnd(
+        e,
+        BackstopTier::BlndXlm,
+        pool_active_emission_assets(e, BackstopTier::BlndXlm, pool),
+    );
+    checked_add(e, blnd_usdc, blnd_xlm)
 }
 
 pub(crate) fn quote_ongoing_blnd_split(
     e: &Env,
     distribution: i128,
     prior_carry: i128,
-) -> OngoingBlndSplit {
+) -> (i128, i128, i128) {
     if distribution < 0 || prior_carry < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
@@ -124,15 +119,11 @@ pub(crate) fn quote_ongoing_blnd_split(
         EMISSION_SPLIT_DENOMINATOR,
     );
     let allocated = checked_add(e, backstop, pool);
-    OngoingBlndSplit {
-        backstop,
-        carry: checked_sub(e, total, allocated),
-        pool,
-        total,
-    }
+    (backstop, pool, checked_sub(e, total, allocated))
 }
 
-pub(crate) fn eligible_blnd(e: &Env, values: &BlndEmissionValues) -> i128 {
+#[cfg(test)]
+fn eligible_blnd(e: &Env, values: &BlndEmissionValues) -> i128 {
     if values.blnd_usdc < 0 || values.blnd_xlm < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
@@ -215,25 +206,9 @@ mod tests {
     fn ongoing_split_conserves_carry() {
         let e = Env::default();
         let first = quote_ongoing_blnd_split(&e, 11, 0);
-        assert_eq!(
-            first,
-            OngoingBlndSplit {
-                backstop: 7,
-                carry: 1,
-                pool: 3,
-                total: 11,
-            }
-        );
+        assert_eq!(first, (7, 3, 1));
 
-        assert_eq!(
-            quote_ongoing_blnd_split(&e, 9, first.carry),
-            OngoingBlndSplit {
-                backstop: 7,
-                carry: 0,
-                pool: 3,
-                total: 10,
-            }
-        );
+        assert_eq!(quote_ongoing_blnd_split(&e, 9, first.2), (7, 3, 0));
     }
 
     #[test]

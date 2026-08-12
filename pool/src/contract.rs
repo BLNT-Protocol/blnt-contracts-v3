@@ -553,8 +553,7 @@ impl Pool for PoolContract {
             }
             auctions::AuctionType::BadDebtAuction => {
                 require_backstop_auction_args(&e, &user, &bid, &lot, percent, true);
-                let auction = auctions::create_bad_debt_auction(&e);
-                auctions::bad_debt_auction_data(&e, &auction)
+                auctions::create_bad_debt_auction(&e).auction
             }
             auctions::AuctionType::InterestAuction => {
                 require_backstop_auction_args(&e, &user, &bid, &lot, percent, false);
@@ -573,8 +572,7 @@ impl Pool for PoolContract {
             }
             auctions::AuctionType::BadDebtAuction => {
                 require_backstop_auction_user(&e, &user);
-                let auction = auctions::get_prepared_bad_debt_auction(&e);
-                auctions::bad_debt_auction_data(&e, &auction)
+                auctions::get_prepared_bad_debt_auction(&e).auction
             }
             auctions::AuctionType::InterestAuction => {
                 require_backstop_auction_user(&e, &user);
@@ -591,7 +589,7 @@ impl Pool for PoolContract {
             }
             auctions::AuctionType::BadDebtAuction => {
                 require_backstop_auction_user(&e, &user);
-                auctions::del_prepared_bad_debt_auction(&e);
+                auctions::del_tier_auction(&e, auctions::AuctionType::BadDebtAuction);
             }
             auctions::AuctionType::InterestAuction => {
                 require_backstop_auction_user(&e, &user);

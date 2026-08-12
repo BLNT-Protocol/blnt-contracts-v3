@@ -1,15 +1,14 @@
 use crate::{
-    constants::SCALAR_7,
+    dependencies::BackstopContractTier,
     errors::PoolError,
     pool::{Pool, User},
     storage,
 };
 use cast::i128;
-use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
 use super::{
-    math::auction_modifiers,
+    math::{auction_modifiers, scale_bid_amount, scale_lot_amount},
     user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction},
 };
 
@@ -19,6 +18,15 @@ pub enum AuctionType {
     UserLiquidation = 0,
     BadDebtAuction = 1,
     InterestAuction = 2,
+}
+
+/// The fixed v3 backstop tier identifiers used by pool auctions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub enum BackstopTier {
+    BlndUsdc,
+    BlndXlm,
+    Usdc,
 }
 
 impl AuctionType {
@@ -54,6 +62,73 @@ pub struct AuctionData {
     /// The block the auction begins on. This is used to determine how the auction
     /// should be scaled based on the number of blocks that have passed since the auction began.
     pub block: u32,
+}
+
+/// One active auction backed by a single v3 backstop tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub(crate) struct TierAuctionData {
+    pub auction: AuctionData,
+    pub tier: BackstopTier,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum TierAuctionDataKey {
+    Auction(u32),
+}
+
+const ONE_DAY_LEDGERS: u32 = 17_280;
+const TIER_AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
+const TIER_AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
+pub(crate) const AUCTION_STALE_LEDGERS: u32 = 500;
+
+pub(crate) fn get_tier_auction(e: &Env, auction_type: AuctionType) -> TierAuctionData {
+    e.storage()
+        .temporary()
+        .get(&TierAuctionDataKey::Auction(auction_type as u32))
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
+}
+
+pub(crate) fn has_tier_auction(e: &Env, auction_type: AuctionType) -> bool {
+    e.storage()
+        .temporary()
+        .has(&TierAuctionDataKey::Auction(auction_type as u32))
+}
+
+pub(crate) fn set_tier_auction(e: &Env, auction_type: AuctionType, auction: &TierAuctionData) {
+    let key = TierAuctionDataKey::Auction(auction_type as u32);
+    e.storage().temporary().set(&key, auction);
+    e.storage()
+        .temporary()
+        .extend_ttl(&key, TIER_AUCTION_TTL_THRESHOLD, TIER_AUCTION_TTL_BUMP);
+}
+
+pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
+    let auction = get_tier_auction(e, auction_type.clone());
+    let stale_at = auction
+        .auction
+        .block
+        .checked_add(AUCTION_STALE_LEDGERS)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    if e.ledger().sequence() < stale_at {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    remove_tier_auction(e, auction_type);
+}
+
+pub(crate) fn remove_tier_auction(e: &Env, auction_type: AuctionType) {
+    e.storage()
+        .temporary()
+        .remove(&TierAuctionDataKey::Auction(auction_type as u32));
+}
+
+pub(crate) fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
+    match tier {
+        BackstopTier::BlndUsdc => BackstopContractTier::BlndUsdc,
+        BackstopTier::BlndXlm => BackstopContractTier::BlndXlm,
+        BackstopTier::Usdc => BackstopContractTier::Usdc,
+    }
 }
 
 /// Create a user-liquidation auction that begins on the next ledger.
@@ -199,29 +274,21 @@ fn scale_auction(
     // scale the auction
     let percent_filled_i128 = i128(percent_filled) * 1_00000; // scale to decimal form in 7 decimals from percentage
     for (asset, amount) in auction_data.bid.iter() {
-        // apply percent scalar and store remainder to base auction
-        // round up to avoid rounding exploits
-        let to_fill_base = amount.fixed_mul_ceil(e, &percent_filled_i128, &SCALAR_7);
-        let remaining_base = amount - to_fill_base;
+        let (_, to_fill_scaled, remaining_base) =
+            scale_bid_amount(e, amount, percent_filled_i128, bid_modifier);
         if remaining_base > 0 {
             remaining_auction.bid.set(asset.clone(), remaining_base);
         }
-        // apply block scalar to to_fill auction and don't store if 0
-        let to_fill_scaled = to_fill_base.fixed_mul_ceil(e, &bid_modifier, &SCALAR_7);
         if to_fill_scaled > 0 {
             to_fill_auction.bid.set(asset, to_fill_scaled);
         }
     }
     for (asset, amount) in auction_data.lot.iter() {
-        // apply percent scalar and store remainder to base auction
-        // round down to avoid rounding exploits
-        let to_fill_base = amount.fixed_mul_floor(e, &percent_filled_i128, &SCALAR_7);
-        let remaining_base = amount - to_fill_base;
+        let (_, to_fill_scaled, remaining_base) =
+            scale_lot_amount(e, amount, percent_filled_i128, lot_modifier);
         if remaining_base > 0 {
             remaining_auction.lot.set(asset.clone(), remaining_base);
         }
-        // apply block scalar to to_fill auction and don't store if 0
-        let to_fill_scaled = to_fill_base.fixed_mul_floor(e, &lot_modifier, &SCALAR_7);
         if to_fill_scaled > 0 {
             to_fill_auction.lot.set(asset, to_fill_scaled);
         }
@@ -238,7 +305,7 @@ fn scale_auction(
 ///
 /// ### Panics
 /// If any duplicate addresses are found
-fn require_unique_addresses(e: &Env, list: &Vec<Address>) {
+pub(crate) fn require_unique_addresses(e: &Env, list: &Vec<Address>) {
     let mut temp_map = Map::<Address, bool>::new(e);
     for address in list {
         if temp_map.contains_key(address.clone()) {
@@ -251,6 +318,7 @@ fn require_unique_addresses(e: &Env, list: &Vec<Address>) {
 #[cfg(test)]
 mod tests {
     use crate::{
+        constants::SCALAR_7,
         pool::Positions,
         storage::PoolConfig,
         testutils::{self, create_comet_lp_pool, create_pool},
