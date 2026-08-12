@@ -284,14 +284,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     e.ledger()
         .set_sequence_number(first.block.saturating_add(100));
     let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
-    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.assets;
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.tokens;
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 50);
     assert_eq!(
         fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
         150 * SCALAR_7
     );
     assert_eq!(
-        fixture.backstop.pool_data(&pool_address).blnd_usdc.assets - tier_assets_before,
+        fixture.backstop.pool_data(&pool_address).blnd_usdc.tokens - tier_assets_before,
         288 * SCALAR_7
     );
     let remaining_first = pool.get_auction(
@@ -314,14 +314,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     e.ledger()
         .set_sequence_number(first.block.saturating_add(200));
     let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
-    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.assets;
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_usdc.tokens;
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
         fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
         300 * SCALAR_7
     );
     assert_eq!(
-        fixture.backstop.pool_data(&pool_address).blnd_usdc.assets - tier_assets_before,
+        fixture.backstop.pool_data(&pool_address).blnd_usdc.tokens - tier_assets_before,
         288 * SCALAR_7
     );
     assert!(pool
@@ -352,14 +352,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     e.ledger()
         .set_sequence_number(second.block.saturating_add(300));
     let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
-    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_xlm.assets;
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).blnd_xlm.tokens;
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
         fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
         expected_lots[1]
     );
     assert_eq!(
-        fixture.backstop.pool_data(&pool_address).blnd_xlm.assets - tier_assets_before,
+        fixture.backstop.pool_data(&pool_address).blnd_xlm.tokens - tier_assets_before,
         realized_donations[1]
     );
 
@@ -380,14 +380,14 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     e.ledger()
         .set_sequence_number(third.block.saturating_add(200));
     let operator_usdc_before = fixture.tokens[TokenIndex::USDC].balance(&operator);
-    let tier_assets_before = fixture.backstop.pool_data(&pool_address).usdc.assets;
+    let tier_assets_before = fixture.backstop.pool_data(&pool_address).usdc.tokens;
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
         fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
         expected_lots[2] - realized_donations[2]
     );
     assert_eq!(
-        fixture.backstop.pool_data(&pool_address).usdc.assets - tier_assets_before,
+        fixture.backstop.pool_data(&pool_address).usdc.tokens - tier_assets_before,
         realized_donations[2]
     );
     assert!(pool
@@ -426,8 +426,8 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         };
         assert_eq!(ending.shares, starting_states[index].shares);
         assert_eq!(
-            ending.assets,
-            starting_states[index].assets + realized_donations[index]
+            ending.tokens,
+            starting_states[index].tokens + realized_donations[index]
         );
     }
 

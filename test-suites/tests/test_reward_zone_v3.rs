@@ -65,13 +65,8 @@ fn exercise_reward_zone(wasm: bool) {
     assert!(fixture.backstop.reward_zone().contains(&second));
 
     let third_data = fixture.backstop.pool_data(&third);
-    assert!(
-        third_data.blnd_usdc.active_value
-            + third_data.blnd_xlm.active_value
-            + third_data.usdc.active_value
-            >= ACTIVATION_ENTRY_THRESHOLD_USDC
-    );
-    assert!(third_data.blnd_usdc.active_blnd > 0);
+    assert!(third_data.active_value >= ACTIVATION_ENTRY_THRESHOLD_USDC);
+    assert!(third_data.blnd_usdc.tokens > 0);
     fixture.jump(60 * 60 + 1);
     assert!(fixture.backstop.try_add_reward(&third, &None).is_err());
     fixture.backstop.distribute();

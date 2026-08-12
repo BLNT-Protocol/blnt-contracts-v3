@@ -104,7 +104,7 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         .backstop
         .pool_data(&pool_fixture.pool.address)
         .blnd_usdc
-        .assets;
+        .tokens;
 
     fixture
         .env
@@ -164,7 +164,7 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
             .backstop
             .pool_data(&pool_fixture.pool.address)
             .blnd_usdc
-            .assets,
+            .tokens,
         tier_assets_before - first_lot
     );
     assert_eq!(
@@ -300,7 +300,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
             .backstop
             .pool_data(&pool_fixture.pool.address)
             .blnd_usdc
-            .assets,
+            .tokens,
         0
     );
     // Force the supplier-loss path to obtain a valuation quote from a positive
@@ -345,7 +345,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         fixture.env.storage().persistent().set(
             &tier_key,
             &PoolBalance {
-                q4w: tier_state.queued_shares,
+                q4w: 0,
                 shares: tier_state.shares,
                 tokens: i128::MAX,
             },

@@ -29,7 +29,7 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
     let backstop_client = BackstopClient::new(e, &backstop_id);
     let pool_data = backstop_client.pool_data(&e.current_contract_address());
     let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
-    let q4w_percentage = pool_data.q4w_percentage;
+    let q4w_percentage = pool_data.q4w_pct;
 
     pool_config.status = match pool_config.status {
         STATUS_SETUP | STATUS_ADMIN_FROZEN => {
@@ -80,8 +80,8 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
     let pool_data = backstop_client.pool_data(&e.current_contract_address());
     let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
     let transition_allowed = match pool_status {
-        STATUS_ADMIN_ACTIVE => met_threshold && pool_data.q4w_percentage < Q4W_ADMIN_ACTIVE_LIMIT,
-        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => pool_data.q4w_percentage < Q4W_ADMIN_ON_ICE_LIMIT,
+        STATUS_ADMIN_ACTIVE => met_threshold && pool_data.q4w_pct < Q4W_ADMIN_ACTIVE_LIMIT,
+        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => pool_data.q4w_pct < Q4W_ADMIN_ON_ICE_LIMIT,
         STATUS_ADMIN_FROZEN => true,
         _ => false,
     };
@@ -93,13 +93,7 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
 }
 
 fn meets_activation_threshold(e: &Env, current_status: u32, pool_data: &BackstopPoolData) -> bool {
-    let active_value = pool_data
-        .blnd_usdc
-        .active_value
-        .checked_add(pool_data.blnd_xlm.active_value)
-        .and_then(|total| total.checked_add(pool_data.usdc.active_value))
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
-    active_value >= required_activation_value(e, current_status)
+    pool_data.active_value >= required_activation_value(e, current_status)
 }
 
 fn required_activation_value(e: &Env, current_status: u32) -> i128 {

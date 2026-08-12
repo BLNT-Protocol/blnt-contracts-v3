@@ -451,19 +451,19 @@ fn select_bad_debt_lot(
         BackstopTier::BlndUsdc,
         BackstopTier::Usdc,
     ] {
-        let (assets, value) = match tier {
-            BackstopTier::BlndUsdc => (pool_data.blnd_usdc.assets, pool_data.blnd_usdc.total_value),
-            BackstopTier::BlndXlm => (pool_data.blnd_xlm.assets, pool_data.blnd_xlm.total_value),
-            BackstopTier::Usdc => (pool_data.usdc.assets, pool_data.usdc.total_value),
+        let (tokens, value) = match tier {
+            BackstopTier::BlndUsdc => (pool_data.blnd_usdc.tokens, pool_data.blnd_usdc.value),
+            BackstopTier::BlndXlm => (pool_data.blnd_xlm.tokens, pool_data.blnd_xlm.value),
+            BackstopTier::Usdc => (pool_data.usdc.tokens, pool_data.usdc.value),
         };
-        if assets < 0 || value < 0 || (assets == 0 && value > 0) {
+        if tokens < 0 || value < 0 || (tokens == 0 && value > 0) {
             panic_with_error!(e, PoolError::InvalidLot);
         }
-        if assets == 0 || value == 0 {
+        if tokens == 0 || value == 0 {
             continue;
         }
         let (lot_amount, committed_value, unfilled_target_value) =
-            allocate_bad_debt_tier(e, assets, value, target_value);
+            allocate_bad_debt_tier(e, tokens, value, target_value);
         return Some(BadDebtLotQuote {
             committed_value,
             debt_value,
@@ -588,15 +588,11 @@ mod tests {
         .is_ok()
     }
 
-    fn test_tier_data(assets: i128, total_value: i128) -> BackstopPoolTierData {
+    fn test_tier_data(tokens: i128, value: i128) -> BackstopPoolTierData {
         BackstopPoolTierData {
-            active_blnd: 0,
-            active_value: total_value,
-            assets,
-            queued_shares: 0,
-            queued_value: 0,
-            shares: assets,
-            total_value,
+            tokens,
+            shares: tokens,
+            value,
         }
     }
 
@@ -606,9 +602,14 @@ mod tests {
         usdc: BackstopPoolTierData,
     ) -> BackstopPoolData {
         BackstopPoolData {
+            active_value: blnd_xlm
+                .value
+                .checked_add(blnd_usdc.value)
+                .and_then(|total| total.checked_add(usdc.value))
+                .unwrap(),
             blnd_usdc,
             blnd_xlm,
-            q4w_percentage: 0,
+            q4w_pct: 0,
             usdc,
         }
     }

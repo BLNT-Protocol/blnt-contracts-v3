@@ -67,9 +67,10 @@ Public deposit, queue, dequeue, and withdrawal operations select one of the
 three immutable assets through the `BackstopTier` discriminator.
 Pool-authorized donation selects a tier and adds its token to that pool-tier
 without minting shares, appreciating its active and queued positions.
-The public `pool_data` view returns all three tiers' accounting, active and
-queued valuation, active underlying BLND, and aggregate value-weighted Q4W in
-one snapshot. V3 exposes no separate pool-tier-state or pool-valuation view.
+The public `pool_data` view returns each tier's tokens, shares, and total USDC
+value together with aggregate active USDC value and value-weighted Q4W. Active
+BLND and queued-value details remain internal. V3 exposes no separate
+pool-tier-state or pool-valuation view.
 
 The public backstop surface is limited to user operations, pool callbacks, and
 consolidated operational views. Internal pool and user emission indexes,

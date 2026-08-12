@@ -60,34 +60,28 @@ struct PoolTierValuation {
     total: AssetValuation,
 }
 
-/// One pool's accounting and canonical valuation for a fixed backstop tier.
+/// One pool's compact accounting and canonical valuation for a fixed backstop tier.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolTierData {
-    /// Underlying BLND represented by active tier assets.
-    pub active_blnd: i128,
-    /// USDC value of active tier assets.
-    pub active_value: i128,
     /// Total tier-token assets.
-    pub assets: i128,
-    /// Shares currently queued for withdrawal.
-    pub queued_shares: i128,
-    /// USDC value of queued tier assets.
-    pub queued_value: i128,
+    pub tokens: i128,
     /// Total issued shares, including queued shares.
     pub shares: i128,
-    /// USDC value of all tier assets before active/queued rounding.
-    pub total_value: i128,
+    /// USDC value of all tier tokens.
+    pub value: i128,
 }
 
 /// One pool's complete three-tier backstop accounting and valuation.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolBackstopData {
+    /// Aggregate USDC value excluding queued withdrawals.
+    pub active_value: i128,
     pub blnd_usdc: PoolTierData,
     pub blnd_xlm: PoolTierData,
     /// Queued value divided by total active-plus-queued value, rounded up.
-    pub q4w_percentage: i128,
+    pub q4w_pct: i128,
     pub usdc: PoolTierData,
 }
 
@@ -98,50 +92,19 @@ pub(crate) fn build_pool_data(e: &Env, pool: &Address) -> PoolBackstopData {
     let usdc = storage::get_pool_balance_for_tier(e, BackstopTier::Usdc, pool);
 
     PoolBackstopData {
-        blnd_usdc: tier_data(
-            &blnd_usdc,
-            valuation.active_blnd.blnd_usdc,
-            valuation.active_values.blnd_usdc,
-            valuation.queued_values.blnd_usdc,
-            valuation.total_values.blnd_usdc,
-        ),
-        blnd_xlm: tier_data(
-            &blnd_xlm,
-            valuation.active_blnd.blnd_xlm,
-            valuation.active_values.blnd_xlm,
-            valuation.queued_values.blnd_xlm,
-            valuation.total_values.blnd_xlm,
-        ),
-        usdc: tier_data(
-            &usdc,
-            0,
-            valuation.active_values.usdc,
-            valuation.queued_values.usdc,
-            valuation.total_values.usdc,
-        ),
-        q4w_percentage: calculate_q4w_percentage(
-            e,
-            &valuation.active_values,
-            &valuation.queued_values,
-        ),
+        active_value: sum_activation_values(e, &valuation.active_values),
+        blnd_usdc: tier_data(&blnd_usdc, valuation.total_values.blnd_usdc),
+        blnd_xlm: tier_data(&blnd_xlm, valuation.total_values.blnd_xlm),
+        usdc: tier_data(&usdc, valuation.total_values.usdc),
+        q4w_pct: calculate_q4w_percentage(e, &valuation.active_values, &valuation.queued_values),
     }
 }
 
-fn tier_data(
-    balance: &PoolBalance,
-    active_blnd: i128,
-    active_value: i128,
-    queued_value: i128,
-    total_value: i128,
-) -> PoolTierData {
+fn tier_data(balance: &PoolBalance, value: i128) -> PoolTierData {
     PoolTierData {
-        active_blnd,
-        active_value,
-        assets: balance.tokens,
-        queued_shares: balance.q4w,
-        queued_value,
+        tokens: balance.tokens,
         shares: balance.shares,
-        total_value,
+        value,
     }
 }
 
@@ -608,40 +571,29 @@ mod tests {
         assert_eq!(
             pool_data.blnd_usdc,
             PoolTierData {
-                active_blnd: 3_000 * SCALAR_7,
-                active_value: 3_000 * SCALAR_7,
-                assets: 4_000 * SCALAR_7,
-                queued_shares: 1_000 * SCALAR_7,
-                queued_value: 1_000 * SCALAR_7,
+                tokens: 4_000 * SCALAR_7,
                 shares: 4_000 * SCALAR_7,
-                total_value: 4_000 * SCALAR_7,
+                value: 4_000 * SCALAR_7,
             }
         );
         assert_eq!(
             pool_data.blnd_xlm,
             PoolTierData {
-                active_blnd: 3_000 * SCALAR_7,
-                active_value: 3_000 * SCALAR_7,
-                assets: 5_000 * SCALAR_7,
-                queued_shares: 2_000 * SCALAR_7,
-                queued_value: 2_000 * SCALAR_7,
+                tokens: 5_000 * SCALAR_7,
                 shares: 5_000 * SCALAR_7,
-                total_value: 5_000 * SCALAR_7,
+                value: 5_000 * SCALAR_7,
             }
         );
         assert_eq!(
             pool_data.usdc,
             PoolTierData {
-                active_blnd: 0,
-                active_value: 6_500 * SCALAR_7,
-                assets: 6_500 * SCALAR_7,
-                queued_shares: 0,
-                queued_value: 0,
+                tokens: 6_500 * SCALAR_7,
                 shares: 6_500 * SCALAR_7,
-                total_value: 6_500 * SCALAR_7,
+                value: 6_500 * SCALAR_7,
             }
         );
-        assert_eq!(pool_data.q4w_percentage, 1_935_484);
+        assert_eq!(pool_data.active_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert_eq!(pool_data.q4w_pct, 1_935_484);
         let quote = e.as_contract(&backstop, || {
             let valuation = build_pool_valuation(&e, &pool);
             quote_activation(&e, &valuation.active_values, false)

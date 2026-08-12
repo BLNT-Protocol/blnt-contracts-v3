@@ -148,9 +148,9 @@ pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> InterestAu
     let backstop_client = BackstopClient::new(e, &backstop);
     let pool_data = backstop_client.pool_data(&pool_address);
     let take_rate_values = [
-        pool_data.blnd_usdc.total_value,
-        pool_data.blnd_xlm.total_value,
-        pool_data.usdc.total_value,
+        pool_data.blnd_usdc.value,
+        pool_data.blnd_xlm.value,
+        pool_data.usdc.value,
     ];
     for (asset, distribution) in distributions.iter() {
         let allocation = allocate_take_rate(e, distribution, take_rate_values);
@@ -412,24 +412,24 @@ fn build_interest_bid(
     tier: super::BackstopTier,
     lot_value: i128,
 ) -> (Address, i128, i128) {
-    let (assets, shares, total_value) = match tier {
+    let (tokens, shares, value) = match tier {
         super::BackstopTier::BlndUsdc => (
-            pool_data.blnd_usdc.assets,
+            pool_data.blnd_usdc.tokens,
             pool_data.blnd_usdc.shares,
-            pool_data.blnd_usdc.total_value,
+            pool_data.blnd_usdc.value,
         ),
         super::BackstopTier::BlndXlm => (
-            pool_data.blnd_xlm.assets,
+            pool_data.blnd_xlm.tokens,
             pool_data.blnd_xlm.shares,
-            pool_data.blnd_xlm.total_value,
+            pool_data.blnd_xlm.value,
         ),
         super::BackstopTier::Usdc => (
-            pool_data.usdc.assets,
+            pool_data.usdc.tokens,
             pool_data.usdc.shares,
-            pool_data.usdc.total_value,
+            pool_data.usdc.value,
         ),
     };
-    if lot_value <= 0 || assets <= 0 || shares <= 0 || total_value <= 0 {
+    if lot_value <= 0 || tokens <= 0 || shares <= 0 || value <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
 
@@ -438,7 +438,7 @@ fn build_interest_bid(
         panic_with_error!(e, PoolError::InvalidLot);
     }
     let target_value = proportional_ceil(e, lot_value, 6, 5);
-    let bid_amount = proportional_ceil(e, target_value, assets, total_value);
+    let bid_amount = proportional_ceil(e, target_value, tokens, value);
     if bid_amount <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }

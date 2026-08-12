@@ -191,7 +191,7 @@ fn test_backstop_interest_auction_inflation_attack() {
     let backstop_data = fixture.backstop.pool_data(&pool_address);
     let shares_to_tokens = backstop_data
         .blnd_usdc
-        .assets
+        .tokens
         .fixed_div_floor(backstop_data.blnd_usdc.shares, SCALAR_7)
         .unwrap();
 

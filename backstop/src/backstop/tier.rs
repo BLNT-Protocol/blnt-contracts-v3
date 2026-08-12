@@ -74,15 +74,12 @@ mod tests {
         assert_eq!(client.backstop_token(&BackstopTier::BlndXlm), blnd_xlm);
         assert_eq!(client.backstop_token(&BackstopTier::Usdc), usdc);
         let pool_data = client.pool_data(&pool);
-        assert_eq!(pool_data.blnd_usdc.assets, 100);
+        assert_eq!(pool_data.blnd_usdc.tokens, 100);
         assert_eq!(pool_data.blnd_usdc.shares, 100);
-        assert_eq!(pool_data.blnd_usdc.queued_shares, 0);
-        assert_eq!(pool_data.blnd_xlm.assets, 200);
+        assert_eq!(pool_data.blnd_xlm.tokens, 200);
         assert_eq!(pool_data.blnd_xlm.shares, 200);
-        assert_eq!(pool_data.blnd_xlm.queued_shares, 0);
-        assert_eq!(pool_data.usdc.assets, 300);
+        assert_eq!(pool_data.usdc.tokens, 300);
         assert_eq!(pool_data.usdc.shares, 300);
-        assert_eq!(pool_data.usdc.queued_shares, 0);
         let user_balance = client.user_balance(&BackstopTier::Usdc, &pool, &user);
         assert_eq!(user_balance.shares, 300);
         assert!(user_balance.q4w.is_empty());
