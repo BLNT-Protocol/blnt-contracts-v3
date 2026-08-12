@@ -1,7 +1,7 @@
 use sep_41_token::TokenClient;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contracttype, panic_with_error, vec, Address, Env, IntoVal, Map, Symbol, Val, Vec,
+    panic_with_error, vec, Address, Env, IntoVal, Map, Symbol, Val, Vec,
 };
 
 #[cfg(test)]
@@ -29,8 +29,7 @@ const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
 
 /// Result of one completed permissionless BLND distribution checkpoint.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct OngoingDistribution {
+pub(crate) struct OngoingDistribution {
     pub backstop_allocated: i128,
     pub backstop_carry: i128,
     pub checkpoint: u64,

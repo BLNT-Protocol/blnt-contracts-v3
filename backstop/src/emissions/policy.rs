@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, panic_with_error, Address, Env, I256};
+use soroban_sdk::{panic_with_error, Address, Env, I256};
 
 use crate::{
     backstop::{tier_token, BackstopTier, BlndEmissionValues},
@@ -14,18 +14,16 @@ const EMISSION_SPLIT_DENOMINATOR: i128 = 10;
 /// Arithmetic-only allocation quote for one BLND-emission scope.
 #[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct BlndEmissionQuote {
-    pub allocation: i128,
-    pub eligible_blnd: i128,
+struct BlndEmissionQuote {
+    allocation: i128,
+    eligible_blnd: i128,
 }
 
 /// Immutable top-level split of ongoing BLND received from the emitter.
 ///
 /// `carry` remains at this scope for the next split.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct OngoingBlndSplit {
+pub(crate) struct OngoingBlndSplit {
     pub backstop: i128,
     pub carry: i128,
     pub pool: i128,

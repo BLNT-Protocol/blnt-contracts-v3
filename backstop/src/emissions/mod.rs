@@ -5,7 +5,6 @@ mod ongoing;
 pub(crate) use ongoing::get_pool_ongoing_emissions;
 #[cfg(test)]
 pub(crate) use ongoing::preview_user_ongoing_blnd;
-pub use ongoing::OngoingDistribution;
 pub(crate) use ongoing::{
     checkpoint_user_ongoing_for_weight_change, claim_user_ongoing_blnd, distribute,
     finish_pool_weight_change, gulp_pool_ongoing_emissions, prepare_pool_weight_change,
@@ -13,7 +12,5 @@ pub(crate) use ongoing::{
 };
 
 mod policy;
-pub use policy::OngoingBlndSplit;
-
 mod reward_zone;
 pub(crate) use reward_zone::{add_to_reward_zone, get_reward_zone, remove_from_reward_zone};

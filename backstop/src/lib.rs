@@ -16,13 +16,9 @@ mod testutils;
 
 #[cfg(any(test, feature = "testutils"))]
 pub use backstop::set_test_valuation_override;
-pub use backstop::{
-    ActivationQuote, ActivationValues, AssetValuation, BackstopTier, BlndEmissionValues,
-    PoolBackstopData, PoolBalance, PoolTierData, UserBalance, Q4W,
-};
+pub use backstop::{BackstopTier, PoolBackstopData, PoolBalance, PoolTierData, UserBalance, Q4W};
 pub use contract::*;
 pub use dependencies::EmitterClient;
-pub use emissions::{OngoingBlndSplit, OngoingDistribution};
 pub use errors::BackstopError;
 #[cfg(any(test, feature = "testutils"))]
 pub use migration::activate_for_test;

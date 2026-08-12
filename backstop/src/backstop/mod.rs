@@ -26,8 +26,6 @@ mod valuation;
 pub use valuation::set_test_valuation_override;
 pub(crate) use valuation::{
     build_pool_data, build_pool_valuation, quote_activation, validate_backstop_assets,
+    BlndEmissionValues,
 };
-pub use valuation::{
-    ActivationQuote, ActivationValues, AssetValuation, BlndEmissionValues, PoolBackstopData,
-    PoolTierData,
-};
+pub use valuation::{PoolBackstopData, PoolTierData};

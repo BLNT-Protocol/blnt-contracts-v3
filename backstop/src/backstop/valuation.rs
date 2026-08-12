@@ -16,23 +16,20 @@ const PAIR_VALUE_MULTIPLIER: i128 = 5;
 const TOKEN_DECIMALS: u32 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct AssetValuation {
+struct AssetValuation {
     pub underlying_blnd: i128,
     pub usdc_value: i128,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct ActivationValues {
+pub(crate) struct ActivationValues {
     pub blnd_usdc: i128,
     pub blnd_xlm: i128,
     pub usdc: i128,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub struct ActivationQuote {
+pub(crate) struct ActivationQuote {
     pub eligible_value: i128,
     pub meets_threshold: bool,
     pub required_value: i128,
@@ -40,13 +37,12 @@ pub struct ActivationQuote {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
-pub struct BlndEmissionValues {
+pub(crate) struct BlndEmissionValues {
     pub blnd_usdc: i128,
     pub blnd_xlm: i128,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
 pub(crate) struct PoolValuation {
     pub active_blnd: BlndEmissionValues,
     pub active_values: ActivationValues,
