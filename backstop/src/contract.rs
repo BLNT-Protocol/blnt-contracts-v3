@@ -1,6 +1,6 @@
 use crate::{
     backstop::{
-        self, build_pool_data, tier_token, validate_backstop_assets, BackstopTier,
+        self, load_pool_backstop_data, tier_token, validate_backstop_assets, BackstopTier,
         PoolBackstopData, UserBalance, Q4W,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
@@ -255,7 +255,7 @@ impl Backstop for BackstopContract {
     }
 
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData {
-        build_pool_data(&e, &pool)
+        load_pool_backstop_data(&e, &pool)
     }
 
     fn backstop_token(e: Env, tier: BackstopTier) -> Address {
@@ -294,8 +294,7 @@ impl Backstop for BackstopContract {
         min_lp_tokens_out: i128,
     ) -> i128 {
         storage::extend_instance(&e);
-        let claim =
-            emissions::claim_user_ongoing_blnd(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
+        let claim = emissions::execute_claim(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
         for (pool, blnd_amount, lp_amount, shares) in claim.allocations.iter() {
             BackstopEvents::claim(&e, tier, from.clone(), pool, blnd_amount, lp_amount, shares);
         }
@@ -304,22 +303,21 @@ impl Backstop for BackstopContract {
 
     fn gulp_emissions(e: Env, pool: Address) -> i128 {
         storage::extend_instance(&e);
-        let (backstop_emissions, pool_emissions) =
-            emissions::gulp_pool_ongoing_emissions(&e, &pool);
+        let (backstop_emissions, pool_emissions) = emissions::gulp_emissions(&e, &pool);
         BackstopEvents::gulp_emissions(&e, pool, backstop_emissions, pool_emissions);
         pool_emissions
     }
 
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>) {
         storage::extend_instance(&e);
-        let removed = emissions::add_to_reward_zone(&e, &to_add, to_remove.as_ref());
+        let removed = emissions::add_to_reward_zone(&e, to_add.clone(), to_remove);
 
         BackstopEvents::rw_zone_add(&e, to_add, removed);
     }
 
     fn remove_reward(e: Env, to_remove: Address) {
         storage::extend_instance(&e);
-        emissions::remove_from_reward_zone(&e, &to_remove);
+        emissions::remove_from_reward_zone(&e, to_remove.clone());
 
         BackstopEvents::rw_zone_remove(&e, to_remove);
     }

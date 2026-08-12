@@ -205,9 +205,10 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillUserLiquidationAuction => {
-                let filled_auction = auctions::fill_user_liquidation_auction(
+                let filled_auction = auctions::fill(
                     e,
                     pool,
+                    AuctionType::UserLiquidation as u32,
                     &request.address,
                     from_state,
                     request.amount as u64,
@@ -224,13 +225,13 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillBadDebtAuction => {
-                let percent = request_fill_percent(e, request.amount);
-                let filled_auction = auctions::fill_prepared_bad_debt_auction(
+                let filled_auction = auctions::fill(
                     e,
                     pool,
+                    AuctionType::BadDebtAuction as u32,
                     &request.address,
                     from_state,
-                    percent,
+                    u64::from(request_fill_percent(e, request.amount)),
                 );
                 actions.do_check_health();
                 PoolEvents::fill_auction(
@@ -243,9 +244,14 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillInterestAuction => {
-                let percent = request_fill_percent(e, request.amount);
-                let filled_auction =
-                    auctions::fill_interest_auction(e, pool, &request.address, from_state, percent);
+                let filled_auction = auctions::fill(
+                    e,
+                    pool,
+                    AuctionType::InterestAuction as u32,
+                    &request.address,
+                    from_state,
+                    u64::from(request_fill_percent(e, request.amount)),
+                );
                 PoolEvents::fill_auction(
                     e,
                     AuctionType::InterestAuction as u32,

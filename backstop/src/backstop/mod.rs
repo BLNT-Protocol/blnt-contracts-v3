@@ -12,19 +12,16 @@ pub use withdrawal::{
 };
 
 mod pool;
-pub use pool::{require_is_from_pool_factory, require_registered_pool, PoolBalance};
+#[cfg(any(test, feature = "testutils"))]
+pub use pool::set_test_valuation_override;
+pub(crate) use pool::{
+    build_pool_valuation, load_pool_backstop_data, quote_activation, tier_token,
+    validate_backstop_assets,
+};
+pub use pool::{
+    require_is_from_pool_factory, require_registered_pool, BackstopTier, PoolBackstopData,
+    PoolBalance, PoolTierData,
+};
 
 mod user;
 pub use user::{UserBalance, Q4W};
-
-mod tier;
-pub(crate) use tier::token as tier_token;
-pub use tier::BackstopTier;
-
-mod valuation;
-#[cfg(any(test, feature = "testutils"))]
-pub use valuation::set_test_valuation_override;
-pub(crate) use valuation::{
-    build_pool_data, build_pool_valuation, quote_activation, validate_backstop_assets,
-};
-pub use valuation::{PoolBackstopData, PoolTierData};

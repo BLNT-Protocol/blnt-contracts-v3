@@ -1,36 +1,128 @@
-use sep_41_token::TokenClient;
-use soroban_sdk::{
-    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    panic_with_error, vec, Address, Env, IntoVal, Map, Symbol, Val, Vec,
-};
-
-#[cfg(test)]
-use crate::storage::UserEmissionData;
 use crate::{
-    backstop::{credit_tier_shares, require_registered_pool, tier_token, BackstopTier},
-    constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
-    dependencies::{CometClient, EmitterClient},
+    backstop::{build_pool_valuation, quote_activation, require_registered_pool, BackstopTier},
+    constants::{MAX_BACKFILLED_EMISSIONS, MAX_RZ_SIZE, SCALAR_7},
+    dependencies::EmitterClient,
     errors::BackstopError,
     migration,
     storage::{self, OngoingEmissionState, PoolOngoingEmissions},
 };
+use sep_41_token::TokenClient;
+use soroban_sdk::{panic_with_error, Address, Env, Vec};
 
 use super::distributor;
 use super::policy::{
-    comet_composition, pool_active_emission_assets, proportional_floor, quote_ongoing_blnd_split,
-    underlying_blnd_from_composition,
+    comet_composition, pool_active_emission_assets, pool_spot_blnd_emission_weight,
+    proportional_floor, quote_ongoing_blnd_split, underlying_blnd_from_composition,
 };
 
 const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 5;
 const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
+pub(super) const CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
-pub(crate) struct OngoingClaim {
-    pub lp_amount: i128,
-    pub allocations: Vec<(Address, i128, i128, i128)>,
+/// Return the pools currently eligible for BLND emissions.
+pub(crate) fn get_reward_zone(e: &Env) -> Vec<Address> {
+    let reward_zone = storage::get_reward_zone(e);
+    if reward_zone.len() > MAX_RZ_SIZE {
+        panic_with_error!(e, BackstopError::OverflowError);
+    }
+    reward_zone
 }
 
-pub(crate) fn distribute(e: &Env) -> i128 {
+/// Add a qualifying pool to the reward zone.
+pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) -> Option<Address> {
+    migration::require_weight_mutation_allowed(e);
+    let mut reward_zone = get_reward_zone(e);
+    if reward_zone.contains(to_add.clone()) {
+        panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
+    }
+
+    let valuation = build_pool_valuation(e, &to_add);
+    if !quote_activation(e, &valuation.active_values, false).meets_threshold {
+        panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
+    }
+    let entrant_weight = pool_weight(e, &to_add);
+    if entrant_weight <= 0 {
+        panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
+    }
+    if !reward_zone.is_empty() || !migration::is_active(e) {
+        require_distribute_run_recently(e);
+    }
+
+    let removed = if reward_zone.len() < MAX_RZ_SIZE {
+        None
+    } else {
+        let to_remove =
+            to_remove.unwrap_or_else(|| panic_with_error!(e, BackstopError::RewardZoneFull));
+        let remove_index = reward_zone
+            .first_index_of(to_remove.clone())
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidRewardZoneEntry));
+        let removed_weight = pool_weight(e, &to_remove);
+        if entrant_weight <= removed_weight {
+            panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
+        }
+        reward_zone.remove(remove_index);
+        Some(to_remove.clone())
+    };
+
+    reward_zone.push_front(to_add.clone());
+    refresh_pool_ongoing_assets(e, &to_add);
+    set_reward_zone(e, &reward_zone);
+    removed
+}
+
+/// Remove a pool that no longer qualifies from the reward zone.
+pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
+    migration::require_weight_mutation_allowed(e);
+    let mut reward_zone = get_reward_zone(e);
+    let remove_index = reward_zone
+        .first_index_of(to_remove.clone())
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidRewardZoneEntry));
+    let removed_weight = pool_weight(e, &to_remove);
+    if removed_weight > 0 {
+        let valuation = build_pool_valuation(e, &to_remove);
+        if quote_activation(e, &valuation.active_values, true).meets_threshold {
+            panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
+        }
+        require_distribute_run_recently(e);
+    }
+
+    reward_zone.remove(remove_index);
+    set_reward_zone(e, &reward_zone);
+}
+
+fn set_reward_zone(e: &Env, reward_zone: &Vec<Address>) {
+    if reward_zone.len() > MAX_RZ_SIZE {
+        panic_with_error!(e, BackstopError::RewardZoneFull);
+    }
+    storage::set_reward_zone(e, reward_zone);
+}
+
+fn pool_weight(e: &Env, pool: &Address) -> i128 {
+    if migration::is_active(e) {
+        pool_spot_blnd_emission_weight(e, pool)
+    } else {
+        pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool)
+    }
+}
+
+fn require_distribute_run_recently(e: &Env) {
+    if !storage::get_reward_zone_distribution_started(e) {
+        return;
+    }
+    let now = e.ledger().timestamp();
+    let checkpoint = storage::get_reward_zone_checkpoint(e)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::DistributionCheckpointRequired));
+    if checkpoint > now
+        || now
+            .checked_sub(checkpoint)
+            .is_none_or(|age| age > CHECKPOINT_MAX_AGE_SECONDS)
+    {
+        panic_with_error!(e, BackstopError::DistributionCheckpointRequired);
+    }
+}
+
+pub fn distribute(e: &Env) -> i128 {
     if !migration::is_active(e) {
         return match migration::distribution_transition(e) {
             migration::DistributionTransition::Backfill(checkpoint) => {
@@ -263,7 +355,7 @@ fn advance_without_distribution(
     0
 }
 
-fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
+pub(crate) fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
     let state = storage::get_ongoing_emission_state(e);
     validate_ongoing_emission_state(e, &state);
     state
@@ -282,46 +374,6 @@ pub(crate) fn refresh_pool_ongoing_assets(e: &Env, pool: &Address) {
     set_pool_ongoing_emissions(e, pool, &state);
 }
 
-#[cfg(test)]
-pub(crate) fn preview_user_ongoing_emissions(
-    e: &Env,
-    tier: BackstopTier,
-    user: &Address,
-    pool: &Address,
-) -> UserEmissionData {
-    require_emission_tier(e, tier);
-    distributor::preview_user_emissions(e, tier, pool, user)
-}
-
-#[cfg(test)]
-pub(crate) fn preview_user_ongoing_blnd(
-    e: &Env,
-    tier: BackstopTier,
-    user: &Address,
-    pool_addresses: &Vec<Address>,
-) -> i128 {
-    require_emission_tier(e, tier);
-    if pool_addresses.is_empty() {
-        panic_with_error!(e, BackstopError::BadRequest);
-    }
-
-    let mut claimable = 0_i128;
-    let mut pools = Map::<Address, ()>::new(e);
-    for pool in pool_addresses.iter() {
-        if pools.contains_key(pool.clone()) {
-            panic_with_error!(e, BackstopError::BadRequest);
-        }
-        require_registered_pool(e, &pool);
-        pools.set(pool.clone(), ());
-        claimable = checked_add(
-            e,
-            claimable,
-            preview_user_ongoing_emissions(e, tier, user, &pool).accrued,
-        );
-    }
-    claimable
-}
-
 pub(crate) fn checkpoint_user_ongoing_for_weight_change(
     e: &Env,
     tier: BackstopTier,
@@ -329,117 +381,11 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
     pool: &Address,
 ) {
     if tier != BackstopTier::Usdc {
-        distributor::checkpoint_user_emissions(e, tier, pool, user);
+        distributor::update_emissions(e, tier, pool, user);
     }
 }
 
-pub(crate) fn claim_user_ongoing_blnd(
-    e: &Env,
-    tier: BackstopTier,
-    from: &Address,
-    pool_addresses: &Vec<Address>,
-    min_lp_tokens_out: i128,
-) -> OngoingClaim {
-    migration::require_backfill_funded(e);
-    from.require_auth();
-    require_emission_tier(e, tier);
-    if pool_addresses.is_empty() {
-        panic_with_error!(e, BackstopError::BadRequest);
-    }
-    if min_lp_tokens_out < 0 {
-        panic_with_error!(e, BackstopError::NegativeAmountError);
-    }
-
-    let mut blnd_amount = 0_i128;
-    let mut claims = Map::<Address, i128>::new(e);
-    for pool in pool_addresses.iter() {
-        if claims.contains_key(pool.clone()) {
-            panic_with_error!(e, BackstopError::BadRequest);
-        }
-        require_registered_pool(e, &pool);
-        prepare_pool_weight_change(e, tier, &pool);
-
-        let pool_claim = distributor::claim_emissions(e, tier, &pool, from);
-        claims.set(pool.clone(), pool_claim);
-        blnd_amount = checked_add(e, blnd_amount, pool_claim);
-    }
-
-    if blnd_amount == 0 {
-        return OngoingClaim {
-            lp_amount: 0,
-            allocations: vec![e],
-        };
-    }
-
-    let mut ongoing = get_ongoing_emission_state(e);
-    ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnd_amount);
-    set_ongoing_emission_state(e, &ongoing);
-
-    let backstop = e.current_contract_address();
-    let blnd = storage::get_blnd_token(e);
-    let lp_token = tier_token(e, tier);
-    let blnd_client = TokenClient::new(e, &blnd);
-    let lp_client = TokenClient::new(e, &lp_token);
-    let blnd_before = blnd_client.balance(&backstop);
-    let lp_before = lp_client.balance(&backstop);
-    let approval_ledger = e
-        .ledger()
-        .sequence()
-        .checked_div(100_000)
-        .and_then(|period| period.checked_add(1))
-        .and_then(|period| period.checked_mul(100_000))
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    let approval_args: Vec<Val> = vec![
-        e,
-        backstop.clone().into_val(e),
-        lp_token.clone().into_val(e),
-        blnd_amount.into_val(e),
-        approval_ledger.into_val(e),
-    ];
-    e.authorize_as_current_contract(vec![
-        e,
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: blnd.clone(),
-                fn_name: Symbol::new(e, "approve"),
-                args: approval_args,
-            },
-            sub_invocations: vec![e],
-        }),
-    ]);
-    let lp_amount = CometClient::new(e, &lp_token).dep_tokn_amt_in_get_lp_tokns_out(
-        &blnd,
-        &blnd_amount,
-        &min_lp_tokens_out,
-        &backstop,
-    );
-    let blnd_after = blnd_client.balance(&backstop);
-    let lp_after = lp_client.balance(&backstop);
-    if blnd_before.checked_sub(blnd_after) != Some(blnd_amount)
-        || lp_after.checked_sub(lp_before) != Some(lp_amount)
-        || lp_amount <= 0
-    {
-        panic_with_error!(e, BackstopError::BalanceError);
-    }
-
-    let mut allocations = vec![e];
-    for pool in pool_addresses.iter() {
-        let pool_claim = claims.get(pool.clone()).unwrap_or(0);
-        let pool_lp_amount = proportional_floor(e, lp_amount, pool_claim, blnd_amount);
-        if pool_lp_amount == 0 {
-            continue;
-        }
-        let shares = credit_tier_shares(e, tier, from, &pool, pool_lp_amount);
-        finish_pool_weight_change(e, tier, &pool);
-        allocations.push_back((pool, pool_claim, pool_lp_amount, shares));
-    }
-    OngoingClaim {
-        lp_amount,
-        allocations,
-    }
-}
-
-pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> (i128, i128) {
+pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     pool.require_auth();
     require_registered_pool(e, pool);
 
@@ -458,13 +404,13 @@ pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> (i128, i12
     if backstop_amount == 0 && pool_amount == 0 {
         return (0, 0);
     }
-    distributor::set_emission_eps(
+    set_backstop_emission_eps(
         e,
         BackstopTier::BlndUsdc,
         pool,
         pool_state.pending_blnd_usdc,
     );
-    distributor::set_emission_eps(e, BackstopTier::BlndXlm, pool, pool_state.pending_blnd_xlm);
+    set_backstop_emission_eps(e, BackstopTier::BlndXlm, pool, pool_state.pending_blnd_xlm);
     pool_state.pending_blnd_usdc = 0;
     pool_state.pending_blnd_xlm = 0;
     pool_state.accrued_pool = 0;
@@ -484,6 +430,11 @@ pub(crate) fn gulp_pool_ongoing_emissions(e: &Env, pool: &Address) -> (i128, i12
     set_pool_ongoing_emissions(e, pool, &pool_state);
     storage::set_pool_emission_gulp(e, pool, now);
     (backstop_amount, pool_amount)
+}
+
+/// Set a fresh seven-day emission stream for one backstop tier.
+pub fn set_backstop_emission_eps(e: &Env, tier: BackstopTier, pool: &Address, pending: i128) {
+    distributor::set_backstop_emission_eps(e, tier, pool, pending);
 }
 
 pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
@@ -519,12 +470,6 @@ pub(crate) fn finish_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Addr
     }
 }
 
-fn require_emission_tier(e: &Env, tier: BackstopTier) {
-    if tier == BackstopTier::Usdc {
-        panic_with_error!(e, BackstopError::InvalidEmissionValue);
-    }
-}
-
 fn allocate_pool_backstop_emissions(
     e: &Env,
     state: &mut PoolOngoingEmissions,
@@ -548,7 +493,7 @@ fn allocate_pool_backstop_emissions(
     state.pending_blnd_xlm = checked_add(e, state.pending_blnd_xlm, blnd_xlm);
 }
 
-fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
+pub(crate) fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
     validate_ongoing_emission_state(e, state);
     let accounted = checked_add(
         e,
@@ -596,7 +541,7 @@ fn validate_pool_ongoing_emissions(e: &Env, state: &PoolOngoingEmissions) {
     }
 }
 
-fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
+pub(crate) fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
 }
@@ -630,6 +575,7 @@ mod tests {
     use crate::{
         backstop::{BackstopTier, PoolBalance, UserBalance},
         constants::{MAX_RZ_SIZE, SCALAR_7},
+        emissions::preview_user_ongoing_blnd,
         migration, storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_emitter,
@@ -826,7 +772,7 @@ mod tests {
         let start = 1_000;
         fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, active_shares);
         fixture.e.as_contract(&fixture.backstop, || {
-            distributor::set_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
+            set_backstop_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
         });
         let stream = fixture.e.as_contract(&fixture.backstop, || {
             storage::get_backstop_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool).unwrap()
@@ -836,19 +782,19 @@ mod tests {
         let next_gulp = start + 24 * 60 * 60;
         fixture.e.ledger().set_timestamp(next_gulp);
         let first_day = fixture.e.as_contract(&fixture.backstop, || {
-            distributor::checkpoint_user_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            distributor::update_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
         });
         assert!((SCALAR_7 - 1..=SCALAR_7).contains(&first_day.accrued));
 
         fixture.e.as_contract(&fixture.backstop, || {
-            distributor::set_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
+            set_backstop_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
         });
         fixture
             .e
             .ledger()
             .set_timestamp(next_gulp + distributor::STREAM_SECONDS);
         let completed = fixture.e.as_contract(&fixture.backstop, || {
-            distributor::checkpoint_user_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            distributor::update_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
         });
         assert_eq!(completed.accrued, 2 * allocation);
         let stream = fixture.e.as_contract(&fixture.backstop, || {
@@ -1411,5 +1357,263 @@ mod tests {
             .client()
             .queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7);
         assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, 9 * SCALAR_7);
+    }
+}
+
+#[cfg(test)]
+mod reward_zone_tests {
+    use mock_pool_factory::MockPoolFactoryClient;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger},
+        Address, Env,
+    };
+
+    use crate::{
+        backstop::{BackstopTier, PoolBalance},
+        constants::{
+            ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC, MAX_RZ_SIZE,
+            SCALAR_7,
+        },
+        storage,
+        testutils::{
+            create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
+            create_token, create_usdc_token,
+        },
+        BackstopClient,
+    };
+
+    use super::CHECKPOINT_MAX_AGE_SECONDS;
+
+    struct Fixture {
+        backstop: Address,
+        e: Env,
+        factory: Address,
+    }
+
+    impl Fixture {
+        fn create() -> Self {
+            let e = Env::default();
+            e.mock_all_auths();
+            e.ledger().set_timestamp(10_000);
+            let admin = Address::generate(&e);
+            let backstop = create_backstop(&e);
+            let (blnd, _) = create_blnd_token(&e, &backstop, &admin);
+            let (usdc, _) = create_usdc_token(&e, &backstop, &admin);
+            let (xlm, _) = create_token(&e, &admin);
+            let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+            let (blnd_xlm, _) = create_comet_lp_pool(&e, &admin, &blnd, &xlm);
+            let (factory, _) = create_mock_pool_factory(&e, &backstop);
+            e.as_contract(&backstop, || {
+                storage::set_blnd_usdc_token(&e, &blnd_usdc);
+                storage::set_blnd_xlm_token(&e, &blnd_xlm);
+            });
+            Self {
+                backstop,
+                e,
+                factory,
+            }
+        }
+
+        fn client(&self) -> BackstopClient<'_> {
+            BackstopClient::new(&self.e, &self.backstop)
+        }
+
+        fn pool(&self, blnd_usdc: i128, queued_blnd_usdc: i128, usdc: i128) -> Address {
+            let pool = Address::generate(&self.e);
+            MockPoolFactoryClient::new(&self.e, &self.factory).set_mock_pool(&pool);
+            self.e.as_contract(&self.backstop, || {
+                storage::set_pool_balance_for_tier(
+                    &self.e,
+                    BackstopTier::BlndUsdc,
+                    &pool,
+                    &PoolBalance {
+                        q4w: queued_blnd_usdc,
+                        shares: blnd_usdc,
+                        tokens: blnd_usdc,
+                    },
+                );
+                storage::set_pool_balance_for_tier(
+                    &self.e,
+                    BackstopTier::Usdc,
+                    &pool,
+                    &PoolBalance {
+                        q4w: 0,
+                        shares: usdc,
+                        tokens: usdc,
+                    },
+                );
+            });
+            pool
+        }
+
+        fn set_pool_tier(
+            &self,
+            pool: &Address,
+            tier: BackstopTier,
+            assets: i128,
+            queued_shares: i128,
+        ) {
+            self.e.as_contract(&self.backstop, || {
+                storage::set_pool_balance_for_tier(
+                    &self.e,
+                    tier,
+                    pool,
+                    &PoolBalance {
+                        q4w: queued_shares,
+                        shares: assets,
+                        tokens: assets,
+                    },
+                );
+            });
+        }
+
+        fn checkpoint(&self, timestamp: u64) {
+            self.e.as_contract(&self.backstop, || {
+                storage::set_reward_zone_checkpoint(&self.e, timestamp);
+            });
+        }
+
+        fn mark_distribution_started(&self, timestamp: u64) {
+            self.e.as_contract(&self.backstop, || {
+                storage::set_reward_zone_distribution_started(&self.e);
+                storage::set_reward_zone_checkpoint(&self.e, timestamp);
+            });
+        }
+
+        fn mark_distribution_started_without_checkpoint(&self) {
+            self.e.as_contract(&self.backstop, || {
+                storage::set_reward_zone_distribution_started(&self.e);
+            });
+        }
+    }
+
+    #[test]
+    fn membership_is_bounded_checkpoint_gated_after_distribution_and_blnd_weighted() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        client.add_reward(&first, &None);
+        assert_eq!(client.reward_zone(), soroban_sdk::vec![&fixture.e, first]);
+
+        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        client.add_reward(&second, &None);
+
+        let third = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        fixture.mark_distribution_started(
+            fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
+        );
+        assert!(client.try_add_reward(&third, &None).is_err());
+        fixture.checkpoint(fixture.e.ledger().timestamp());
+        client.add_reward(&third, &None);
+
+        while client.reward_zone().len() < MAX_RZ_SIZE {
+            let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+            client.add_reward(&pool, &None);
+        }
+        let removed = client.reward_zone().last().unwrap();
+        let equal = fixture.pool(2 * SCALAR_7, SCALAR_7, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert!(client
+            .try_add_reward(&equal, &Some(removed.clone()))
+            .is_err());
+
+        fixture.set_pool_tier(&equal, BackstopTier::BlndUsdc, 2 * SCALAR_7, 0);
+        client.add_reward(&equal, &Some(removed.clone()));
+        assert_eq!(client.reward_zone().len(), MAX_RZ_SIZE);
+        assert_eq!(client.reward_zone().first(), Some(equal));
+        assert!(!client.reward_zone().contains(removed));
+    }
+
+    #[test]
+    fn entry_requires_value_and_blnd_while_removal_uses_hysteresis() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let usdc_only = fixture.pool(0, 0, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert!(client.try_add_reward(&usdc_only, &None).is_err());
+
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        client.add_reward(&pool, &None);
+        fixture.mark_distribution_started(fixture.e.ledger().timestamp());
+        fixture.set_pool_tier(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
+            0,
+        );
+        assert!(client.try_remove_reward(&pool).is_err());
+
+        fixture.set_pool_tier(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            0,
+        );
+        client.remove_reward(&pool);
+        assert!(client.reward_zone().is_empty());
+    }
+
+    #[test]
+    fn missing_checkpoint_after_distribution_fails_closed() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        client.add_reward(&first, &None);
+        fixture.mark_distribution_started_without_checkpoint();
+
+        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        assert!(client.try_add_reward(&second, &None).is_err());
+
+        fixture.set_pool_tier(
+            &first,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            0,
+        );
+        assert!(client.try_remove_reward(&first).is_err());
+    }
+
+    #[test]
+    fn first_pre_activation_member_cannot_receive_prior_distribution_time() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        fixture.mark_distribution_started(
+            fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
+        );
+
+        assert!(client.try_add_reward(&first, &None).is_err());
+        fixture.checkpoint(fixture.e.ledger().timestamp());
+        client.add_reward(&first, &None);
+    }
+
+    #[test]
+    fn ordinary_removal_needs_no_checkpoint_before_distribution_begins() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        client.add_reward(&pool, &None);
+        fixture.set_pool_tier(
+            &pool,
+            BackstopTier::Usdc,
+            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            0,
+        );
+
+        client.remove_reward(&pool);
+        assert!(client.reward_zone().is_empty());
+    }
+
+    #[test]
+    fn zero_blnd_member_can_be_removed_without_a_fresh_checkpoint() {
+        let fixture = Fixture::create();
+        let client = fixture.client();
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        client.add_reward(&pool, &None);
+        fixture.set_pool_tier(&pool, BackstopTier::BlndUsdc, SCALAR_7, SCALAR_7);
+        fixture.mark_distribution_started(
+            fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
+        );
+
+        client.remove_reward(&pool);
+        assert!(client.reward_zone().is_empty());
     }
 }

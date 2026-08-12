@@ -10,7 +10,7 @@ use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, Address, Env, Map, Vec};
 
 use super::{
-    del_tier_auction, get_tier_auction, has_tier_auction,
+    get_tier_auction, has_tier_auction,
     math::{
         auction_modifiers, proportional_ceil, proportional_floor, scale_bid_amount,
         scale_lot_amount,
@@ -28,72 +28,7 @@ const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 4;
 const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 3;
 const TAKE_RATE_WEIGHT_USDC: i128 = 2;
 
-/// Pending reserve credit apportioned to each tier for one reserve asset.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-struct InterestReserveState {
-    blnd_usdc: i128,
-    blnd_xlm: i128,
-    carry: i128,
-    usdc: i128,
-}
-
-impl InterestReserveState {
-    fn empty() -> Self {
-        Self {
-            blnd_usdc: 0,
-            blnd_xlm: 0,
-            carry: 0,
-            usdc: 0,
-        }
-    }
-
-    fn total(&self, e: &Env) -> i128 {
-        checked_add(
-            e,
-            checked_add(e, self.blnd_usdc, self.blnd_xlm),
-            checked_add(e, self.usdc, self.carry),
-        )
-    }
-
-    fn tier_amount(&self, tier: super::BackstopTier) -> i128 {
-        match tier {
-            super::BackstopTier::BlndUsdc => self.blnd_usdc,
-            super::BackstopTier::BlndXlm => self.blnd_xlm,
-            super::BackstopTier::Usdc => self.usdc,
-        }
-    }
-
-    fn set_tier_amount(&mut self, tier: super::BackstopTier, amount: i128) {
-        match tier {
-            super::BackstopTier::BlndUsdc => self.blnd_usdc = amount,
-            super::BackstopTier::BlndXlm => self.blnd_xlm = amount,
-            super::BackstopTier::Usdc => self.usdc = amount,
-        }
-    }
-}
-
-/// Exact base and time-scaled amounts processed by one interest fill.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub(crate) struct InterestAuctionFill {
-    pub base_bid_amount: i128,
-    pub base_lot: Map<Address, i128>,
-    pub bid_amount: i128,
-    pub block: u32,
-    pub complete: bool,
-    pub lot: Map<Address, i128>,
-    pub tier: super::BackstopTier,
-}
-
-#[derive(Clone)]
-#[contracttype]
-enum InterestDataKey {
-    Cursor,
-    Reserve(Address),
-}
-
-pub fn create_interest_auction(e: &Env, lot_assets: &Vec<Address>) -> TierAuctionData {
+pub fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -> TierAuctionData {
     if has_tier_auction(e, AuctionType::InterestAuction) {
         panic_with_error!(e, PoolError::AuctionInProgress);
     }
@@ -259,8 +194,69 @@ pub fn fill_interest_auction(
     }
 }
 
-pub fn del_interest_auction(e: &Env) {
-    del_tier_auction(e, AuctionType::InterestAuction);
+/// Pending reserve credit apportioned to each tier for one reserve asset.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+struct InterestReserveState {
+    blnd_usdc: i128,
+    blnd_xlm: i128,
+    carry: i128,
+    usdc: i128,
+}
+
+impl InterestReserveState {
+    fn empty() -> Self {
+        Self {
+            blnd_usdc: 0,
+            blnd_xlm: 0,
+            carry: 0,
+            usdc: 0,
+        }
+    }
+
+    fn total(&self, e: &Env) -> i128 {
+        checked_add(
+            e,
+            checked_add(e, self.blnd_usdc, self.blnd_xlm),
+            checked_add(e, self.usdc, self.carry),
+        )
+    }
+
+    fn tier_amount(&self, tier: super::BackstopTier) -> i128 {
+        match tier {
+            super::BackstopTier::BlndUsdc => self.blnd_usdc,
+            super::BackstopTier::BlndXlm => self.blnd_xlm,
+            super::BackstopTier::Usdc => self.usdc,
+        }
+    }
+
+    fn set_tier_amount(&mut self, tier: super::BackstopTier, amount: i128) {
+        match tier {
+            super::BackstopTier::BlndUsdc => self.blnd_usdc = amount,
+            super::BackstopTier::BlndXlm => self.blnd_xlm = amount,
+            super::BackstopTier::Usdc => self.usdc = amount,
+        }
+    }
+}
+
+/// Exact base and time-scaled amounts processed by one interest fill.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub(crate) struct InterestAuctionFill {
+    pub base_bid_amount: i128,
+    pub base_lot: Map<Address, i128>,
+    pub bid_amount: i128,
+    pub block: u32,
+    pub complete: bool,
+    pub lot: Map<Address, i128>,
+    pub tier: super::BackstopTier,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum InterestDataKey {
+    Cursor,
+    Reserve(Address),
 }
 
 fn get_interest_reserve_state(e: &Env, asset: &Address) -> InterestReserveState {

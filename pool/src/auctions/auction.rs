@@ -8,6 +8,10 @@ use cast::i128;
 use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
 use super::{
+    backstop_interest_auction::{
+        create_interest_auction_data, fill_interest_auction, get_interest_auction,
+    },
+    bad_debt_auction::{create_bad_debt_auction_data, fill_bad_debt_auction, get_bad_debt_auction},
     math::{auction_modifiers, scale_bid_amount, scale_lot_amount},
     user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction},
 };
@@ -20,17 +24,8 @@ pub enum AuctionType {
     InterestAuction = 2,
 }
 
-/// The fixed v3 backstop tier identifiers used by pool auctions.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub enum BackstopTier {
-    BlndUsdc,
-    BlndXlm,
-    Usdc,
-}
-
 impl AuctionType {
-    pub(crate) fn from_u32(e: &Env, value: u32) -> Self {
+    pub fn from_u32(e: &Env, value: u32) -> Self {
         match value {
             0 => Self::UserLiquidation,
             1 => Self::BadDebtAuction,
@@ -64,78 +59,12 @@ pub struct AuctionData {
     pub block: u32,
 }
 
-/// One active auction backed by a single v3 backstop tier.
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype(export = false)]
-pub(crate) struct TierAuctionData {
-    pub auction: AuctionData,
-    pub tier: BackstopTier,
-}
-
-#[derive(Clone)]
-#[contracttype]
-enum TierAuctionDataKey {
-    Auction(u32),
-}
-
-const ONE_DAY_LEDGERS: u32 = 17_280;
-const TIER_AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
-const TIER_AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
-pub(crate) const AUCTION_STALE_LEDGERS: u32 = 500;
-
-pub(crate) fn get_tier_auction(e: &Env, auction_type: AuctionType) -> TierAuctionData {
-    e.storage()
-        .temporary()
-        .get(&TierAuctionDataKey::Auction(auction_type as u32))
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
-}
-
-pub(crate) fn has_tier_auction(e: &Env, auction_type: AuctionType) -> bool {
-    e.storage()
-        .temporary()
-        .has(&TierAuctionDataKey::Auction(auction_type as u32))
-}
-
-pub(crate) fn set_tier_auction(e: &Env, auction_type: AuctionType, auction: &TierAuctionData) {
-    let key = TierAuctionDataKey::Auction(auction_type as u32);
-    e.storage().temporary().set(&key, auction);
-    e.storage()
-        .temporary()
-        .extend_ttl(&key, TIER_AUCTION_TTL_THRESHOLD, TIER_AUCTION_TTL_BUMP);
-}
-
-pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
-    let auction = get_tier_auction(e, auction_type.clone());
-    let stale_at = auction
-        .auction
-        .block
-        .checked_add(AUCTION_STALE_LEDGERS)
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
-    if e.ledger().sequence() < stale_at {
-        panic_with_error!(e, PoolError::BadRequest);
-    }
-    remove_tier_auction(e, auction_type);
-}
-
-pub(crate) fn remove_tier_auction(e: &Env, auction_type: AuctionType) {
-    e.storage()
-        .temporary()
-        .remove(&TierAuctionDataKey::Auction(auction_type as u32));
-}
-
-pub(crate) fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
-    match tier {
-        BackstopTier::BlndUsdc => BackstopContractTier::BlndUsdc,
-        BackstopTier::BlndXlm => BackstopContractTier::BlndXlm,
-        BackstopTier::Usdc => BackstopContractTier::Usdc,
-    }
-}
-
-/// Create a user-liquidation auction that begins on the next ledger.
+/// Create a new auction. Stores the resulting auction to begin on the next ledger.
 ///
 /// Returns the AuctionData object created
 ///
 /// ### Arguments
+/// * `auction_type` - The type of auction being created
 /// * `user` - The user involved in the auction
 /// * `bid` - The assets being bid on
 /// * `lot` - The assets being auctioned off
@@ -143,10 +72,11 @@ pub(crate) fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
 ///
 /// ### Panics
 /// * If the max positions are exceeded
-/// * If the user or percentage is invalid
+/// * If the user or percentage is invalid for the auction type
 /// * If the auction is unable to be created
-pub fn create_user_liquidation_auction(
+pub fn create_auction(
     e: &Env,
+    auction_type: u32,
     user: &Address,
     bid: &Vec<Address>,
     lot: &Vec<Address>,
@@ -154,30 +84,56 @@ pub fn create_user_liquidation_auction(
 ) -> AuctionData {
     require_unique_addresses(e, bid);
     require_unique_addresses(e, lot);
-    let auction_data = create_user_liq_auction_data(e, user, bid, lot, percent);
-    storage::set_auction(
-        e,
-        &(AuctionType::UserLiquidation as u32),
-        user,
-        &auction_data,
-    );
-    auction_data
+    match AuctionType::from_u32(e, auction_type) {
+        AuctionType::UserLiquidation => {
+            let auction = create_user_liq_auction_data(e, user, bid, lot, percent);
+            storage::set_auction(e, &auction_type, user, &auction);
+            auction
+        }
+        AuctionType::BadDebtAuction => {
+            require_backstop_auction_args(e, user, bid, lot, percent, true);
+            create_bad_debt_auction_data(e).auction
+        }
+        AuctionType::InterestAuction => {
+            require_backstop_auction_args(e, user, bid, lot, percent, false);
+            create_interest_auction_data(e, lot).auction
+        }
+    }
 }
 
-/// Delete a user-liquidation auction if it is stale.
-pub fn del_user_liquidation_auction(e: &Env, user: &Address) {
-    let auction_type = AuctionType::UserLiquidation as u32;
-    if !storage::has_auction(e, &auction_type, user) {
-        panic_with_error!(e, PoolError::BadRequest);
+/// Fetch an auction from its canonical v2-compatible public scope.
+pub fn get_auction(e: &Env, auction_type: u32, user: &Address) -> AuctionData {
+    match AuctionType::from_u32(e, auction_type) {
+        AuctionType::UserLiquidation => storage::get_auction(e, &auction_type, user),
+        AuctionType::BadDebtAuction => {
+            require_backstop_auction_user(e, user);
+            get_bad_debt_auction(e).auction
+        }
+        AuctionType::InterestAuction => {
+            require_backstop_auction_user(e, user);
+            get_interest_auction(e).auction
+        }
     }
+}
 
-    let auction = storage::get_auction(e, &auction_type, user);
-    // require auction is stale (older than 500 blocks)
-    if auction.block + 500 > e.ledger().sequence() {
-        panic_with_error!(e, PoolError::BadRequest);
+/// Delete an auction if it is stale.
+pub fn delete_stale_auction(e: &Env, auction_type: u32, user: &Address) {
+    match AuctionType::from_u32(e, auction_type) {
+        AuctionType::UserLiquidation => {
+            if !storage::has_auction(e, &auction_type, user) {
+                panic_with_error!(e, PoolError::BadRequest);
+            }
+            let auction = storage::get_auction(e, &auction_type, user);
+            if auction.block + AUCTION_STALE_LEDGERS > e.ledger().sequence() {
+                panic_with_error!(e, PoolError::BadRequest);
+            }
+            storage::del_auction(e, &auction_type, user);
+        }
+        kind @ (AuctionType::BadDebtAuction | AuctionType::InterestAuction) => {
+            require_backstop_auction_user(e, user);
+            del_tier_auction(e, kind);
+        }
     }
-
-    storage::del_auction(e, &auction_type, user);
 }
 
 /// Delete a liquidation auction if the user being liquidated
@@ -197,10 +153,11 @@ pub fn delete_liquidation(e: &Env, user: &Address) {
     storage::del_auction(e, &(AuctionType::UserLiquidation as u32), user);
 }
 
-/// Fill a user-liquidation auction from the invoker.
+/// Fill an auction from the invoker.
 ///
 /// ### Arguments
 /// * `pool` - The pool
+/// * `auction_type` - The type of auction to fill
 /// * `user` - The user involved in the auction
 /// * `filler_state` - The Address filling the auction
 /// * `percent_filled` - The percentage being filled as a number (i.e. 15 => 15%)
@@ -208,29 +165,65 @@ pub fn delete_liquidation(e: &Env, user: &Address) {
 /// ### Panics
 /// If the auction does not exist, or if the pool is unable to fulfill either side
 /// of the auction quote
-pub fn fill_user_liquidation_auction(
+pub fn fill(
     e: &Env,
     pool: &mut Pool,
+    auction_type: u32,
     user: &Address,
     filler_state: &mut User,
     percent_filled: u64,
 ) -> AuctionData {
-    if user.clone() == filler_state.address {
-        panic_with_error!(e, PoolError::InvalidLiquidation);
+    match AuctionType::from_u32(e, auction_type) {
+        AuctionType::UserLiquidation => {
+            if user.clone() == filler_state.address {
+                panic_with_error!(e, PoolError::InvalidLiquidation);
+            }
+            let auction_data = storage::get_auction(e, &auction_type, user);
+            let (to_fill_auction, remaining_auction) =
+                scale_auction(e, &auction_data, percent_filled);
+            let is_full_fill = remaining_auction.is_none();
+            fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill);
+            if let Some(auction_to_store) = remaining_auction {
+                storage::set_auction(e, &auction_type, user, &auction_to_store);
+            } else {
+                storage::del_auction(e, &auction_type, user);
+            }
+            to_fill_auction
+        }
+        AuctionType::BadDebtAuction => {
+            fill_bad_debt_auction(e, pool, user, filler_state, fill_percent(e, percent_filled))
+        }
+        AuctionType::InterestAuction => {
+            fill_interest_auction(e, pool, user, filler_state, fill_percent(e, percent_filled))
+        }
     }
-    let auction_type = AuctionType::UserLiquidation as u32;
-    let auction_data = storage::get_auction(e, &auction_type, user);
-    let (to_fill_auction, remaining_auction) = scale_auction(e, &auction_data, percent_filled);
-    let is_full_fill = remaining_auction.is_none();
-    fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill);
+}
 
-    if let Some(auction_to_store) = remaining_auction {
-        storage::set_auction(e, &auction_type, user, &auction_to_store);
-    } else {
-        storage::del_auction(e, &auction_type, user);
+fn fill_percent(e: &Env, percent: u64) -> u32 {
+    u32::try_from(percent)
+        .ok()
+        .filter(|value| *value > 0 && *value <= 100)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
+}
+
+fn require_backstop_auction_user(e: &Env, user: &Address) {
+    if user != &storage::get_backstop(e) {
+        panic_with_error!(e, PoolError::BadRequest);
     }
+}
 
-    to_fill_auction
+fn require_backstop_auction_args(
+    e: &Env,
+    user: &Address,
+    bid: &Vec<Address>,
+    lot: &Vec<Address>,
+    percent: u32,
+    require_empty_lot: bool,
+) {
+    require_backstop_auction_user(e, user);
+    if percent != 100 || !bid.is_empty() || (require_empty_lot && !lot.is_empty()) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
 }
 
 /// Scale the auction based on the percent being filled and the amount of blocks that have passed
@@ -312,6 +305,82 @@ pub(crate) fn require_unique_addresses(e: &Env, list: &Vec<Address>) {
             panic_with_error!(e, PoolError::BadRequest);
         }
         temp_map.set(address.clone(), true);
+    }
+}
+
+/// The fixed v3 backstop tier identifiers used by pool auctions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub enum BackstopTier {
+    BlndUsdc,
+    BlndXlm,
+    Usdc,
+}
+
+/// One active auction backed by a single v3 backstop tier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub(crate) struct TierAuctionData {
+    pub auction: AuctionData,
+    pub tier: BackstopTier,
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum TierAuctionDataKey {
+    Auction(u32),
+}
+
+const ONE_DAY_LEDGERS: u32 = 17_280;
+const TIER_AUCTION_TTL_THRESHOLD: u32 = 45 * ONE_DAY_LEDGERS;
+const TIER_AUCTION_TTL_BUMP: u32 = 46 * ONE_DAY_LEDGERS;
+pub(crate) const AUCTION_STALE_LEDGERS: u32 = 500;
+
+pub(crate) fn get_tier_auction(e: &Env, auction_type: AuctionType) -> TierAuctionData {
+    e.storage()
+        .temporary()
+        .get(&TierAuctionDataKey::Auction(auction_type as u32))
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest))
+}
+
+pub(crate) fn has_tier_auction(e: &Env, auction_type: AuctionType) -> bool {
+    e.storage()
+        .temporary()
+        .has(&TierAuctionDataKey::Auction(auction_type as u32))
+}
+
+pub(crate) fn set_tier_auction(e: &Env, auction_type: AuctionType, auction: &TierAuctionData) {
+    let key = TierAuctionDataKey::Auction(auction_type as u32);
+    e.storage().temporary().set(&key, auction);
+    e.storage()
+        .temporary()
+        .extend_ttl(&key, TIER_AUCTION_TTL_THRESHOLD, TIER_AUCTION_TTL_BUMP);
+}
+
+pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
+    let auction = get_tier_auction(e, auction_type.clone());
+    let stale_at = auction
+        .auction
+        .block
+        .checked_add(AUCTION_STALE_LEDGERS)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    if e.ledger().sequence() < stale_at {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    remove_tier_auction(e, auction_type);
+}
+
+pub(crate) fn remove_tier_auction(e: &Env, auction_type: AuctionType) {
+    e.storage()
+        .temporary()
+        .remove(&TierAuctionDataKey::Auction(auction_type as u32));
+}
+
+pub(crate) fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
+    match tier {
+        BackstopTier::BlndUsdc => BackstopContractTier::BlndUsdc,
+        BackstopTier::BlndXlm => BackstopContractTier::BlndXlm,
+        BackstopTier::Usdc => BackstopContractTier::Usdc,
     }
 }
 
@@ -437,8 +506,9 @@ mod tests {
             storage::set_pool_config(&e, &pool_config);
 
             e.cost_estimate().budget().reset_unlimited();
-            create_user_liquidation_auction(
+            create_auction(
                 &e,
+                0,
                 &samwise,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -549,8 +619,9 @@ mod tests {
             storage::set_user_positions(&e, &pool_address, &positions);
             storage::set_pool_config(&e, &pool_config);
 
-            create_user_liquidation_auction(
+            create_auction(
                 &e,
+                0,
                 &pool_address,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -661,8 +732,9 @@ mod tests {
             storage::set_user_positions(&e, &backstop, &positions);
             storage::set_pool_config(&e, &pool_config);
 
-            create_user_liquidation_auction(
+            create_auction(
                 &e,
+                0,
                 &backstop,
                 &vec![&e, underlying_2],
                 &vec![&e, underlying_0, underlying_1],
@@ -800,8 +872,9 @@ mod tests {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &positions);
 
-            create_user_liquidation_auction(
+            create_auction(
                 &e,
+                0,
                 &backstop_address,
                 &vec![&e, underlying_0.clone(), underlying_1, underlying_0],
                 &vec![&e, lp_token],
@@ -913,8 +986,9 @@ mod tests {
         e.as_contract(&pool_address, || {
             storage::set_pool_config(&e, &pool_config);
 
-            create_user_liquidation_auction(
+            create_auction(
                 &e,
+                0,
                 &backstop_address,
                 &vec![&e, backstop_token_id],
                 &vec![&e, underlying_0.clone(), underlying_1, underlying_0],
@@ -1070,7 +1144,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 100);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 100);
             let has_auction = storage::has_auction(&e, &0, &samwise);
             assert_eq!(has_auction, false);
         });
@@ -1179,7 +1253,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 25);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 25);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -1301,7 +1375,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 25);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 25);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 75_000_0000)],
@@ -1331,7 +1405,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 67);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 67);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 24_7500000)],
@@ -1360,7 +1434,7 @@ mod tests {
             });
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 100);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 100);
             let new_auction = storage::has_auction(&e, &0, &samwise);
             assert_eq!(new_auction, false);
             let samwise_positions = storage::get_user_positions(&e, &samwise);
@@ -1491,7 +1565,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 101);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 101);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -1614,7 +1688,7 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut frodo_state = User::load(&e, &frodo);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut frodo_state, 0);
+            fill(&e, &mut pool, 0, &samwise, &mut frodo_state, 0);
 
             let expected_new_auction_data = AuctionData {
                 bid: map![&e, (underlying_2.clone(), 9281250)],
@@ -1735,12 +1809,35 @@ mod tests {
             e.cost_estimate().budget().reset_unlimited();
             let mut pool = Pool::load(&e);
             let mut samwise_state = User::load(&e, &samwise);
-            fill_user_liquidation_auction(&e, &mut pool, &samwise, &mut samwise_state, 100);
+            fill(&e, &mut pool, 0, &samwise, &mut samwise_state, 100);
         });
     }
 
     #[test]
-    fn test_del_user_liquidation_auction() {
+    #[should_panic(expected = "Error(Contract, #1227)")]
+    fn test_fill_interest_auction_same_address_uses_interest_error() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let pool_address = create_pool(&e);
+        e.as_contract(&pool_address, || {
+            let backstop = storage::get_backstop(&e);
+            let mut pool = Pool::load(&e);
+            let mut backstop_state = User::load(&e, &backstop);
+
+            fill(
+                &e,
+                &mut pool,
+                AuctionType::InterestAuction as u32,
+                &backstop,
+                &mut backstop_state,
+                100,
+            );
+        });
+    }
+
+    #[test]
+    fn test_delete_stale_auction() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -1771,7 +1868,7 @@ mod tests {
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, true);
 
-            del_user_liquidation_auction(&e, &user);
+            delete_stale_auction(&e, auction_type, &user);
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, false);
         });
@@ -2208,7 +2305,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_del_user_liquidation_auction_not_stale() {
+    fn test_delete_stale_auction_not_stale() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -2240,13 +2337,13 @@ mod tests {
             let has_auction = storage::has_auction(&e, &auction_type, &user);
             assert_eq!(has_auction, true);
 
-            del_user_liquidation_auction(&e, &user);
+            delete_stale_auction(&e, auction_type, &user);
         });
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1200)")]
-    fn test_del_user_liquidation_auction_does_not_exist() {
+    fn test_delete_stale_auction_does_not_exist() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -2265,7 +2362,7 @@ mod tests {
         let user = Address::generate(&e);
 
         e.as_contract(&pool_address, || {
-            del_user_liquidation_auction(&e, &user);
+            delete_stale_auction(&e, AuctionType::UserLiquidation as u32, &user);
         });
     }
 

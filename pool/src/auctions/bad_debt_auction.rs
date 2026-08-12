@@ -25,6 +25,96 @@ const BAD_DEBT_LOT_PREMIUM_DENOMINATOR: i128 = 5;
 /// creation call also validates the complete bounded reserve set.
 const MAX_BAD_DEBT_BID_ASSETS: u32 = 4;
 
+/// Create the next canonical bad-debt auction.
+pub fn create_bad_debt_auction_data(e: &Env) -> TierAuctionData {
+    require_no_active_bad_debt_auction(e);
+    let mut pool = Pool::load(e);
+    let bid = canonical_bad_debt_bid(e, &pool);
+    let (bid_amounts, debt_value_usdc) = build_bad_debt_bid(e, &mut pool, &bid);
+    commit_prepared_bad_debt_auction(e, &bid_amounts, debt_value_usdc)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot))
+}
+
+pub fn get_bad_debt_auction(e: &Env) -> TierAuctionData {
+    get_tier_auction(e, AuctionType::BadDebtAuction)
+}
+
+/// Atomically transfer the scaled debt bid and settle the realized tier loss.
+pub fn fill_bad_debt_auction(
+    e: &Env,
+    pool: &mut Pool,
+    auction_user: &Address,
+    filler_state: &mut User,
+    percent: u32,
+) -> AuctionData {
+    let pool_address = e.current_contract_address();
+    let backstop = storage::get_backstop(e);
+    if auction_user != &backstop
+        || filler_state.address == pool_address
+        || filler_state.address == backstop
+        || percent == 0
+        || percent > 100
+    {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+    if storage::has_auction(
+        e,
+        &(AuctionType::UserLiquidation as u32),
+        &filler_state.address,
+    ) {
+        panic_with_error!(e, PoolError::AuctionInProgress);
+    }
+
+    let auction = get_bad_debt_auction(e);
+    let (fill, remaining_bid, remaining_lot_amount) =
+        scale_prepared_bad_debt_auction(e, &auction, percent);
+    let mut backstop_state = User::load(e, &backstop);
+
+    backstop_state.rm_positions(e, pool, map![e], fill.bid.clone());
+    filler_state.add_positions(e, pool, map![e], fill.bid.clone());
+
+    BackstopClient::new(e, &backstop).draw(
+        &to_backstop_tier(fill.tier),
+        &pool_address,
+        &fill.lot_amount,
+        &filler_state.address,
+    );
+    if !fill.complete {
+        set_prepared_bad_debt_auction(
+            e,
+            &TierAuctionData {
+                auction: AuctionData {
+                    bid: remaining_bid,
+                    lot: map![
+                        e,
+                        (
+                            auction.auction.lot.keys().get(0).unwrap(),
+                            remaining_lot_amount
+                        )
+                    ],
+                    block: auction.auction.block,
+                },
+                tier: auction.tier,
+            },
+        );
+    } else {
+        remove_tier_auction(e, AuctionType::BadDebtAuction);
+    }
+
+    backstop_state.store(e);
+    let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(fill.tier));
+    let lot = if fill.lot_amount > 0 {
+        map![e, (lot_token, fill.lot_amount)]
+    } else {
+        map![e]
+    };
+    AuctionData {
+        bid: fill.bid,
+        lot,
+        block: fill.block,
+    }
+}
+
 /// Exact amounts processed by one bad-debt auction fill.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -38,16 +128,6 @@ pub(crate) struct BadDebtAuctionFill {
     /// Time-scaled tier-token amount transferred to the filler.
     pub lot_amount: i128,
     pub tier: BackstopTier,
-}
-
-/// Create the next canonical bad-debt auction.
-pub fn create_bad_debt_auction(e: &Env) -> TierAuctionData {
-    require_no_active_bad_debt_auction(e);
-    let mut pool = Pool::load(e);
-    let bid = canonical_bad_debt_bid(e, &pool);
-    let (bid_amounts, debt_value_usdc) = build_bad_debt_bid(e, &mut pool, &bid);
-    commit_prepared_bad_debt_auction(e, &bid_amounts, debt_value_usdc)
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot))
 }
 
 /// Default residual backstop debt only after verifying that every tier has no
@@ -207,86 +287,6 @@ fn default_all_backstop_liabilities(e: &Env, mut pool: Pool) {
     }
     backstop_state.store(e);
     pool.store_cached_reserves(e);
-}
-
-pub fn get_prepared_bad_debt_auction(e: &Env) -> TierAuctionData {
-    get_tier_auction(e, AuctionType::BadDebtAuction)
-}
-
-/// Atomically transfer the scaled debt bid and settle the realized tier loss.
-pub fn fill_prepared_bad_debt_auction(
-    e: &Env,
-    pool: &mut Pool,
-    auction_user: &Address,
-    filler_state: &mut User,
-    percent: u32,
-) -> AuctionData {
-    let pool_address = e.current_contract_address();
-    let backstop = storage::get_backstop(e);
-    if auction_user != &backstop
-        || filler_state.address == pool_address
-        || filler_state.address == backstop
-        || percent == 0
-        || percent > 100
-    {
-        panic_with_error!(e, PoolError::InvalidLiquidation);
-    }
-    if storage::has_auction(
-        e,
-        &(AuctionType::UserLiquidation as u32),
-        &filler_state.address,
-    ) {
-        panic_with_error!(e, PoolError::AuctionInProgress);
-    }
-
-    let auction = get_prepared_bad_debt_auction(e);
-    let (fill, remaining_bid, remaining_lot_amount) =
-        scale_prepared_bad_debt_auction(e, &auction, percent);
-    let mut backstop_state = User::load(e, &backstop);
-
-    backstop_state.rm_positions(e, pool, map![e], fill.bid.clone());
-    filler_state.add_positions(e, pool, map![e], fill.bid.clone());
-
-    BackstopClient::new(e, &backstop).draw(
-        &to_backstop_tier(fill.tier),
-        &pool_address,
-        &fill.lot_amount,
-        &filler_state.address,
-    );
-    if !fill.complete {
-        set_prepared_bad_debt_auction(
-            e,
-            &TierAuctionData {
-                auction: AuctionData {
-                    bid: remaining_bid,
-                    lot: map![
-                        e,
-                        (
-                            auction.auction.lot.keys().get(0).unwrap(),
-                            remaining_lot_amount
-                        )
-                    ],
-                    block: auction.auction.block,
-                },
-                tier: auction.tier,
-            },
-        );
-    } else {
-        remove_tier_auction(e, AuctionType::BadDebtAuction);
-    }
-
-    backstop_state.store(e);
-    let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(fill.tier));
-    let lot = if fill.lot_amount > 0 {
-        map![e, (lot_token, fill.lot_amount)]
-    } else {
-        map![e]
-    };
-    AuctionData {
-        bid: fill.bid,
-        lot,
-        block: fill.block,
-    }
 }
 
 fn set_prepared_bad_debt_auction(e: &Env, auction: &TierAuctionData) {

@@ -11,7 +11,7 @@ use crate::{
 
 pub(super) const STREAM_SECONDS: u64 = 7 * 24 * 60 * 60;
 
-pub(crate) fn checkpoint_user_emissions(
+pub(crate) fn update_emissions(
     e: &Env,
     tier: BackstopTier,
     pool: &Address,
@@ -19,10 +19,10 @@ pub(crate) fn checkpoint_user_emissions(
 ) -> UserEmissionData {
     let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool);
     let user_balance = storage::get_user_balance_for_tier(e, tier, pool, user);
-    let Some(emission_data) = checkpoint_emission_data(e, tier, pool, &pool_balance) else {
+    let Some(emission_data) = update_emission_data(e, tier, pool, &pool_balance) else {
         return storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data());
     };
-    let user_data = accrue_user_emissions(
+    let user_data = update_user_emissions(
         e,
         storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data()),
         &user_balance,
@@ -44,7 +44,7 @@ pub(crate) fn preview_user_emissions(
     let current_index = storage::get_backstop_emis_data(e, tier, pool)
         .map(|data| advance_emission_data(e, data, &pool_balance).index)
         .unwrap_or(0);
-    accrue_user_emissions(
+    update_user_emissions(
         e,
         storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data()),
         &user_balance,
@@ -53,7 +53,7 @@ pub(crate) fn preview_user_emissions(
 }
 
 pub(crate) fn claim_emissions(e: &Env, tier: BackstopTier, pool: &Address, user: &Address) -> i128 {
-    let mut user_data = checkpoint_user_emissions(e, tier, pool, user);
+    let mut user_data = update_emissions(e, tier, pool, user);
     let accrued = user_data.accrued;
     if accrued > 0 {
         user_data.accrued = 0;
@@ -62,13 +62,18 @@ pub(crate) fn claim_emissions(e: &Env, tier: BackstopTier, pool: &Address, user:
     accrued
 }
 
-pub(crate) fn set_emission_eps(e: &Env, tier: BackstopTier, pool: &Address, pending: i128) {
+pub(crate) fn set_backstop_emission_eps(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    pending: i128,
+) {
     if pending < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
     let now = e.ledger().timestamp();
     let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool);
-    let existing = checkpoint_emission_data(e, tier, pool, &pool_balance);
+    let existing = update_emission_data(e, tier, pool, &pool_balance);
     if pending == 0 {
         return;
     }
@@ -107,7 +112,7 @@ pub(crate) fn set_emission_eps(e: &Env, tier: BackstopTier, pool: &Address, pend
     storage::set_backstop_emis_data(e, tier, pool, &data);
 }
 
-fn checkpoint_emission_data(
+fn update_emission_data(
     e: &Env,
     tier: BackstopTier,
     pool: &Address,
@@ -160,7 +165,7 @@ fn advance_emission_data(
     data
 }
 
-fn accrue_user_emissions(
+fn update_user_emissions(
     e: &Env,
     mut data: UserEmissionData,
     balance: &UserBalance,

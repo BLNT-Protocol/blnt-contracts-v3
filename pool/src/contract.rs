@@ -546,56 +546,21 @@ impl Pool for PoolContract {
         percent: u32,
     ) -> AuctionData {
         storage::extend_instance(&e);
-        let kind = auctions::AuctionType::from_u32(&e, auction_type);
-        let auction_data = match kind {
-            auctions::AuctionType::UserLiquidation => {
-                auctions::create_user_liquidation_auction(&e, &user, &bid, &lot, percent)
-            }
-            auctions::AuctionType::BadDebtAuction => {
-                require_backstop_auction_args(&e, &user, &bid, &lot, percent, true);
-                auctions::create_bad_debt_auction(&e).auction
-            }
-            auctions::AuctionType::InterestAuction => {
-                require_backstop_auction_args(&e, &user, &bid, &lot, percent, false);
-                auctions::create_interest_auction(&e, &lot).auction
-            }
-        };
+
+        let auction_data = auctions::create_auction(&e, auction_type, &user, &bid, &lot, percent);
 
         PoolEvents::new_auction(&e, auction_type, user, percent, auction_data.clone());
         auction_data
     }
 
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {
-        match auctions::AuctionType::from_u32(&e, auction_type) {
-            auctions::AuctionType::UserLiquidation => {
-                storage::get_auction(&e, &auction_type, &user)
-            }
-            auctions::AuctionType::BadDebtAuction => {
-                require_backstop_auction_user(&e, &user);
-                auctions::get_prepared_bad_debt_auction(&e).auction
-            }
-            auctions::AuctionType::InterestAuction => {
-                require_backstop_auction_user(&e, &user);
-                auctions::get_interest_auction(&e).auction
-            }
-        }
+        auctions::get_auction(&e, auction_type, &user)
     }
 
     fn del_auction(e: Env, auction_type: u32, user: Address) {
         storage::extend_instance(&e);
-        match auctions::AuctionType::from_u32(&e, auction_type) {
-            auctions::AuctionType::UserLiquidation => {
-                auctions::del_user_liquidation_auction(&e, &user)
-            }
-            auctions::AuctionType::BadDebtAuction => {
-                require_backstop_auction_user(&e, &user);
-                auctions::del_tier_auction(&e, auctions::AuctionType::BadDebtAuction);
-            }
-            auctions::AuctionType::InterestAuction => {
-                require_backstop_auction_user(&e, &user);
-                auctions::del_interest_auction(&e);
-            }
-        }
+
+        auctions::delete_stale_auction(&e, auction_type, &user);
         PoolEvents::delete_auction(&e, auction_type, user);
     }
 
@@ -603,25 +568,5 @@ impl Pool for PoolContract {
         storage::extend_instance(&e);
 
         pool::bad_debt(&e, &user);
-    }
-}
-
-fn require_backstop_auction_user(e: &Env, user: &Address) {
-    if user != &storage::get_backstop(e) {
-        panic_with_error!(e, PoolError::BadRequest);
-    }
-}
-
-fn require_backstop_auction_args(
-    e: &Env,
-    user: &Address,
-    bid: &Vec<Address>,
-    lot: &Vec<Address>,
-    percent: u32,
-    require_empty_lot: bool,
-) {
-    require_backstop_auction_user(e, user);
-    if percent != 100 || !bid.is_empty() || (require_empty_lot && !lot.is_empty()) {
-        panic_with_error!(e, PoolError::BadRequest);
     }
 }
