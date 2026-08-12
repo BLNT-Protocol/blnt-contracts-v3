@@ -447,7 +447,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #20)")]
     fn test_claim_uses_min_lp_amount() {
         let e = Env::default();
         e.mock_all_auths();
@@ -501,7 +500,8 @@ mod tests {
             accrued: 0,
             carry: 0,
         };
-        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+        let (lp_address, lp_client) =
+            create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
@@ -545,11 +545,69 @@ mod tests {
                     q4w: vec![&e],
                 },
             );
-            execute_claim(
-                &e,
+        });
+
+        let blnd_before = blnd_token_client.balance(&backstop_address);
+        let lp_before = lp_client.balance(&backstop_address);
+        let allowance_before = blnd_token_client.allowance(&backstop_address, &lp_address);
+        let ongoing_before = e.as_contract(&backstop_address, || {
+            crate::storage::get_ongoing_emission_state(&e)
+        });
+        let client = crate::BackstopClient::new(&e, &backstop_address);
+        let claim_error = client
+            .try_claim(
+                &BackstopTier::BlndUsdc,
                 &samwise,
                 &vec![&e, pool_1_id.clone(), pool_2_id.clone()],
                 &6_5000000,
+            )
+            .err();
+        assert_eq!(
+            claim_error,
+            Some(Ok(soroban_sdk::Error::from_contract_error(20)))
+        );
+
+        assert_eq!(blnd_token_client.balance(&backstop_address), blnd_before);
+        assert_eq!(lp_client.balance(&backstop_address), lp_before);
+        assert_eq!(
+            blnd_token_client.allowance(&backstop_address, &lp_address),
+            allowance_before
+        );
+        e.as_contract(&backstop_address, || {
+            assert_eq!(
+                storage::get_backstop_emis_data(&e, &pool_1_id),
+                Some(backstop_1_emissions_data)
+            );
+            assert_eq!(
+                storage::get_user_emis_data(&e, &pool_1_id, &samwise),
+                Some(user_1_emissions_data)
+            );
+            assert_eq!(
+                storage::get_backstop_emis_data(&e, &pool_2_id),
+                Some(backstop_2_emissions_data)
+            );
+            assert_eq!(
+                storage::get_user_emis_data(&e, &pool_2_id, &samwise),
+                Some(user_2_emissions_data)
+            );
+            let pool_1_balance = storage::get_pool_balance(&e, &pool_1_id);
+            assert_eq!(pool_1_balance.shares, 150_0000000);
+            assert_eq!(pool_1_balance.tokens, 200_0000000);
+            assert_eq!(pool_1_balance.q4w, 2_0000000);
+            let user_1_balance = storage::get_user_balance(&e, &pool_1_id, &samwise);
+            assert_eq!(user_1_balance.shares, 9_0000000);
+            assert!(user_1_balance.q4w.is_empty());
+
+            let pool_2_balance = storage::get_pool_balance(&e, &pool_2_id);
+            assert_eq!(pool_2_balance.shares, 70_0000000);
+            assert_eq!(pool_2_balance.tokens, 75_0000000);
+            assert_eq!(pool_2_balance.q4w, 3_5000000);
+            let user_2_balance = storage::get_user_balance(&e, &pool_2_id, &samwise);
+            assert_eq!(user_2_balance.shares, 7_5000000);
+            assert!(user_2_balance.q4w.is_empty());
+            assert_eq!(
+                crate::storage::get_ongoing_emission_state(&e),
+                ongoing_before
             );
         });
     }

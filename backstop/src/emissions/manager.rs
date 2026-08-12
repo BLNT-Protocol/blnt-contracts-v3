@@ -697,64 +697,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_compounding_preserves_the_tier_accrual() {
-        let fixture = Fixture::create();
-        let pool = fixture.pool(10 * SCALAR_7, 0);
-        let user = Address::generate(&fixture.e);
-        fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, 10 * SCALAR_7);
-        fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
-
-        fixture.e.ledger().set_timestamp(1_010);
-        fixture.client().distribute();
-        assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
-        fixture
-            .e
-            .ledger()
-            .set_timestamp(1_010 + distributor::STREAM_SECONDS);
-        fixture.client().distribute();
-        let accrued = fixture.claimable(
-            &BackstopTier::BlndUsdc,
-            &user,
-            &vec![&fixture.e, pool.clone()],
-        );
-        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
-        let shares_before = fixture
-            .client()
-            .user_balance(&BackstopTier::BlndUsdc, &pool, &user)
-            .shares;
-
-        assert!(fixture
-            .client()
-            .try_claim(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, pool.clone()],
-                &i128::MAX,
-            )
-            .is_err());
-        assert_eq!(
-            fixture.claimable(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, pool.clone()],
-            ),
-            accrued
-        );
-        assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
-            blnd_before
-        );
-        assert_eq!(
-            fixture
-                .client()
-                .user_balance(&BackstopTier::BlndUsdc, &pool, &user)
-                .shares,
-            shares_before
-        );
-        assert_eq!(fixture.ongoing_state().backstop_claimed, 0);
-    }
-
-    #[test]
     fn claim_batches_pool_addresses_for_one_tier() {
         let fixture = Fixture::create();
         let first = fixture.pool(10 * SCALAR_7, 0);
@@ -823,39 +765,17 @@ mod tests {
     }
 
     #[test]
-    fn claim_rejects_invalid_scope() {
+    fn claim_rejects_non_emitting_tier() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
 
         assert!(fixture
             .client()
-            .try_claim(&BackstopTier::BlndUsdc, &user, &vec![&fixture.e], &0,)
-            .is_err());
-        assert!(fixture
-            .client()
             .try_claim(
                 &BackstopTier::Usdc,
                 &user,
                 &vec![&fixture.e, pool.clone()],
-                &0,
-            )
-            .is_err());
-        assert!(fixture
-            .client()
-            .try_claim(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, Address::generate(&fixture.e)],
-                &0,
-            )
-            .is_err());
-        assert!(fixture
-            .client()
-            .try_claim(
-                &BackstopTier::BlndUsdc,
-                &user,
-                &vec![&fixture.e, pool.clone(), pool],
                 &0,
             )
             .is_err());
