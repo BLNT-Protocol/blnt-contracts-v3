@@ -8,7 +8,7 @@ use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 use super::{tier_token, BackstopTier, Q4W};
 
 /// Perform a queue for withdrawal from one fixed backstop tier.
-pub fn execute_queue_withdrawal_for_tier(
+pub fn execute_queue_withdrawal(
     e: &Env,
     tier: BackstopTier,
     from: &Address,
@@ -33,7 +33,7 @@ pub fn execute_queue_withdrawal_for_tier(
 }
 
 /// Dequeue a withdrawal from one fixed backstop tier.
-pub fn execute_dequeue_withdrawal_for_tier(
+pub fn execute_dequeue_withdrawal(
     e: &Env,
     tier: BackstopTier,
     from: &Address,
@@ -56,7 +56,7 @@ pub fn execute_dequeue_withdrawal_for_tier(
 }
 
 /// Withdraw expired shares from one fixed backstop tier.
-pub fn execute_withdraw_for_tier(
+pub fn execute_withdraw(
     e: &Env,
     tier: BackstopTier,
     from: &Address,
@@ -122,7 +122,7 @@ mod tests {
     };
 
     use crate::{
-        backstop::{execute_deposit_for_tier, execute_donate, execute_draw},
+        backstop::{execute_deposit, execute_donate, execute_draw},
         testutils::{
             assert_eq_vec_q4w, create_backstop, create_backstop_token, create_mock_pool,
             create_mock_pool_factory,
@@ -145,11 +145,11 @@ mod tests {
         backstop_token_client.mint(&samwise, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // setup pool with deposits
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -170,7 +170,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -217,11 +217,11 @@ mod tests {
         backstop_token_client.mint(&samwise, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // setup pool with deposits
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -242,7 +242,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -266,11 +266,11 @@ mod tests {
         backstop_token_client.mint(&samwise, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // queue shares for withdraw
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -289,7 +289,7 @@ mod tests {
                 max_entry_ttl: 3110400,
             });
 
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -308,7 +308,7 @@ mod tests {
                 max_entry_ttl: 3110400,
             });
 
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -329,7 +329,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_dequeue_withdrawal_for_tier(
+            execute_dequeue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -373,18 +373,18 @@ mod tests {
         backstop_token_client.mint(&samwise, &100_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // queue shares for withdraw
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 75_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -403,7 +403,7 @@ mod tests {
                 max_entry_ttl: 3110400,
             });
 
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -424,7 +424,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_dequeue_withdrawal_for_tier(
+            execute_dequeue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -449,7 +449,7 @@ mod tests {
         backstop_token_client.mint(&samwise, &150_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         e.ledger().set(LedgerInfo {
             protocol_version: 27,
@@ -470,14 +470,14 @@ mod tests {
         );
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -505,7 +505,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            let tokens = execute_withdraw_for_tier(
+            let tokens = execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -548,7 +548,7 @@ mod tests {
         backstop_token_client.mint(&samwise, &150_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         e.ledger().set(LedgerInfo {
             protocol_version: 27,
@@ -569,14 +569,14 @@ mod tests {
         );
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -604,7 +604,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_withdraw_for_tier(
+            execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -633,7 +633,7 @@ mod tests {
         backstop_token_client.mint(&frodo, &150_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         e.ledger().set(LedgerInfo {
             protocol_version: 27,
@@ -648,15 +648,15 @@ mod tests {
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
-            execute_deposit_for_tier(
+            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -678,7 +678,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            execute_withdraw_for_tier(
+            execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -705,7 +705,7 @@ mod tests {
         backstop_token_client.mint(&samwise, &150_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         e.ledger().set(LedgerInfo {
             protocol_version: 27,
@@ -735,14 +735,14 @@ mod tests {
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -770,7 +770,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            let tokens = execute_withdraw_for_tier(
+            let tokens = execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -814,7 +814,7 @@ mod tests {
         backstop_token_client.mint(&frodo, &150_0000000);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         e.ledger().set(LedgerInfo {
             protocol_version: 27,
@@ -829,15 +829,15 @@ mod tests {
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
-            execute_deposit_for_tier(
+            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -860,7 +860,7 @@ mod tests {
 
         e.as_contract(&backstop_address, || {
             assert_eq!(
-                execute_withdraw_for_tier(
+                execute_withdraw(
                     &e,
                     BackstopTier::BlndUsdc,
                     &samwise,
@@ -905,7 +905,7 @@ mod tests {
         let (_, backstop_token_client) = create_backstop_token(&e, &backstop_address, &bombadil);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         let deposit_amount = 111_1111111;
@@ -918,14 +918,14 @@ mod tests {
             &e.ledger().sequence(),
         );
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -953,7 +953,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            let tokens = execute_withdraw_for_tier(
+            let tokens = execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -1002,21 +1002,21 @@ mod tests {
         let (_, backstop_token_client) = create_backstop_token(&e, &backstop_address, &bombadil);
 
         let (_, mock_pool_factory_client) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory_client.set_mock_pool(&pool_address);
+        mock_pool_factory_client.set_pool(&pool_address);
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         let deposit_amount = 111_1111111;
         let draw_amount = 123;
         backstop_token_client.mint(&samwise, &deposit_amount);
         e.as_contract(&backstop_address, || {
-            execute_deposit_for_tier(
+            execute_deposit(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
-            execute_queue_withdrawal_for_tier(
+            execute_queue_withdrawal(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,
@@ -1044,7 +1044,7 @@ mod tests {
         });
 
         e.as_contract(&backstop_address, || {
-            let tokens = execute_withdraw_for_tier(
+            let tokens = execute_withdraw(
                 &e,
                 BackstopTier::BlndUsdc,
                 &samwise,

@@ -27,8 +27,8 @@ fn exercise_reward_zone(wasm: bool) {
         let second = Address::generate(&e);
         let third = Address::generate(&e);
         let factory = MockPoolFactoryClient::new(&e, &fixture.pool_factory.address);
-        factory.set_mock_pool(&second);
-        factory.set_mock_pool(&third);
+        factory.set_pool(&second);
+        factory.set_pool(&third);
         (second, third)
     };
 

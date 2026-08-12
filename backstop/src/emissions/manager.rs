@@ -579,7 +579,7 @@ mod tests {
         migration, storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_emitter,
-            create_mock_pool_factory, create_token, create_usdc_token,
+            create_mock_pool, create_mock_pool_factory, create_token, create_usdc_token,
         },
         BackstopClient,
     };
@@ -664,8 +664,8 @@ mod tests {
         }
 
         fn pool(&self, blnd_usdc: i128, blnd_xlm: i128) -> Address {
-            let pool = Address::generate(&self.e);
-            MockPoolFactoryClient::new(&self.e, &self.factory).set_mock_pool(&pool);
+            let (pool, _) = create_mock_pool(&self.e, &self.backstop);
+            MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
                 storage::set_pool_balance_for_tier(
                     &self.e,
@@ -1420,7 +1420,7 @@ mod reward_zone_tests {
 
         fn pool(&self, blnd_usdc: i128, queued_blnd_usdc: i128, usdc: i128) -> Address {
             let pool = Address::generate(&self.e);
-            MockPoolFactoryClient::new(&self.e, &self.factory).set_mock_pool(&pool);
+            MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
                 storage::set_pool_balance_for_tier(
                     &self.e,

@@ -7,7 +7,6 @@ use soroban_sdk::{
     BytesN, Env, String,
 };
 
-use mock_pool::{MockPool, MockPoolClient};
 use pool::PoolContract;
 
 #[contractevent(topics = ["deploy"], data_format = "single-value")]
@@ -52,9 +51,6 @@ pub trait MockPoolFactoryTrait {
     /// ### Arguments
     /// * `pool_address` - The pool address to set
     fn set_pool(e: Env, pool_address: Address);
-
-    /// Mock only: register a compatible mock pool and mark it deployed.
-    fn set_mock_pool(e: Env, pool_address: Address);
 }
 
 #[contractimpl]
@@ -119,13 +115,6 @@ impl MockPoolFactoryTrait for MockPoolFactory {
     }
 
     fn set_pool(e: Env, pool_address: Address) {
-        storage::set_deployed(&e, &pool_address);
-    }
-
-    fn set_mock_pool(e: Env, pool_address: Address) {
-        let backstop = storage::get_pool_init_meta(&e).backstop;
-        e.register_at(&pool_address, MockPool, ());
-        MockPoolClient::new(&e, &pool_address).set_backstop(&backstop);
         storage::set_deployed(&e, &pool_address);
     }
 }

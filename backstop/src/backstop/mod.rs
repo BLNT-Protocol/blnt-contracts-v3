@@ -1,15 +1,12 @@
 mod deposit;
 pub(crate) use deposit::credit_tier_shares;
-pub use deposit::execute_deposit_for_tier;
+pub use deposit::execute_deposit;
 
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
 mod withdrawal;
-pub use withdrawal::{
-    execute_dequeue_withdrawal_for_tier, execute_queue_withdrawal_for_tier,
-    execute_withdraw_for_tier,
-};
+pub use withdrawal::{execute_dequeue_withdrawal, execute_queue_withdrawal, execute_withdraw};
 
 mod pool;
 #[cfg(any(test, feature = "testutils"))]

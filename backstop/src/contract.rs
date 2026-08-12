@@ -220,7 +220,13 @@ impl Backstop for BackstopContract {
         pool_address: Address,
         amount: i128,
     ) -> i128 {
-        deposit_tier(e, tier, from, pool_address, amount)
+        storage::extend_instance(&e);
+        from.require_auth();
+
+        let shares = backstop::execute_deposit(&e, tier, &from, &pool_address, amount);
+
+        BackstopEvents::tier_deposit(&e, tier, pool_address, from, amount, shares);
+        shares
     }
 
     fn queue_withdrawal(
@@ -230,7 +236,13 @@ impl Backstop for BackstopContract {
         pool_address: Address,
         amount: i128,
     ) -> Q4W {
-        queue_tier_withdrawal(e, tier, from, pool_address, amount)
+        storage::extend_instance(&e);
+        from.require_auth();
+
+        let entry = backstop::execute_queue_withdrawal(&e, tier, &from, &pool_address, amount);
+
+        BackstopEvents::tier_queue_withdrawal(&e, tier, pool_address, from, amount, entry.exp);
+        entry
     }
 
     fn dequeue_withdrawal(
@@ -240,7 +252,12 @@ impl Backstop for BackstopContract {
         pool_address: Address,
         amount: i128,
     ) {
-        dequeue_tier_withdrawal(e, tier, from, pool_address, amount)
+        storage::extend_instance(&e);
+        from.require_auth();
+
+        backstop::execute_dequeue_withdrawal(&e, tier, &from, &pool_address, amount);
+
+        BackstopEvents::tier_dequeue_withdrawal(&e, tier, pool_address, from, amount);
     }
 
     fn withdraw(
@@ -251,7 +268,13 @@ impl Backstop for BackstopContract {
         amount: i128,
         to: Address,
     ) -> i128 {
-        withdraw_tier(e, tier, from, pool_address, amount, to)
+        storage::extend_instance(&e);
+        from.require_auth();
+
+        let tokens = backstop::execute_withdraw(&e, tier, &from, &pool_address, amount, &to);
+
+        BackstopEvents::tier_withdraw(&e, tier, pool_address, from, amount, tokens);
+        tokens
     }
 
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData {
@@ -342,62 +365,6 @@ impl Backstop for BackstopContract {
 
         BackstopEvents::donate(&e, tier, pool_address, from, amount);
     }
-}
-
-fn deposit_tier(
-    e: Env,
-    tier: BackstopTier,
-    from: Address,
-    pool_address: Address,
-    amount: i128,
-) -> i128 {
-    storage::extend_instance(&e);
-    from.require_auth();
-    let shares = backstop::execute_deposit_for_tier(&e, tier, &from, &pool_address, amount);
-    BackstopEvents::tier_deposit(&e, tier, pool_address, from, amount, shares);
-    shares
-}
-
-fn queue_tier_withdrawal(
-    e: Env,
-    tier: BackstopTier,
-    from: Address,
-    pool_address: Address,
-    amount: i128,
-) -> Q4W {
-    storage::extend_instance(&e);
-    from.require_auth();
-    let entry = backstop::execute_queue_withdrawal_for_tier(&e, tier, &from, &pool_address, amount);
-    BackstopEvents::tier_queue_withdrawal(&e, tier, pool_address, from, amount, entry.exp);
-    entry
-}
-
-fn dequeue_tier_withdrawal(
-    e: Env,
-    tier: BackstopTier,
-    from: Address,
-    pool_address: Address,
-    amount: i128,
-) {
-    storage::extend_instance(&e);
-    from.require_auth();
-    backstop::execute_dequeue_withdrawal_for_tier(&e, tier, &from, &pool_address, amount);
-    BackstopEvents::tier_dequeue_withdrawal(&e, tier, pool_address, from, amount);
-}
-
-fn withdraw_tier(
-    e: Env,
-    tier: BackstopTier,
-    from: Address,
-    pool_address: Address,
-    amount: i128,
-    to: Address,
-) -> i128 {
-    storage::extend_instance(&e);
-    from.require_auth();
-    let tokens = backstop::execute_withdraw_for_tier(&e, tier, &from, &pool_address, amount, &to);
-    BackstopEvents::tier_withdraw(&e, tier, pool_address, from, amount, tokens);
-    tokens
 }
 
 /// Require that an incoming amount is not negative

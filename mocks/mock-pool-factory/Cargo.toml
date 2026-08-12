@@ -11,12 +11,11 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [features]
-testutils = ["soroban-sdk/testutils", "mock-pool/testutils"]
+testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
 soroban-sdk = { workspace = true }
 pool = { path = "../../pool", features = ["testutils"] }
-mock-pool = { path = "../mock-pool" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

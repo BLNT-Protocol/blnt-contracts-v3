@@ -394,7 +394,7 @@ mod tests {
             let pool = e.register(MockPool, ());
             MockPoolClient::new(&e, &pool).set_backstop(&backstop);
             let (_, factory) = create_mock_pool_factory(&e, &backstop);
-            factory.set_mock_pool(&pool);
+            factory.set_pool(&pool);
 
             let emitter = e.register(MockEmitter, ());
             let emitter_client = EmitterClient::new(&e, &emitter);

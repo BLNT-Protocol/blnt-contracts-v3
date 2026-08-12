@@ -554,7 +554,7 @@ mod tests {
         let pool_address = Address::generate(&e);
 
         let (_, mock_pool_factory) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory.set_mock_pool(&pool_address);
+        mock_pool_factory.set_pool(&pool_address);
 
         e.as_contract(&backstop_address, || {
             require_is_from_pool_factory(&e, &pool_address, 0);
@@ -587,7 +587,7 @@ mod tests {
         let not_pool_address = Address::generate(&e);
 
         let (_, mock_pool_factory) = create_mock_pool_factory(&e, &backstop_address);
-        mock_pool_factory.set_mock_pool(&pool_address);
+        mock_pool_factory.set_pool(&pool_address);
 
         e.as_contract(&backstop_address, || {
             require_is_from_pool_factory(&e, &not_pool_address, 0);
@@ -836,7 +836,7 @@ mod tier_tests {
     use crate::{
         constants::{MAX_Q4W_SIZE, Q4W_LOCK_TIME},
         testutils::{
-            create_backstop, create_backstop_token, create_blnd_xlm_token,
+            create_backstop, create_backstop_token, create_blnd_xlm_token, create_mock_pool,
             create_mock_pool_factory, create_usdc_token,
         },
         BackstopClient,
@@ -857,7 +857,7 @@ mod tier_tests {
         let (blnd_xlm, blnd_xlm_client) = create_blnd_xlm_token(&e, &backstop, &admin);
         let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
-        factory.set_mock_pool(&pool);
+        factory.set_pool(&pool);
 
         blnd_usdc_client.mint(&user, &100);
         blnd_xlm_client.mint(&user, &200);
@@ -910,13 +910,13 @@ mod tier_tests {
         let admin = Address::generate(&e);
         let user = Address::generate(&e);
         let recipient = Address::generate(&e);
-        let pool = Address::generate(&e);
         let backstop = create_backstop(&e);
+        let (pool, _) = create_mock_pool(&e, &backstop);
         let (_, blnd_usdc_client) = create_backstop_token(&e, &backstop, &admin);
         let (_, blnd_xlm_client) = create_blnd_xlm_token(&e, &backstop, &admin);
         let (_, usdc_client) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
-        factory.set_mock_pool(&pool);
+        factory.set_pool(&pool);
 
         blnd_usdc_client.mint(&user, &100);
         blnd_xlm_client.mint(&user, &100);
@@ -1092,7 +1092,7 @@ mod valuation_tests {
         let (_, blnd_xlm) = create_blnd_xlm_token(&e, &backstop, &admin);
         let (_, usdc) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
-        factory.set_mock_pool(&pool);
+        factory.set_pool(&pool);
 
         blnd_usdc.mint(&user, &(4_000 * SCALAR_7));
         blnd_xlm.mint(&user, &(5_000 * SCALAR_7));
