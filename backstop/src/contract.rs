@@ -58,6 +58,9 @@ pub trait Backstop {
         to: Address,
     ) -> i128;
 
+    /// Fetch one user's active shares and bounded withdrawal queue in a tier.
+    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
+
     /// Fetch the backstop data for the pool
     ///
     /// Return the pool's complete three-tier accounting and valuation.
@@ -69,12 +72,6 @@ pub trait Backstop {
     /// Fetch the token contract bound to one fixed backstop tier.
     fn backstop_token(e: Env, tier: BackstopTier) -> Address;
 
-    /// Fetch one user's active shares and bounded withdrawal queue in a tier.
-    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
-
-    /// Execute the configured initial drop and fund any scheduled migration backfill.
-    fn drop(e: Env);
-
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
 
@@ -82,15 +79,6 @@ pub trait Backstop {
 
     /// Allocate the next migration-backfill or ongoing BLND checkpoint.
     fn distribute(e: Env) -> i128;
-
-    /// Compound one eligible tier's accrued BLND across a list of pools.
-    fn claim(
-        e: Env,
-        tier: BackstopTier,
-        from: Address,
-        pool_addresses: Vec<Address>,
-        min_lp_tokens_out: i128,
-    ) -> i128;
 
     /// Start or refresh the pool's tier streams and grant its accrued 30% allowance.
     fn gulp_emissions(e: Env, pool: Address) -> i128;
@@ -119,6 +107,18 @@ pub trait Backstop {
     /// ### Errors
     /// If the pool is not below the threshold or if the pool is not in the reward zone
     fn remove_reward(e: Env, to_remove: Address);
+
+    /// Compound one eligible tier's accrued BLND across a list of pools.
+    fn claim(
+        e: Env,
+        tier: BackstopTier,
+        from: Address,
+        pool_addresses: Vec<Address>,
+        min_lp_tokens_out: i128,
+    ) -> i128;
+
+    /// Execute the configured initial drop and fund any scheduled migration backfill.
+    fn drop(e: Env);
 
     /********** Fund Management *********/
 
@@ -277,21 +277,16 @@ impl Backstop for BackstopContract {
         tokens
     }
 
+    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance {
+        storage::get_user_balance_for_tier(&e, tier, &pool, &user)
+    }
+
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData {
         load_pool_backstop_data(&e, &pool)
     }
 
     fn backstop_token(e: Env, tier: BackstopTier) -> Address {
         tier_token(&e, tier)
-    }
-
-    fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance {
-        storage::get_user_balance_for_tier(&e, tier, &pool, &user)
-    }
-
-    fn drop(e: Env) {
-        storage::extend_instance(&e);
-        migration::drop(&e)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
@@ -307,21 +302,6 @@ impl Backstop for BackstopContract {
 
         BackstopEvents::distribute(&e, distributed);
         distributed
-    }
-
-    fn claim(
-        e: Env,
-        tier: BackstopTier,
-        from: Address,
-        pool_addresses: Vec<Address>,
-        min_lp_tokens_out: i128,
-    ) -> i128 {
-        storage::extend_instance(&e);
-        let claim = emissions::execute_claim(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
-        for (pool, blnd_amount, lp_amount, shares) in claim.allocations.iter() {
-            BackstopEvents::claim(&e, tier, from.clone(), pool, blnd_amount, lp_amount, shares);
-        }
-        claim.lp_amount
     }
 
     fn gulp_emissions(e: Env, pool: Address) -> i128 {
@@ -343,6 +323,26 @@ impl Backstop for BackstopContract {
         emissions::remove_from_reward_zone(&e, to_remove.clone());
 
         BackstopEvents::rw_zone_remove(&e, to_remove);
+    }
+
+    fn claim(
+        e: Env,
+        tier: BackstopTier,
+        from: Address,
+        pool_addresses: Vec<Address>,
+        min_lp_tokens_out: i128,
+    ) -> i128 {
+        storage::extend_instance(&e);
+        let claim = emissions::execute_claim(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
+        for (pool, blnd_amount, lp_amount, shares) in claim.allocations.iter() {
+            BackstopEvents::claim(&e, tier, from.clone(), pool, blnd_amount, lp_amount, shares);
+        }
+        claim.lp_amount
+    }
+
+    fn drop(e: Env) {
+        storage::extend_instance(&e);
+        migration::drop(&e)
     }
 
     /********** Fund Management *********/

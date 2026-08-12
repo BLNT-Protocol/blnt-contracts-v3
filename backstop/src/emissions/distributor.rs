@@ -11,7 +11,7 @@ use crate::{
 
 pub(super) const STREAM_SECONDS: u64 = 7 * 24 * 60 * 60;
 
-pub(crate) fn update_emissions(
+pub fn update_emissions(
     e: &Env,
     tier: BackstopTier,
     pool: &Address,

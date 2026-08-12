@@ -4,28 +4,6 @@ use soroban_sdk::{panic_with_error, Address, Env};
 
 use super::{require_registered_pool, tier_token, BackstopTier};
 
-/// Credit tier tokens already held by the backstop and mint user shares.
-pub(crate) fn credit_tier_shares(
-    e: &Env,
-    tier: BackstopTier,
-    user: &Address,
-    pool_address: &Address,
-    amount: i128,
-) -> i128 {
-    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
-    let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, user);
-    let to_mint = pool_balance.convert_to_shares(amount);
-    if to_mint <= 0 {
-        panic_with_error!(e, &BackstopError::InvalidShareMintAmount);
-    }
-    pool_balance.deposit(amount, to_mint);
-    user_balance.add_shares(to_mint);
-
-    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    storage::set_user_balance_for_tier(e, tier, pool_address, user, &user_balance);
-    to_mint
-}
-
 /// Perform a deposit into one fixed backstop tier.
 pub fn execute_deposit(
     e: &Env,
@@ -47,6 +25,28 @@ pub fn execute_deposit(
     let to_mint = credit_tier_shares(e, tier, from, pool_address, amount);
     emissions::finish_pool_weight_change(e, tier, pool_address);
 
+    to_mint
+}
+
+/// Credit tier tokens already held by the backstop and mint user shares.
+pub(crate) fn credit_tier_shares(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool_address: &Address,
+    amount: i128,
+) -> i128 {
+    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
+    let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, user);
+    let to_mint = pool_balance.convert_to_shares(amount);
+    if to_mint <= 0 {
+        panic_with_error!(e, &BackstopError::InvalidShareMintAmount);
+    }
+    pool_balance.deposit(amount, to_mint);
+    user_balance.add_shares(to_mint);
+
+    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
+    storage::set_user_balance_for_tier(e, tier, pool_address, user, &user_balance);
     to_mint
 }
 

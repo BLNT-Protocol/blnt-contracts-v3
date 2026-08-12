@@ -272,23 +272,6 @@ pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
 }
 
-/// Fetch the immutable initial-drop recipient list.
-pub fn get_drop_list(e: &Env) -> Vec<(Address, i128)> {
-    e.storage()
-        .persistent()
-        .get::<Symbol, Vec<(Address, i128)>>(&Symbol::new(e, DROP_LIST_KEY))
-        .unwrap_optimized()
-}
-
-/// Store the immutable initial-drop recipient list.
-pub fn set_drop_list(e: &Env, drop_list: &Vec<(Address, i128)>) {
-    let key = Symbol::new(e, DROP_LIST_KEY);
-    e.storage().persistent().set(&key, drop_list);
-    e.storage()
-        .persistent()
-        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
-}
-
 /********** User Shares **********/
 
 /// Fetch the balance's for a given user
@@ -701,6 +684,25 @@ pub fn set_user_emis_data(
     e.storage()
         .persistent()
         .set::<BackstopDataKey, UserEmissionData>(&key, user_emis_data);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/********** Drop Emissions **********/
+
+/// Fetch the immutable initial-drop recipient list.
+pub fn get_drop_list(e: &Env) -> Vec<(Address, i128)> {
+    e.storage()
+        .persistent()
+        .get::<Symbol, Vec<(Address, i128)>>(&Symbol::new(e, DROP_LIST_KEY))
+        .unwrap_optimized()
+}
+
+/// Store the immutable initial-drop recipient list.
+pub fn set_drop_list(e: &Env, drop_list: &Vec<(Address, i128)>) {
+    let key = Symbol::new(e, DROP_LIST_KEY);
+    e.storage().persistent().set(&key, drop_list);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
