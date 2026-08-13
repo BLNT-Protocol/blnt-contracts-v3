@@ -10,6 +10,10 @@ experimental Blend v3 contract specification compose.
 2. [V3_SYSTEM_SPEC.md](V3_SYSTEM_SPEC.md) defines only the v3 additions,
    replacements, extensions, approved exceptions, and safety fixes.
 
+[V2_V3_PUBLIC_API.md](V2_V3_PUBLIC_API.md) is a non-normative review aid that
+compares the public backstop, pool, and pool-factory entry points and data
+types.
+
 Declarative behavioral requirements and the terms `MUST`, `MUST NOT`,
 `SHOULD`, and `MAY` in the normative specifications are acceptance criteria.
 
