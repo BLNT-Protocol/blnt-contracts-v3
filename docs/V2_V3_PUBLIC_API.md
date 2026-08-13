@@ -51,11 +51,11 @@ Private storage-only types are excluded.
 
 | Type | V2 example | V3 example | Comparison |
 | --- | --- | --- | --- |
-| `Q4W` | <code>{"amount":100000000,"exp":1800000000}</code> | Same | Shape is unchanged. V3 maintains an independent queue per tier under one aggregate pool-user entry bound. |
-| `UserBalance` | <code>{"shares":900000000,"q4w":[{"amount":100000000,"exp":1800000000}]}</code> | Same shape, returned for the selected `tier` | `shares` excludes queued shares in both versions. |
+| `Q4W` | <code>{"amount":100000000,<wbr>"exp":1800000000}</code> | Same | Shape is unchanged. V3 maintains an independent queue per tier under one aggregate pool-user entry bound. |
+| `UserBalance` | <code>{"shares":900000000,<wbr>"q4w":[{"amount":100000000,<wbr>"exp":1800000000}]}</code> | Same shape, returned for the selected `tier` | `shares` excludes queued shares in both versions. |
 | `BackstopTier` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, or `"Usdc"` | New public selector for a fixed v3 backstop asset. Enum declaration order is not the loss-waterfall order. |
-| `PoolTierData` | Not present | <code>{"tokens":500000000,"shares":500000000,"value":500000000}</code> | New nested summary; `value` is the tier's canonical seven-decimal USDC value. |
-| `PoolBackstopData` | <code>{"tokens":1000000000,"shares":1000000000,"q4w_pct":1000000,"blnd":8000000000,"usdc":200000000,"token_spot_price":10000000}</code> | <code>{"active_value":900000000,"blnd_usdc":{"tokens":300000000,"shares":300000000,"value":300000000},"blnd_xlm":{"tokens":500000000,"shares":500000000,"value":500000000},"q4w_pct":1000000,"usdc":{"tokens":200000000,"shares":200000000,"value":200000000}}</code> | Replaced view shape. V3 reports all tiers, aggregate active value, and value-weighted Q4W instead of one LP's underlying reserves and spot price. |
+| `PoolTierData` | Not present | <code>{"tokens":500000000,<wbr>"shares":500000000,<wbr>"value":500000000}</code> | New nested summary; `value` is the tier's canonical seven-decimal USDC value. |
+| `PoolBackstopData` | <code>{"tokens":1000000000,<wbr>"shares":1000000000,<wbr>"q4w_pct":1000000,<wbr>"blnd":8000000000,<wbr>"usdc":200000000,<wbr>"token_spot_price":10000000}</code> | <code>{"active_value":900000000,<wbr>"blnd_usdc":{"tokens":300000000,<wbr>"shares":300000000,<wbr>"value":300000000},<wbr>"blnd_xlm":{"tokens":500000000,<wbr>"shares":500000000,<wbr>"value":500000000},<wbr>"q4w_pct":1000000,<wbr>"usdc":{"tokens":200000000,<wbr>"shares":200000000,<wbr>"value":200000000}}</code> | Replaced view shape. V3 reports all tiers, aggregate active value, and value-weighted Q4W instead of one LP's underlying reserves and spot price. |
 
 ## Pool
 
@@ -103,17 +103,17 @@ appear in these values.
 
 | Type | V2 example | V3 example | Comparison |
 | --- | --- | --- | --- |
-| `PoolConfig` | <code>{"oracle":"G_ORACLE","min_collateral":1000000000,"bstop_rate":2000000,"status":1,"max_positions":20}</code> | Same | Pool configuration ABI is unchanged. |
-| `ReserveConfig` | <code>{"index":0,"decimals":7,"c_factor":8000000,"l_factor":9000000,"util":7500000,"max_util":9500000,"r_base":100000,"r_one":500000,"r_two":2000000,"r_three":10000000,"reactivity":100000,"supply_cap":10000000000000,"enabled":true}</code> | Same | Reserve setup ABI is unchanged. |
-| `ReserveData` | <code>{"d_rate":1000000000000,"b_rate":1000000000000,"ir_mod":0,"b_supply":10000000000,"d_supply":2500000000,"backstop_credit":50000000,"last_time":1800000000}</code> | Same | Accrued reserve-data ABI is unchanged. |
-| `Reserve` | <code>{"asset":"G_USDC","config":"&lt;ReserveConfig above&gt;","data":"&lt;ReserveData above&gt;","scalar":10000000}</code> | Same | The nested reserve view is unchanged. |
-| `Positions` | <code>{"liabilities":{"0":250000000},"collateral":{"1":500000000},"supply":{"2":100000000}}</code> | Same | Maps remain keyed by reserve index. |
-| `Request` | <code>{"request_type":4,"address":"G_USDC","amount":250000000}</code> | Same | Example is a borrow request; request discriminants 0 through 9 are inherited. |
-| `FlashLoan` | <code>{"contract":"C_RECEIVER","asset":"G_USDC","amount":1000000000}</code> | Same | Flash-loan argument ABI is unchanged. |
-| `ReserveEmissionMetadata` | <code>{"res_index":0,"res_type":1,"share":70}</code> | Same | Example assigns relative weight 70 to reserve 0's bToken stream. |
-| `ReserveEmissionData` | <code>{"expiration":1800604800,"eps":1000000,"index":25000000000000,"last_time":1800000000}</code> | Same | V3 carry is deliberately omitted from the public view. |
-| `UserEmissionData` | <code>{"index":25000000000000,"accrued":120000000}</code> | Same | V3 user carry is deliberately omitted from the public view. |
-| `AuctionData` | <code>{"bid":{"G_USDC":1200000000},"lot":{"C_BLND_USDC_LP":1000000000},"block":1234567}</code> | <code>{"bid":{"G_USDC":1200000000},"lot":{"C_BLND_XLM_LP":1000000000},"block":1234567}</code> | Shape is unchanged. These bad-debt examples show that v3 may expose the privately selected tier token in `lot`. |
+| `PoolConfig` | <code>{"oracle":"G_ORACLE",<wbr>"min_collateral":1000000000,<wbr>"bstop_rate":2000000,<wbr>"status":1,<wbr>"max_positions":20}</code> | Same | Pool configuration ABI is unchanged. |
+| `ReserveConfig` | <code>{"index":0,<wbr>"decimals":7,<wbr>"c_factor":8000000,<wbr>"l_factor":9000000,<wbr>"util":7500000,<wbr>"max_util":9500000,<wbr>"r_base":100000,<wbr>"r_one":500000,<wbr>"r_two":2000000,<wbr>"r_three":10000000,<wbr>"reactivity":100000,<wbr>"supply_cap":10000000000000,<wbr>"enabled":true}</code> | Same | Reserve setup ABI is unchanged. |
+| `ReserveData` | <code>{"d_rate":1000000000000,<wbr>"b_rate":1000000000000,<wbr>"ir_mod":0,<wbr>"b_supply":10000000000,<wbr>"d_supply":2500000000,<wbr>"backstop_credit":50000000,<wbr>"last_time":1800000000}</code> | Same | Accrued reserve-data ABI is unchanged. |
+| `Reserve` | <code>{"asset":"G_USDC",<wbr>"config":"&lt;ReserveConfig above&gt;",<wbr>"data":"&lt;ReserveData above&gt;",<wbr>"scalar":10000000}</code> | Same | The nested reserve view is unchanged. |
+| `Positions` | <code>{"liabilities":{"0":250000000},<wbr>"collateral":{"1":500000000},<wbr>"supply":{"2":100000000}}</code> | Same | Maps remain keyed by reserve index. |
+| `Request` | <code>{"request_type":4,<wbr>"address":"G_USDC",<wbr>"amount":250000000}</code> | Same | Example is a borrow request; request discriminants 0 through 9 are inherited. |
+| `FlashLoan` | <code>{"contract":"C_RECEIVER",<wbr>"asset":"G_USDC",<wbr>"amount":1000000000}</code> | Same | Flash-loan argument ABI is unchanged. |
+| `ReserveEmissionMetadata` | <code>{"res_index":0,<wbr>"res_type":1,<wbr>"share":70}</code> | Same | Example assigns relative weight 70 to reserve 0's bToken stream. |
+| `ReserveEmissionData` | <code>{"expiration":1800604800,<wbr>"eps":1000000,<wbr>"index":25000000000000,<wbr>"last_time":1800000000}</code> | Same | V3 carry is deliberately omitted from the public view. |
+| `UserEmissionData` | <code>{"index":25000000000000,<wbr>"accrued":120000000}</code> | Same | V3 user carry is deliberately omitted from the public view. |
+| `AuctionData` | <code>{"bid":{"G_USDC":1200000000},<wbr>"lot":{"C_BLND_USDC_LP":1000000000},<wbr>"block":1234567}</code> | <code>{"bid":{"G_USDC":1200000000},<wbr>"lot":{"C_BLND_XLM_LP":1000000000},<wbr>"block":1234567}</code> | Shape is unchanged. These bad-debt examples show that v3 may expose the privately selected tier token in `lot`. |
 
 ## Pool factory
 
@@ -132,4 +132,4 @@ baseline and the v3 candidate.
 
 | Type | V2 example | V3 example | Comparison |
 | --- | --- | --- | --- |
-| `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL","backstop":"C_BACKSTOP","blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
+| `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL",<wbr>"backstop":"C_BACKSTOP",<wbr>"blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
