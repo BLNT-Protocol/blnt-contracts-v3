@@ -164,6 +164,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let realized_donations = [576 * SCALAR_7, 384 * SCALAR_7, 480 * SCALAR_7];
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
+    let blnd_usdc_token = fixture.backstop.backstop_token(&BackstopTier::BlndUsdc);
     let empty = vec![&e];
     assert!(pool
         .try_new_auction(
@@ -178,6 +179,8 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         .try_new_auction(
             &(AuctionType::InterestAuction as u32),
             &fixture.backstop.address,
+            // A nonempty interest bid asserts the selected tier token. This
+            // reserve asset is not the canonical first tier and must fail.
             &lot_assets,
             &lot_assets,
             &100,
@@ -207,7 +210,9 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let first = pool.new_auction(
         &(AuctionType::InterestAuction as u32),
         &fixture.backstop.address,
-        &empty,
+        // The matching assertion accepts the canonically selected tier and
+        // does not supply its bid amount.
+        &vec![&e, blnd_usdc_token.clone()],
         &lot_assets,
         &100,
     );
@@ -264,7 +269,6 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         starting_data.usdc,
     ];
 
-    let blnd_usdc_token = fixture.backstop.backstop_token(&BackstopTier::BlndUsdc);
     let usdc_token = fixture.backstop.backstop_token(&BackstopTier::Usdc);
     assert_eq!(
         first

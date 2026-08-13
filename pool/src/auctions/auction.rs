@@ -61,6 +61,14 @@ pub struct AuctionData {
 
 /// Create a new auction. Stores the resulting auction to begin on the next ledger.
 ///
+/// For bad debt, `bid = []` or `lot = []` accepts the corresponding canonical
+/// asset set; a nonempty vector asserts an exact match. For interest, `bid = []`
+/// accepts the canonically selected tier token and a nonempty `bid` asserts it;
+/// `lot` must be a nonempty reserve-asset input, so `lot = []` is invalid.
+/// Liquidation keeps the inherited requirement that both vectors are nonempty
+/// inputs.
+/// Assertions do not influence asset selection, amounts, or pricing.
+///
 /// Returns the AuctionData object created
 ///
 /// ### Arguments
@@ -73,6 +81,7 @@ pub struct AuctionData {
 /// ### Panics
 /// * If the max positions are exceeded
 /// * If the user or percentage is invalid for the auction type
+/// * If a nonempty bad-debt or interest assertion does not exactly match the canonical asset set
 /// * If the auction is unable to be created
 pub fn create_auction(
     e: &Env,
@@ -91,12 +100,17 @@ pub fn create_auction(
             auction
         }
         AuctionType::BadDebtAuction => {
-            require_backstop_auction_args(e, user, bid, lot, percent, true);
-            create_bad_debt_auction_data(e).auction
+            require_backstop_auction_args(e, user, percent);
+            let auction = create_bad_debt_auction_data(e).auction;
+            require_optional_asset_match(e, bid, &auction.bid, PoolError::InvalidBid);
+            require_optional_asset_match(e, lot, &auction.lot, PoolError::InvalidLot);
+            auction
         }
         AuctionType::InterestAuction => {
-            require_backstop_auction_args(e, user, bid, lot, percent, false);
-            create_interest_auction_data(e, lot).auction
+            require_backstop_auction_args(e, user, percent);
+            let auction = create_interest_auction_data(e, lot).auction;
+            require_optional_asset_match(e, bid, &auction.bid, PoolError::InvalidBid);
+            auction
         }
     }
 }
@@ -212,17 +226,31 @@ fn require_backstop_auction_user(e: &Env, user: &Address) {
     }
 }
 
-fn require_backstop_auction_args(
-    e: &Env,
-    user: &Address,
-    bid: &Vec<Address>,
-    lot: &Vec<Address>,
-    percent: u32,
-    require_empty_lot: bool,
-) {
+fn require_backstop_auction_args(e: &Env, user: &Address, percent: u32) {
     require_backstop_auction_user(e, user);
-    if percent != 100 || !bid.is_empty() || (require_empty_lot && !lot.is_empty()) {
+    if percent != 100 {
         panic_with_error!(e, PoolError::BadRequest);
+    }
+}
+
+/// Require a nonempty caller-supplied asset set to match the canonical auction
+/// side exactly. The assertion never selects assets or controls amounts.
+fn require_optional_asset_match(
+    e: &Env,
+    expected: &Vec<Address>,
+    actual: &Map<Address, i128>,
+    error: PoolError,
+) {
+    if expected.is_empty() {
+        return;
+    }
+    if expected.len() != actual.len() {
+        panic_with_error!(e, error);
+    }
+    for asset in expected {
+        if !actual.contains_key(asset) {
+            panic_with_error!(e, error);
+        }
     }
 }
 

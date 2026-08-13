@@ -877,7 +877,40 @@ mod tests {
         e.as_contract(&backstop_address, || {
             backstop::set_test_valuation_override(&e, Some(false));
         });
-        let auction = pool_client.new_auction(&1, &backstop_address, &vec![&e], &vec![&e], &100);
+
+        let wrong_asset = Address::generate(&e);
+        // Nonempty bid and lot vectors are assertions only. A mismatch must
+        // roll back canonical creation so a corrected call can retry.
+        assert!(pool_client
+            .try_new_auction(
+                &1,
+                &backstop_address,
+                &vec![&e, wrong_asset.clone()],
+                &vec![&e, lp_token.clone()],
+                &100,
+            )
+            .is_err());
+        assert!(pool_client.try_get_auction(&1, &backstop_address).is_err());
+        assert!(pool_client
+            .try_new_auction(
+                &1,
+                &backstop_address,
+                &vec![&e, debt_asset.clone()],
+                &vec![&e, wrong_asset],
+                &100,
+            )
+            .is_err());
+        assert!(pool_client.try_get_auction(&1, &backstop_address).is_err());
+
+        // Matching assertions accept the same canonical auction that empty
+        // vectors would create; they do not control its amounts.
+        let auction = pool_client.new_auction(
+            &1,
+            &backstop_address,
+            &vec![&e, debt_asset.clone()],
+            &vec![&e, lp_token],
+            &100,
+        );
         assert_eq!(auction.bid.get(debt_asset), Some(debt));
         assert_eq!(auction.lot.len(), 1);
         assert!(pool_client.try_bad_debt(&backstop_address).is_err());

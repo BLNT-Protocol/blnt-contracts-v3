@@ -210,6 +210,17 @@ Refresh and admin status decisions use one canonical `pool_data` snapshot.
   `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
   discriminator. All three fill types use the inherited `submit` request
   discriminants; tier selection and settlement metadata remain private.
+  Vector semantics are explicit by type:
+  - User liquidation inherits the requirement that `bid` and `lot` are
+    nonempty auction inputs.
+  - For bad debt, `bid = []` or `lot = []` means no caller assertion. A nonempty
+    vector MUST exactly match the canonical debt-asset or selected-tier-token
+    set, respectively.
+  - For interest, `bid = []` means no caller assertion and a nonempty `bid` MUST
+    exactly match the selected-tier-token set. `lot` remains a required,
+    nonempty reserve-asset input; `lot = []` is invalid.
+  Assertions are order-independent and MUST NOT influence selection, amounts,
+  or pricing. A mismatch fails atomically.
   Auction pricing and submission behavior otherwise remain inherited.
 
 All extensions share the inherited atomic rollback boundary.
@@ -295,6 +306,9 @@ order and contains at most `min(max_positions - 1, 4)` reserves. The pool MUST
 use canonical `pool_data` to select the first qualifying tier, and each call
 restarts the strict tier search. It returns the v2-compatible `AuctionData`
 projection when a tier qualifies and fails when none qualifies.
+Callers MAY replace the empty `bid` with the exact canonical debt-asset set,
+the empty `lot` with the expected selected-tier-token set, or both; a mismatch
+fails the transaction without changing the selection.
 
 As in v2, the separate permissionless `bad_debt(backstop)` entry point handles
 supplier default. It requires no active bad-debt auction, repeats the canonical
@@ -329,6 +343,10 @@ With no active interest auction, any caller may invoke
 `new_auction(2, backstop, [], reserve_assets, 100)` with one to
 `min(max_positions - 1, 4)` unique configured reserves. The transaction follows
 this atomic pipeline:
+
+`bid = []` accepts whichever tier the canonical cursor and value checks
+select. A caller MAY instead provide the exact expected tier-token set; a
+mismatch fails atomically and does not redirect the auction.
 
 | Phase | Required behavior |
 | --- | --- |

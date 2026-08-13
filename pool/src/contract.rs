@@ -261,12 +261,27 @@ pub trait Pool {
 
     /// Create a liquidation, bad-debt, or interest auction.
     ///
+    /// `bid` and `lot` have these auction-specific meanings:
+    /// - Liquidation: both are required auction inputs; neither may be empty.
+    /// - Bad debt: either may be `[]`, meaning the caller accepts the corresponding canonical
+    ///   asset set. A nonempty `bid` must exactly match the canonical debt assets, and a nonempty
+    ///   `lot` must exactly match the selected waterfall-tier token.
+    /// - Interest: `bid` may be `[]`, meaning the caller accepts the canonically selected tier
+    ///   token, or nonempty to assert that exact token. `lot` is the required, nonempty list of
+    ///   reserve assets to checkpoint and offer; `lot = []` is invalid.
+    ///
+    /// Assertions are order-independent and never choose a tier, set an amount, or affect pricing.
+    /// A mismatch fails the transaction atomically.
+    ///
     /// ### Arguments
     /// * `auction_type` - 0 for liquidation, 1 for bad debt, or 2 for interest
     /// * `user` - The borrower for liquidation or the configured backstop otherwise
-    /// * `bid` - Liquidation bid assets; empty for bad debt and interest
-    /// * `lot` - Liquidation lot assets, empty for bad debt, or interest reserve assets
+    /// * `bid` - Bid assets or optional backstop-auction asset assertion, as described above
+    /// * `lot` - Lot assets, optional bad-debt asset assertion, or interest reserve inputs
     /// * `percent` - Liquidation percentage; exactly 100 otherwise
+    ///
+    /// A nonempty assertion that does not exactly match the canonical asset set fails with
+    /// `InvalidBid` or `InvalidLot`, as applicable.
     fn new_auction(
         e: Env,
         auction_type: u32,
