@@ -17,8 +17,7 @@ const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
 const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
 const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
 const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
-const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
-const ACTIVATION_MAINTENANCE_THRESHOLD_USDC: i128 = 10_000 * SCALAR_7;
+const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
 
 /// Update the pool status based on the backstop module
 #[allow(clippy::zero_prefixed_literal)]
@@ -98,9 +97,8 @@ fn meets_activation_threshold(e: &Env, current_status: u32, pool_data: &Backstop
 
 fn required_activation_value(e: &Env, current_status: u32) -> i128 {
     match current_status {
-        STATUS_ADMIN_ACTIVE | STATUS_ACTIVE => ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE | STATUS_ADMIN_FROZEN | STATUS_FROZEN
-        | STATUS_SETUP => ACTIVATION_ENTRY_THRESHOLD_USDC,
+        STATUS_ADMIN_ACTIVE | STATUS_ACTIVE | STATUS_ADMIN_ON_ICE | STATUS_ON_ICE
+        | STATUS_ADMIN_FROZEN | STATUS_FROZEN | STATUS_SETUP => ACTIVATION_THRESHOLD_USDC,
         _ => panic_with_error!(e, PoolError::InvalidPoolStatus),
     }
 }
@@ -116,20 +114,12 @@ mod tests {
     use soroban_sdk::{testutils::Address as _, vec, Address};
 
     #[test]
-    fn activation_hysteresis_uses_maintenance_only_while_active() {
+    fn activation_threshold_is_uniform_across_statuses() {
         let e = Env::default();
-        assert_eq!(
-            required_activation_value(&e, STATUS_ADMIN_ACTIVE),
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-        );
-        assert_eq!(
-            required_activation_value(&e, STATUS_ACTIVE),
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-        );
-        for status in STATUS_ADMIN_ON_ICE..=STATUS_SETUP {
+        for status in STATUS_ADMIN_ACTIVE..=STATUS_SETUP {
             assert_eq!(
                 required_activation_value(&e, status),
-                ACTIVATION_ENTRY_THRESHOLD_USDC
+                ACTIVATION_THRESHOLD_USDC
             );
         }
     }

@@ -74,7 +74,7 @@ first:
 - One tier per auction and at most one active interest auction per pool.
   Interest requires at least 200 USDC; bad debt uses every positively valued
   tier before suppliers.
-- Activation entry at 12,500 USDC and maintenance at 10,000 USDC.
+- A single inclusive 12,500-USDC activation threshold.
 - Take-rate weighting of `4:3:2` in loss order.
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
 - Ongoing BLND weight only for active, nonqueued underlying BLND in the two

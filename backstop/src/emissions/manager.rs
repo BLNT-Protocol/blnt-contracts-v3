@@ -38,7 +38,7 @@ pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) 
     }
 
     let valuation = build_pool_valuation(e, &to_add);
-    if !quote_activation(e, &valuation.active_values, false).meets_threshold {
+    if !quote_activation(e, &valuation.active_values).meets_threshold {
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
     let entrant_weight = pool_weight(e, &to_add);
@@ -81,7 +81,7 @@ pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
     let removed_weight = pool_weight(e, &to_remove);
     if removed_weight > 0 {
         let valuation = build_pool_valuation(e, &to_remove);
-        if quote_activation(e, &valuation.active_values, true).meets_threshold {
+        if quote_activation(e, &valuation.active_values).meets_threshold {
             panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
         }
         require_distribute_run_recently(e);
@@ -969,10 +969,7 @@ mod reward_zone_tests {
 
     use crate::{
         backstop::{BackstopTier, PoolBalance},
-        constants::{
-            ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC, MAX_RZ_SIZE,
-            SCALAR_7,
-        },
+        constants::{ACTIVATION_THRESHOLD_USDC, MAX_RZ_SIZE, SCALAR_7},
         storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
@@ -1090,14 +1087,14 @@ mod reward_zone_tests {
     fn membership_is_bounded_checkpoint_gated_after_distribution_and_blnd_weighted() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         client.add_reward(&first, &None);
         assert_eq!(client.reward_zone(), soroban_sdk::vec![&fixture.e, first]);
 
-        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         client.add_reward(&second, &None);
 
-        let third = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let third = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         fixture.mark_distribution_started(
             fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
         );
@@ -1106,11 +1103,11 @@ mod reward_zone_tests {
         client.add_reward(&third, &None);
 
         while client.reward_zone().len() < MAX_RZ_SIZE {
-            let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+            let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
             client.add_reward(&pool, &None);
         }
         let removed = client.reward_zone().last().unwrap();
-        let equal = fixture.pool(2 * SCALAR_7, SCALAR_7, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        let equal = fixture.pool(2 * SCALAR_7, SCALAR_7, ACTIVATION_THRESHOLD_USDC);
         assert!(client
             .try_add_reward(&equal, &Some(removed.clone()))
             .is_err());
@@ -1123,27 +1120,22 @@ mod reward_zone_tests {
     }
 
     #[test]
-    fn entry_requires_value_and_blnd_while_removal_uses_hysteresis() {
+    fn entry_requires_value_and_blnd_while_removal_uses_same_threshold() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let usdc_only = fixture.pool(0, 0, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        let usdc_only = fixture.pool(0, 0, ACTIVATION_THRESHOLD_USDC);
         assert!(client.try_add_reward(&usdc_only, &None).is_err());
 
-        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         client.add_reward(&pool, &None);
         fixture.mark_distribution_started(fixture.e.ledger().timestamp());
-        fixture.set_pool_tier(
-            &pool,
-            BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC,
-            0,
-        );
+        fixture.set_pool_tier(&pool, BackstopTier::Usdc, ACTIVATION_THRESHOLD_USDC, 0);
         assert!(client.try_remove_reward(&pool).is_err());
 
         fixture.set_pool_tier(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
             0,
         );
         client.remove_reward(&pool);
@@ -1154,17 +1146,17 @@ mod reward_zone_tests {
     fn missing_checkpoint_after_distribution_fails_closed() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         client.add_reward(&first, &None);
         fixture.mark_distribution_started_without_checkpoint();
 
-        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let second = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         assert!(client.try_add_reward(&second, &None).is_err());
 
         fixture.set_pool_tier(
             &first,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
             0,
         );
         assert!(client.try_remove_reward(&first).is_err());
@@ -1174,7 +1166,7 @@ mod reward_zone_tests {
     fn first_pre_activation_member_cannot_receive_prior_distribution_time() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let first = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         fixture.mark_distribution_started(
             fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
         );
@@ -1188,12 +1180,12 @@ mod reward_zone_tests {
     fn ordinary_removal_needs_no_checkpoint_before_distribution_begins() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC - SCALAR_7);
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
         client.add_reward(&pool, &None);
         fixture.set_pool_tier(
             &pool,
             BackstopTier::Usdc,
-            ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 2 * SCALAR_7,
+            ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
             0,
         );
 
@@ -1205,7 +1197,7 @@ mod reward_zone_tests {
     fn zero_blnd_member_can_be_removed_without_a_fresh_checkpoint() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC);
         client.add_reward(&pool, &None);
         fixture.set_pool_tier(&pool, BackstopTier::BlndUsdc, SCALAR_7, SCALAR_7);
         fixture.mark_distribution_started(

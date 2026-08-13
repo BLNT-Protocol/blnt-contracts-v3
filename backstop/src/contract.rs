@@ -96,7 +96,7 @@ pub trait Backstop {
     /// If the pool is ineligible or the required distribution checkpoint is stale
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>);
 
-    /// Remove a pool below the maintenance threshold from the reward zone.
+    /// Remove a pool below the activation threshold from the reward zone.
     ///
     /// A member with zero active underlying BLND can be removed regardless of
     /// activation value and without a recent distribution checkpoint.

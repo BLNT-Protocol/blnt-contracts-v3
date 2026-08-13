@@ -130,16 +130,36 @@ Stored pool status is not an additional reward-zone gate.
 ### V2-BACKSTOP-006: Backstop emission weight
 
 Reward-zone pool weight is its nonqueued pool-attributed BLND:USDC LP-token
-amount. Within a pool, active user shares receive the pool's backstop
-allocation through a cumulative index. Queued shares receive zero weight.
-Each pool gulp streams the new 70% backstop allocation over seven days before
-it is fully represented in that index.
+amount. A pool may gulp its accrued allocation at most once per 24 hours. The
+gulp applies `V2-EMISSIONS-002`, grants the 30% pool tranche through a BLND
+allowance, and streams the 70% backstop tranche over seven days.
 
-Distribution and claims use bounded pool and user accounting. A user claim
-requires the user's authorization. Claimed BLND is deposited into the
-BLND:USDC Comet for LP tokens, and the resulting LP tokens are added
-proportionally to the user's selected pool backstop positions; v2 does not pay
-the claimed BLND directly to the user's wallet.
+Within a pool, active user shares receive the streamed backstop allocation
+through a cumulative index; queued shares receive zero weight. Deposits,
+queueing, and dequeueing checkpoint the affected pool and user before changing
+active shares, so new or dequeued shares do not receive earlier accrual. A
+refreshed stream checkpoints its predecessor, truncates the predecessor's
+unstreamed amount to seven decimals, adds the new allocation, and replaces it
+with a fresh seven-day rate. For seven-day duration \(D\), pending BLND \(P\),
+remaining seconds \(r\), and old scaled rate \(\epsilon\), v2 computes
+\(U=\lfloor r\epsilon/10^7\rfloor\) and
+\(\epsilon'=\lfloor(P+U)10^7/D\rfloor\).
+
+For elapsed seconds \(t\) and active shares \(S\), a stream checkpoint adds
+\(\lfloor t\epsilon10^7/S\rfloor\) to the \(10^{14}\)-scaled pool index,
+bounded by expiration. A user checkpoint credits
+\(\lfloor S_u\Delta I/10^{14}\rfloor\) BLND. Elapsed emissions while no active
+shares exist produce no depositor credit. V2 discards every remainder in these
+calculations.
+
+The owner-authorized `claim(from, pools, min_lp_out)` accepts a nonempty list
+of unique pool addresses, checkpoints each pool, and aggregates the owner's
+accrued backstop BLND. It deposits the aggregate BLND single-sided into the
+BLND:USDC Comet once and adds the resulting LP tokens proportionally to the
+owner's selected pool positions using floor rounding. V2 does not pay claimed
+backstop BLND directly to the owner's wallet and exposes no separate
+claimable-emissions view. Clients MAY estimate from pool, user, and emission
+records, but only `claim` performs the authoritative checkpoint.
 
 ## 4. Pool lifecycle and administration
 
@@ -318,6 +338,12 @@ supply, and borrow but permit withdrawal and repayment.
 
 ### V2-AUCTION-001: Shared price curve
 
+The public v2 auction interface identifies an auction by `(auction_type,
+user)`: type 0 is user liquidation, type 1 is bad debt, and type 2 is backstop
+interest. Creation, lookup, and deletion use the generic `new_auction`,
+`get_auction`, and `del_auction` entry points; fills use the corresponding
+`submit` request discriminant.
+
 V2 auctions begin on the ledger after creation and use a 400-ledger curve:
 
 - During the first 200 ledgers, bid remains 100% while lot increases by 0.5%
@@ -329,6 +355,10 @@ V2 auctions begin on the ledger after creation and use a 400-ledger curve:
 - Unselected base amounts remain in a partial auction.
 - An auction becomes stale after 500 ledgers and may be deleted through the
   applicable permissionless recovery path.
+
+The auction record stores base bid and lot amounts. A fill applies the current
+time modifier only to the selected transfer amounts; a partial fill reduces
+the remaining base amounts. Completion removes the auction.
 
 ### V2-AUCTION-002: User liquidation
 
@@ -386,6 +416,10 @@ at zero when the loss exceeds supplier value.
 
 Accrued reserve `backstop_credit` is realized through an interest auction:
 
+- A pool has at most one active interest auction, identified by type 2 and the
+  configured backstop address.
+- Creation is permissionless and requires an oracle-valued reserve-asset lot
+  of at least 200 USDC.
 - The filler bids the single BLND:USDC backstop token.
 - The filler receives the time-scaled reserve-asset lot.
 - The bid is donated to the pool's backstop allocation without minting shares.
@@ -394,6 +428,8 @@ Accrued reserve `backstop_credit` is realized through an interest auction:
 - The auction uses `V2-AUCTION-001`.
 
 V2 does not create a direct per-user interest claim.
+Interest-auction creation and reserve-credit accounting are pool-local; the
+backstop provides custody and receives the realized donation.
 
 ## 7. BLND emissions
 
@@ -401,7 +437,8 @@ V2 does not create a direct per-user interest claim.
 
 After a valid distribution checkpoint, v2 allocates new BLND among reward-zone
 pools in proportion to nonqueued BLND:USDC LP-token amounts. Integer division
-rounds down under the frozen implementation.
+rounds down under the frozen implementation, and v2 does not carry every
+allocation remainder forward.
 
 Standalone distribution requires at least five seconds since the preceding
 checkpoint and a nonempty reward zone.
@@ -432,7 +469,38 @@ A pool emission gulp:
 - Checkpoints existing streams before balance or configuration changes.
 
 Supply emission weight includes ordinary and collateral bTokens. Debt emission
-weight uses dTokens. Claims require the position owner's authorization.
+weight uses dTokens. A refreshed stream includes its unstreamed predecessor.
+Claims require the position owner's authorization and may direct the BLND to a
+chosen recipient through the pool's backstop allowance. Stream refresh and
+index rounding follow the truncating pattern in `V2-BACKSTOP-006` at the
+reserve-token scale.
+
+### V2-EMISSIONS-004: Candidate backfill and initial drop
+
+The v2 backstop constructor binds an immutable initial-drop recipient list. Its
+aggregate allocation plus the maximum 10-million-BLND backfill MUST fit within
+the emitter's 50-million-BLND drop ceiling.
+
+Before the emitter recognizes the candidate backstop, permissionless
+`distribute` implements queue-independent backfill:
+
+- The first call records the current ledger timestamp and returns zero.
+- Later calls accrue one BLND per eligible second, subject to the 10-million-
+  BLND aggregate cap and the ordinary reward-zone, 70/30, gulp, stream, and
+  claim rules.
+- Backfill does not inspect, start, pause, reset, or extend the emitter's swap
+  queue.
+- Once the emitter reports a checkpoint for the candidate, the next
+  `distribute` ends backfill, resets the candidate timestamp to that emitter
+  checkpoint, and returns zero. The interval between the candidate's last
+  pre-swap checkpoint and the emitter checkpoint receives no allocation.
+
+Public `distribute` returns the newly allocated BLND amount. Public `drop`
+submits the immutable recipient list plus the recorded candidate-backfill
+amount to the emitter and returns no value. The emitter enforces its drop
+lifecycle and ceiling; v2 does not add a separate migration-status entry
+point. Clients MAY reconstruct lifecycle state from the contract's ledger
+entries without extending their TTL.
 
 ## 8. Authorization
 

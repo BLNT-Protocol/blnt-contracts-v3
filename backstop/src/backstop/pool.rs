@@ -3,7 +3,7 @@ use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env, I256};
 
 use crate::{
-    constants::{ACTIVATION_ENTRY_THRESHOLD_USDC, ACTIVATION_MAINTENANCE_THRESHOLD_USDC, SCALAR_7},
+    constants::{ACTIVATION_THRESHOLD_USDC, SCALAR_7},
     dependencies::{CometClient, PoolFactoryClient},
     errors::BackstopError,
     storage,
@@ -359,21 +359,12 @@ fn unit_asset_valuation(amount: i128) -> AssetValuation {
     AssetValuation { usdc_value: amount }
 }
 
-pub fn quote_activation(
-    e: &Env,
-    values: &ActivationValues,
-    currently_active: bool,
-) -> ActivationQuote {
+pub fn quote_activation(e: &Env, values: &ActivationValues) -> ActivationQuote {
     let eligible_value = sum_activation_values(e, values);
-    let required_value = if currently_active {
-        ACTIVATION_MAINTENANCE_THRESHOLD_USDC
-    } else {
-        ACTIVATION_ENTRY_THRESHOLD_USDC
-    };
     ActivationQuote {
         eligible_value,
-        meets_threshold: eligible_value >= required_value,
-        required_value,
+        meets_threshold: eligible_value >= ACTIVATION_THRESHOLD_USDC,
+        required_value: ACTIVATION_THRESHOLD_USDC,
     }
 }
 
@@ -1016,24 +1007,20 @@ mod valuation_tests {
     }
 
     #[test]
-    fn activation_values_all_tiers_equally_and_applies_hysteresis() {
+    fn activation_values_all_tiers_equally_and_uses_one_threshold() {
         let e = Env::default();
-        let entry = values(4_000 * SCALAR_7, 3_500 * SCALAR_7, 5_000 * SCALAR_7);
+        let threshold = values(4_000 * SCALAR_7, 3_500 * SCALAR_7, 5_000 * SCALAR_7);
         assert_eq!(
-            quote_activation(&e, &entry, false),
+            quote_activation(&e, &threshold),
             ActivationQuote {
-                eligible_value: ACTIVATION_ENTRY_THRESHOLD_USDC,
+                eligible_value: ACTIVATION_THRESHOLD_USDC,
                 meets_threshold: true,
-                required_value: ACTIVATION_ENTRY_THRESHOLD_USDC,
+                required_value: ACTIVATION_THRESHOLD_USDC,
             }
         );
 
-        let maintenance = values(0, 0, ACTIVATION_MAINTENANCE_THRESHOLD_USDC);
-        assert!(quote_activation(&e, &maintenance, true).meets_threshold);
-        assert!(!quote_activation(&e, &maintenance, false).meets_threshold);
-
-        let below_maintenance = values(0, 0, ACTIVATION_MAINTENANCE_THRESHOLD_USDC - 1);
-        assert!(!quote_activation(&e, &below_maintenance, true).meets_threshold);
+        let below_threshold = values(0, 0, ACTIVATION_THRESHOLD_USDC - 1);
+        assert!(!quote_activation(&e, &below_threshold).meets_threshold);
     }
 
     #[test]
@@ -1154,13 +1141,13 @@ mod valuation_tests {
                 value: 6_500 * SCALAR_7,
             }
         );
-        assert_eq!(pool_data.active_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert_eq!(pool_data.active_value, ACTIVATION_THRESHOLD_USDC);
         assert_eq!(pool_data.q4w_pct, 1_935_484);
         let quote = e.as_contract(&backstop, || {
             let valuation = build_pool_valuation(&e, &pool);
-            quote_activation(&e, &valuation.active_values, false)
+            quote_activation(&e, &valuation.active_values)
         });
-        assert_eq!(quote.eligible_value, ACTIVATION_ENTRY_THRESHOLD_USDC);
+        assert_eq!(quote.eligible_value, ACTIVATION_THRESHOLD_USDC);
         assert!(quote.meets_threshold);
     }
 }

@@ -59,7 +59,7 @@ fn test_backstop_rz_changes_handle_emissions() {
         frodo,
     );
 
-    // Move active value below the v3 maintenance threshold for the reward-zone
+    // Move active value below the v3 activation threshold for the reward-zone
     // removal, then restore Sam's ordinary position at the same timestamp.
     // The fixture Comet is worth about $1.25 per LP share. Queue enough of
     // Sam's position to leave 7,500 active shares (about $9,375).

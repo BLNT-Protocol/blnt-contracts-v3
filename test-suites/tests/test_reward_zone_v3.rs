@@ -5,7 +5,7 @@ use mock_pool_factory::MockPoolFactoryClient;
 use soroban_sdk::{testutils::Address as _, vec, Address, String};
 use test_suites::test_fixture::{TestFixture, TokenIndex, SCALAR_7};
 
-const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
+const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
 
 fn exercise_reward_zone(wasm: bool) {
     let mut fixture = TestFixture::create(wasm);
@@ -41,7 +41,7 @@ fn exercise_reward_zone(wasm: bool) {
     );
 
     let lp_deposit = SCALAR_7;
-    let usdc_deposit = ACTIVATION_ENTRY_THRESHOLD_USDC - lp_deposit;
+    let usdc_deposit = ACTIVATION_THRESHOLD_USDC - lp_deposit;
     for pool in [&first, &second, &third] {
         fixture.backstop.deposit(
             &backstop::BackstopTier::BlndUsdc,
@@ -65,7 +65,7 @@ fn exercise_reward_zone(wasm: bool) {
     assert!(fixture.backstop.reward_zone().contains(&second));
 
     let third_data = fixture.backstop.pool_data(&third);
-    assert!(third_data.active_value >= ACTIVATION_ENTRY_THRESHOLD_USDC);
+    assert!(third_data.active_value >= ACTIVATION_THRESHOLD_USDC);
     assert!(third_data.blnd_usdc.tokens > 0);
     fixture.jump(60 * 60 + 1);
     assert!(fixture.backstop.try_add_reward(&third, &None).is_err());

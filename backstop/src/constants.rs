@@ -20,8 +20,5 @@ pub const MAX_BACKFILLED_EMISSIONS: i128 = 10_000_000 * SCALAR_7;
 /// The emitter's maximum one-time initial drop.
 pub const MAX_INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
 
-/// The verified USDC value required for an inactive pool to activate.
-pub const ACTIVATION_ENTRY_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
-
-/// The verified USDC value an active pool must maintain.
-pub const ACTIVATION_MAINTENANCE_THRESHOLD_USDC: i128 = 10_000 * SCALAR_7;
+/// The verified USDC value required for pool activation.
+pub const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
