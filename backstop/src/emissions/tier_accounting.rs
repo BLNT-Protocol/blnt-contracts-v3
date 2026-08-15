@@ -15,8 +15,6 @@ use super::{
     },
 };
 
-const WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS: u64 = 5;
-
 pub(crate) fn pool_weight(e: &Env, pool: &Address) -> i128 {
     if migration::is_active(e) {
         pool_spot_blnd_emission_weight(e, pool)
@@ -213,28 +211,12 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
     }
 }
 
-pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
-    if tier == BackstopTier::Usdc {
-        return;
-    }
-    migration::require_weight_mutation_allowed(e);
-    if tier == BackstopTier::BlndXlm && !migration::is_active(e) {
-        return;
-    }
-    if !storage::get_reward_zone(e).contains(pool.clone())
-        || get_ongoing_emission_state(e).last_distribution.is_none()
-    {
-        return;
-    }
-    let now = e.ledger().timestamp();
-    let checkpoint = storage::get_reward_zone_checkpoint(e)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::DistributionCheckpointRequired));
-    if checkpoint > now
-        || now
-            .checked_sub(checkpoint)
-            .is_none_or(|age| age > WEIGHT_CHANGE_CHECKPOINT_MAX_AGE_SECONDS)
-    {
-        panic_with_error!(e, BackstopError::DistributionCheckpointRequired);
+/// Preserve the migration transition gate while inheriting v2's global
+/// weight-sampling behavior. Tier and user streams are checkpointed
+/// separately before their balances change.
+pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier) {
+    if tier != BackstopTier::Usdc {
+        migration::require_weight_mutation_allowed(e);
     }
 }
 

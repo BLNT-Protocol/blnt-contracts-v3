@@ -18,7 +18,7 @@ pub fn execute_draw(
     if amount == 0 {
         return;
     }
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
 
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
 
@@ -41,7 +41,7 @@ pub fn execute_donate(
     if from == pool_address || from == &e.current_contract_address() {
         panic_with_error!(e, &BackstopError::BadRequest)
     }
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
 
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     require_is_from_pool_factory(e, pool_address, pool_balance.shares);

@@ -4,20 +4,16 @@ Status: Draft 0.2
 
 ## 1. Purpose and inheritance
 
-This document defines only the v3 additions, replacements, extensions,
-approved exceptions, and safety fixes. Unstated behavior inherits
+This document defines only v3 differences. Unstated behavior inherits
 [V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md) under [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
-A difference MUST be required by the three-tier backstop, Protocol 27, an
-approved conservation or safety fix, or an exception recorded here.
+A difference MUST be classified here as an addition, replacement, extension,
+safety fix, or approved exception.
 
-Scoped integer carry-forward is an approved conservation fix. The 12,500-USDC
-activation threshold in Section 4 is the sole approved economic exception.
-Implementation details MUST NOT introduce a protocol fee, another allocation,
-a protocol-wide administrator or multisig, governance, an emergency override,
-a privileged WASM replacement, or another upgrade path. Inherited pool-admin
-and user authorization remain pool-local and custody-local; deployment actors
-receive no continuing authority. A future protocol-wide change requires a
-separately specified and deployed contract version.
+Scoped integer carry-forward is an approved conservation fix; Section 4's
+12,500-USDC threshold is the sole approved economic exception. V3 adds no
+protocol fee, protocol-wide admin, multisig, governance, emergency override,
+privileged WASM replacement, or alternate upgrade path. Deployment grants no
+continuing authority.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements.
 
@@ -39,16 +35,13 @@ at the same global, pool, pool-tier, reserve-tier, or user scope.
 
 ## 2. Runtime — **Replaced**
 
-The frozen SDK-22 v2 baseline is governed by `V2-RUNTIME-001`. New v3 contracts
-MUST target Stellar Protocol 27 with Rust 1.91.1, Soroban SDK 27.0.3, and the
-`wasm32v1-none` target. V3 does not need to compile against SDK 22 or any
-intermediate SDK version.
+`V2-RUNTIME-001` is replaced: V3 MUST target Stellar Protocol 27, Rust 1.91.1,
+Soroban SDK 27.0.3, and `wasm32v1-none`.
 
 ## 3. Multi-asset backstop — **Replaced and extended**
 
-This section replaces the single accepted token and generalizes the
-pool-share and Q4W accounting in `V2-BACKSTOP-001` through
-`V2-BACKSTOP-003` only as stated below.
+This section replaces `V2-BACKSTOP-001`'s single token and extends
+`V2-BACKSTOP-002` and `V2-BACKSTOP-003` per tier.
 
 ### 3.1 Asset configuration
 
@@ -67,17 +60,13 @@ Eligibility follows Section 3.3.
 
 ### 3.2 Position accounting
 
-Each pool-tier independently applies `V2-BACKSTOP-001`'s attribution and raw-
-transfer rules and all of `V2-BACKSTOP-002`. Every deposit verifies the pool
-through the immutable factory's `is_pool` interface before custody changes.
-Registered pools retain the v2-compatible `get_positions(address)` withdrawal
-guard.
-
-Public share operations select a tier through `BackstopTier`; pool-authorized
-`donate` does likewise. Raw transfers remain unaccounted. The consolidated
-`pool_data` view returns each tier's tokens, shares, and USDC value plus
-aggregate active value and value-weighted Q4W. Active BLND, queued value,
-emission indexes, carries, and migration fields remain internal.
+Each pool-tier independently applies `V2-BACKSTOP-001` and
+`V2-BACKSTOP-002`; every deposit additionally verifies the pool through the
+immutable factory before custody changes. Public share operations and
+pool-authorized `donate` select a `BackstopTier`. The consolidated `pool_data`
+returns each tier's tokens, shares, and USDC value plus aggregate active value
+and value-weighted Q4W; active BLND, queued value, emission data, and migration
+data remain internal.
 
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
@@ -182,13 +171,10 @@ Q_p =
 
 Active and queued values use the same canonical inputs without take-rate
 weights. A zero denominator gives zero; division rounds upward at seven
-decimals. The inherited thresholds and admin overrides are unchanged.
-
-Statuses 0 and 1 require the activation threshold. Returning from any inactive
-status uses the same threshold; statuses 4 and 6 still reject
-permissionless refresh. Queueing does not itself refresh status. Stored status
-does not separately gate the reward zone or the two backstop-auction types.
-Refresh and admin status decisions use one canonical `pool_data` snapshot.
+decimals. Inherited thresholds and admin overrides apply to this ratio.
+Statuses 0 and 1 also require Section 4's activation threshold. Queueing does
+not refresh status, stored status is not an additional reward-zone or
+backstop-auction gate, and each status decision uses one `pool_data` snapshot.
 
 ### 4.2 Pool integration — **Safety extensions**
 
@@ -210,9 +196,7 @@ Refresh and admin status decisions use one canonical `pool_data` snapshot.
   `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
   discriminator. All three fill types use the inherited `submit` request
   discriminants; tier selection and settlement metadata remain private.
-  Vector semantics are explicit by type:
-  - User liquidation inherits the requirement that `bid` and `lot` are
-    nonempty auction inputs.
+  Vector semantics for the two extended auction types are:
   - For bad debt, `bid = []` or `lot = []` means no caller assertion. A nonempty
     vector MUST exactly match the canonical debt-asset or selected-tier-token
     set, respectively.
@@ -221,9 +205,6 @@ Refresh and admin status decisions use one canonical `pool_data` snapshot.
     nonempty reserve-asset input; `lot = []` is invalid.
   Assertions are order-independent and MUST NOT influence selection, amounts,
   or pricing. A mismatch fails atomically.
-  Auction pricing and submission behavior otherwise remain inherited.
-
-All extensions share the inherited atomic rollback boundary.
 
 ### 4.3 User-liquidation handoff — **Safety extension**
 
@@ -243,8 +224,8 @@ input to a later permissionless type-1 `new_auction` call.
 An incomplete fill never hands off. It MUST fail if it exhausts collateral or
 leaves collateral and liabilities while reducing health.
 
-The inherited 30-reserve maximum bounds the handoff, whose liability-map
-mutation uses one load and store and MUST fit Protocol-27 invocation limits.
+The handoff uses one liability-map load and store, remains bounded by 30
+reserves, and MUST fit Protocol-27 invocation limits.
 
 ## 5. Loss waterfall — **Replaced**
 
@@ -255,19 +236,14 @@ inherited.
 ### 5.1 Tier-auction lifecycle
 
 `V2-AUCTION-001` applies. Each pool retains at most one active auction of each
-backstop type, identified publicly by `(auction_type, configured_backstop)`.
-V3 privately associates its selected tier and settlement metadata with a
-46-day temporary lifetime; reads do not renew it.
+backstop type under the inherited public key and privately binds its selected
+tier and settlement metadata. Private metadata has a 46-day temporary
+lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
 
-Each tier independently uses `V2-AUCTION-004`'s inclusive 200-USDC interest
-minimum and Section 4's valuation rule.
-
-The inherited partial-fill and time-modifier rules apply. An interest fill
-atomically donates its realized bid to the selected tier; a bad-debt fill
-atomically draws its realized loss. Pool records use a 45-day renewal threshold
-and 46-day bump. Completion deletes the record. At the inherited stale
-boundary, deletion releases the selection without changing liabilities,
-pending credit, balances, or tier assets.
+Each tier uses Section 4 valuation and `V2-AUCTION-004`'s inclusive 200-USDC
+interest minimum. Interest fills donate to the selected tier; bad-debt fills
+draw from it. Stale deletion releases the selection without changing
+liabilities, pending credit, balances, or tier assets.
 
 ### 5.2 Bad-debt waterfall
 
@@ -310,12 +286,11 @@ Callers MAY replace the empty `bid` with the exact canonical debt-asset set,
 the empty `lot` with the expected selected-tier-token set, or both; a mismatch
 fails the transaction without changing the selection.
 
-As in v2, the separate permissionless `bad_debt(backstop)` entry point handles
-supplier default. It requires no active bad-debt auction, repeats the canonical
-liability validation, and succeeds only when canonical `pool_data` proves that
-all three tiers have no usable value. The transaction accrues each affected
-reserve, applies `V2-AUCTION-003` to at most 30 reserves, clears the liability
-map, and recomputes withdrawal eligibility atomically.
+The inherited permissionless `bad_debt(backstop)` supplier-default path
+requires no active bad-debt auction and succeeds only when canonical
+`pool_data` proves all tiers have no usable value. It revalidates liabilities,
+accrues affected reserves, applies `V2-AUCTION-003`, clears the liability map,
+and recomputes withdrawal eligibility atomically.
 
 ### 5.3 Take-rate allocation — **Replaced**
 
@@ -333,11 +308,10 @@ A zero-value tier is omitted. Each pool and reserve stores the three resulting
 pending amounts and its Section 1.1 carry. Section 3.3 determines eligible
 value, including capital selected for bad debt until drawn.
 
-As in v2, the pool owns interest-auction policy and exposes no dedicated
-allocation entry point. V3's persistent per-reserve tier amounts and carry are
-instead a direct-ledger client boundary; reads do not renew TTL and report only
-live RPC entries. The pool applies `4:3:2` using canonical `pool_data`; the
-backstop exposes no weighting entry point.
+Persistent per-reserve tier amounts and carry are a direct-ledger client
+boundary; reads do not renew TTL and report only live RPC entries. The pool
+applies `4:3:2` using canonical `pool_data`; the backstop exposes no weighting
+entry point.
 
 With no active interest auction, any caller may invoke
 `new_auction(2, backstop, [], reserve_assets, 100)` with one to
@@ -384,13 +358,11 @@ initial-drop ceiling. V3 adds the following migration constraints:
   emitter recognizes this backstop and the observation occurs within the
   attested grace period. The deployed emitter's deleted queue is why prior
   attestation is required.
-- After backfill starts, a current checkpoint is required before BLND-bearing
-  weight changes. Until activation succeeds, those mutations and reward-zone
-  edits fail closed; plain-USDC operations remain available.
-- Backfill pool weight remains active, nonqueued BLND:USDC LP-token amount,
-  exactly as in v2. Only BLND:USDC receives the 70% backstop tranche;
-  BLND:XLM and plain USDC are ineligible. Ordinary v2 stream checkpoints mean
-  queueing forfeits no already accrued amount.
+- Until activation succeeds after emitter replacement, BLND-bearing tier
+  mutations and reward-zone edits fail closed; plain-USDC operations remain
+  available.
+- Backfill retains v2 pool weight, but only BLND:USDC receives the 70%
+  backstop tranche; BLND:XLM and plain USDC are ineligible.
 - `drop` records and verifies the exact scheduled backfill received by the
   backstop. Positive backstop-tier claims remain disabled until the complete
   schedule is funded. BLND:USDC claims and the 30% pool tranche then use their
@@ -470,12 +442,6 @@ C_u'=N-\Delta E10^{14}.
 The inherited mutation checkpoints and new-share index apply independently per
 tier. The same position cannot earn through two tiers or both eligible and
 ineligible accounting.
-
-After distribution begins, deposits, queue/dequeue, withdrawals, actual loss,
-or auction gain that changes a reward-zone pool's active BLND-bearing LP amount
-requires a production checkpoint no more than five seconds old. Other pools
-and plain USDC are exempt. A mutation cannot change prior allocation and may
-affect only the unresolved five-second window.
 
 Selected bad-debt capital remains eligible until transferred; only the actual
 loss changes future weight. Selection, discount, stale release, composition,

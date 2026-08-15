@@ -51,7 +51,7 @@ pub fn execute_claim(
             panic_with_error!(e, BackstopError::BadRequest);
         }
         require_registered_pool(e, &pool);
-        prepare_pool_weight_change(e, tier, &pool);
+        prepare_pool_weight_change(e, tier);
 
         let pool_claim = distributor::claim_emissions(e, tier, &pool, from);
         claims.set(pool.clone(), pool_claim);

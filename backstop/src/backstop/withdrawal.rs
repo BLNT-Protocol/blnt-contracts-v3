@@ -21,7 +21,7 @@ pub fn execute_queue_withdrawal(
     require_q4w_entry_capacity(e, from, pool_address);
     user_balance.queue_shares_for_withdrawal(e, amount);
 
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     pool_balance.queue_for_withdraw(amount);
 
@@ -45,7 +45,7 @@ pub fn execute_dequeue_withdrawal(
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
     user_balance.dequeue_shares(e, amount);
 
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     user_balance.add_shares(amount);
     pool_balance.dequeue_q4w(e, amount);
@@ -81,7 +81,7 @@ pub fn execute_withdraw(
         panic_with_error!(e, &BackstopError::InvalidTokenWithdrawAmount);
     }
 
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     pool_balance.withdraw(e, to_return, amount);
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);

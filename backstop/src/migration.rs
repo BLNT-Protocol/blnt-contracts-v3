@@ -576,20 +576,20 @@ mod tests {
     }
 
     #[test]
-    fn independent_backfill_clock_requires_checkpoint_before_later_weight_enters() {
+    fn backfill_distribution_samples_current_weight_like_v2() {
         let fixture = Fixture::create();
         assert_eq!(fixture.client().distribute(), 0);
         fixture.e.ledger().set_timestamp(1_010);
 
-        assert!(fixture
-            .client()
-            .try_deposit(
+        assert_eq!(
+            fixture.client().deposit(
                 &BackstopTier::BlndUsdc,
                 &fixture.user,
                 &fixture.pool,
                 &SCALAR_7,
-            )
-            .is_err());
+            ),
+            SCALAR_7
+        );
 
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
@@ -599,15 +599,6 @@ mod tests {
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
             0
-        );
-        assert_eq!(
-            fixture.client().deposit(
-                &BackstopTier::BlndUsdc,
-                &fixture.user,
-                &fixture.pool,
-                &SCALAR_7,
-            ),
-            SCALAR_7
         );
     }
 

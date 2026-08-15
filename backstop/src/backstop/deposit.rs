@@ -17,7 +17,7 @@ pub fn execute_deposit(
         panic_with_error!(e, &BackstopError::BadRequest)
     }
     require_registered_pool(e, pool_address);
-    emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::prepare_pool_weight_change(e, tier);
     emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
     let backstop_token_client = TokenClient::new(e, &tier_token(e, tier));
     backstop_token_client.transfer(from, &e.current_contract_address(), &amount);

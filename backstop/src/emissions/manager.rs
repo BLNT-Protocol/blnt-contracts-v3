@@ -902,7 +902,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_checkpoint_rejects_active_weight_changes() {
+    fn active_weight_changes_do_not_require_a_recent_global_checkpoint() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
@@ -923,35 +923,6 @@ mod tests {
         fixture.client().distribute();
 
         fixture.e.ledger().set_timestamp(1_016);
-        assert!(fixture
-            .client()
-            .try_queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7)
-            .is_err());
-    }
-
-    #[test]
-    fn fresh_checkpoint_allows_and_refreshes_active_weight_changes() {
-        let fixture = Fixture::create();
-        let pool = fixture.pool(10 * SCALAR_7, 0);
-        let user = Address::generate(&fixture.e);
-        fixture.e.as_contract(&fixture.backstop, || {
-            storage::set_user_balance_for_tier(
-                &fixture.e,
-                BackstopTier::BlndUsdc,
-                &pool,
-                &user,
-                &UserBalance {
-                    shares: 10 * SCALAR_7,
-                    q4w: vec![&fixture.e],
-                },
-            );
-        });
-        fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
-        fixture.e.ledger().set_timestamp(1_010);
-        fixture.client().distribute();
-
-        fixture.e.ledger().set_timestamp(1_016);
-        fixture.client().distribute();
         fixture
             .client()
             .queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7);

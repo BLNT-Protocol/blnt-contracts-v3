@@ -59,6 +59,15 @@ fn exercise_reward_zone(wasm: bool) {
 
     fixture.backstop.add_reward(&first, &None);
     fixture.backstop.distribute();
+    fixture.jump(6);
+    let first_tokens_before = fixture.backstop.pool_data(&first).blnd_usdc.tokens;
+    fixture
+        .backstop
+        .deposit(&BackstopTier::BlndUsdc, &depositor, &first, &lp_deposit);
+    assert_eq!(
+        fixture.backstop.pool_data(&first).blnd_usdc.tokens,
+        first_tokens_before + lp_deposit
+    );
     fixture.backstop.add_reward(&second, &None);
     assert_eq!(fixture.backstop.reward_zone().len(), 2);
     assert!(fixture.backstop.reward_zone().contains(&first));
