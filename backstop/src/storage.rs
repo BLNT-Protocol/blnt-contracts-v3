@@ -84,6 +84,7 @@ const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
+const BUYBACK_PENDING_KEY: &str = "BuybackUSDC";
 
 #[derive(Clone)]
 #[contracttype(export = false)]
@@ -119,6 +120,7 @@ pub enum BackstopDataKey {
     UEmisData(PoolUserTierKey),
     PoolOngoingEmissions(Address),
     PoolEmissionGulp(Address),
+    BuybackCarry(Address),
 }
 
 /****************************
@@ -270,6 +272,36 @@ pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
+}
+
+/// Return USDC reserved for the next canonical BLND buy-and-burn.
+pub fn get_buyback_pending(e: &Env) -> i128 {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, BUYBACK_PENDING_KEY))
+        .unwrap_or(0)
+}
+
+/// Store USDC reserved for the next canonical BLND buy-and-burn.
+pub fn set_buyback_pending(e: &Env, amount: i128) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, BUYBACK_PENDING_KEY), &amount);
+}
+
+/// Return the sub-stroop haircut remainder for one pool's USDC auction proceeds.
+pub fn get_buyback_carry(e: &Env, pool: &Address) -> i128 {
+    let key = BackstopDataKey::BuybackCarry(pool.clone());
+    get_persistent_default(e, &key, || 0, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED)
+}
+
+/// Store the sub-stroop haircut remainder for one pool's USDC auction proceeds.
+pub fn set_buyback_carry(e: &Env, pool: &Address, carry: i128) {
+    let key = BackstopDataKey::BuybackCarry(pool.clone());
+    e.storage().persistent().set(&key, &carry);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
 /********** User Shares **********/

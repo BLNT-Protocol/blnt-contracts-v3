@@ -55,8 +55,9 @@ The candidate immutably binds exactly these three seven-decimal assets:
 
 All three count equally per verified USDC for activation, participate in the
 fixed-weight take-rate policy, and absorb loss in table order without an
-asset-specific haircut or concentration limit. No other tier is supported.
-Eligibility follows Section 3.3.
+asset-specific activation or loss haircut or concentration limit. Plain-USDC
+interest proceeds have the buy-and-burn haircut specified in Section 5.3. No
+other tier is supported. Eligibility follows Section 3.3.
 
 ### 3.2 Position accounting
 
@@ -328,7 +329,7 @@ mismatch fails atomically and does not redirect the auction.
 | Allocate | Use one canonical `pool_data` snapshot and the formula above to move new credit into persistent tier amounts. |
 | Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic tier cursor, choose the first tier meeting the inclusive 200-USDC minimum. |
 | Create | Store the selected persistent amounts in a next-ledger auction, privately bind its tier, and advance the cursor. No second interest auction may start before fill or stale deletion. |
-| Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically `donate` the realized bid to that tier. |
+| Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically transfer and account for the realized bid under the selected tier's rules below. |
 | Recover | Stale deletion releases the selection; unfilled amounts remain in their original pending and credit accumulators. |
 
 Public lookup and deletion remain `get_auction(2, backstop)` and
@@ -336,9 +337,37 @@ Public lookup and deletion remain `get_auction(2, backstop)` and
 amounts remain pending so expiry cannot lose or reweight them; ordinary share
 operations remain available. A partial fill releases its base-lot discount,
 and only reserve assets actually transferred reduce pending amounts and
-accrued credit. Donation mints no shares or user claim but appreciates active
-and queued shares and assumes the tier's protocol roles. The `4:3:2` ratio
-governs credit allocation, not necessarily the timing of realized donations.
+accrued credit. BLND:XLM and BLND:USDC bids are donated in full. Donation mints
+no shares or user claim but appreciates active and queued shares and assumes
+the tier's protocol roles. The `4:3:2` ratio governs credit allocation, not
+necessarily the timing of realized donations.
+
+For each plain-USDC bid \(B\), the backstop transfers the full amount from the
+filler but credits only 99% to the pool tier. It carries fractional haircut
+dust per pool in raw seven-decimal units:
+
+\[
+H=\left\lfloor\frac{B+C_h}{100}\right\rfloor,
+\qquad C_h'=(B+C_h)\bmod 100,
+\qquad B_{\mathrm{tier}}=B-H.
+\]
+
+The haircut \(H\) joins a global pending-USDC buyback balance. Pending USDC
+mints no shares, has no activation, loss, take-rate, or emission role, and is
+not created by an unsolicited token transfer.
+
+Any caller MAY invoke `buy_and_burn()`. One call processes
+\(X=\min(P,\lfloor R_{USDC}/200\rfloor)\), where \(P\) is pending USDC and
+\(R_{USDC}\) is the canonical BLND:USDC Comet's current USDC reserve. The
+backstop reads that Comet's fee-inclusive USDC-per-BLND spot price \(p\), sets
+the maximum final price to \(\lceil1.01p\rceil\), and requires at least
+\(\lfloor X10^7/p_{max}\rfloor\) BLND from an exact-input swap. It verifies the
+exact USDC decrease, exact BLND receipt, reported final price, and exact BLND
+burn before reducing pending USDC. A zero-work call returns zero. Any swap,
+authorization, balance, or burn failure rolls back without changing pending
+USDC or the prior interest-auction settlement. No oracle or TWAP supplements
+the canonical Comet spot; the reserve-fraction limit bounds one call's
+exposure to current-spot manipulation.
 
 ## 6. BLND emissions — **Extended**
 

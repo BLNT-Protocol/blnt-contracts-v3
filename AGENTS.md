@@ -76,6 +76,10 @@ first:
   tier before suppliers.
 - A single inclusive 12,500-USDC activation threshold.
 - Take-rate weighting of `4:3:2` in loss order.
+- Plain-USDC interest-auction payments credit 99% to that tier and reserve an
+  exact cumulative 1% for bounded swaps through the canonical BLND:USDC Comet
+  followed by an exact BLND burn. Buyback failure must not unwind or block the
+  completed interest settlement.
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
 - Ongoing BLND weight only for active, nonqueued underlying BLND in the two
   BLND-bearing tiers.

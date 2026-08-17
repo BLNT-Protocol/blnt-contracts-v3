@@ -161,7 +161,12 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     // The BLND:XLM auction fills 100 ledgers into the declining-bid half of
     // the v2 curve, so realized donations intentionally diverge from the
     // BLND:XLM=4, BLND:USDC=3, USDC=2 credit-allocation weights.
-    let realized_donations = [576 * SCALAR_7, 384 * SCALAR_7, 480 * SCALAR_7];
+    let realized_payments = [576 * SCALAR_7, 384 * SCALAR_7, 480 * SCALAR_7];
+    let realized_tier_gains = [
+        realized_payments[0],
+        realized_payments[1],
+        realized_payments[2] * 99 / 100,
+    ];
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
     let blnd_usdc_token = fixture.backstop.backstop_token(&BackstopTier::BlndUsdc);
@@ -364,7 +369,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     );
     assert_eq!(
         fixture.backstop.pool_data(&pool_address).blnd_xlm.tokens - tier_assets_before,
-        realized_donations[1]
+        realized_tier_gains[1]
     );
 
     let third = pool.new_auction(
@@ -388,11 +393,11 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
     assert_eq!(
         fixture.tokens[TokenIndex::USDC].balance(&operator) - operator_usdc_before,
-        expected_lots[2] - realized_donations[2]
+        expected_lots[2] - realized_payments[2]
     );
     assert_eq!(
         fixture.backstop.pool_data(&pool_address).usdc.tokens - tier_assets_before,
-        realized_donations[2]
+        realized_tier_gains[2]
     );
     assert!(pool
         .try_get_auction(
@@ -431,7 +436,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         assert_eq!(ending.shares, starting_states[index].shares);
         assert_eq!(
             ending.tokens,
-            starting_states[index].tokens + realized_donations[index]
+            starting_states[index].tokens + realized_tier_gains[index]
         );
     }
 
@@ -543,6 +548,8 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &(AuctionType::InterestAuction as u32),
         &fixture.backstop.address,
     );
+    assert!(fixture.backstop.buy_and_burn() > 0);
+    assert_eq!(fixture.backstop.buy_and_burn(), 0);
 }
 
 #[test]

@@ -120,6 +120,9 @@ pub trait Backstop {
     /// Execute the configured initial drop and fund any scheduled migration backfill.
     fn drop(e: Env);
 
+    /// Swap a bounded pending-USDC haircut through the canonical Comet and burn the BLND output.
+    fn buy_and_burn(e: Env) -> i128;
+
     /********** Fund Management *********/
 
     /// (Only Pool) Take one tier token from a pool's backstop
@@ -135,7 +138,8 @@ pub trait Backstop {
     /// not authorize the call
     fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address);
 
-    /// (Only Pool) Sends one tier token from `from` to a pool's backstop
+    /// (Only Pool) Sends one tier token from `from` to a pool's backstop.
+    /// Plain-USDC donations credit 99% and reserve 1% for BLND buy-and-burn.
     ///
     /// NOTE: This is not a deposit, and `from` will permanently lose access to the funds
     ///
@@ -345,6 +349,20 @@ impl Backstop for BackstopContract {
         migration::drop(&e)
     }
 
+    fn buy_and_burn(e: Env) -> i128 {
+        storage::extend_instance(&e);
+        let result = backstop::execute_buy_and_burn(&e);
+        if result.usdc_in > 0 {
+            BackstopEvents::buy_and_burn(
+                &e,
+                result.usdc_in,
+                result.blnd_burned,
+                result.pending_usdc,
+            );
+        }
+        result.blnd_burned
+    }
+
     /********** Fund Management *********/
 
     fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address) {
@@ -361,9 +379,17 @@ impl Backstop for BackstopContract {
         from.require_auth();
         pool_address.require_auth();
 
-        backstop::execute_donate(&e, tier, &from, &pool_address, amount);
+        let result = backstop::execute_donate(&e, tier, &from, &pool_address, amount);
 
-        BackstopEvents::donate(&e, tier, pool_address, from, amount);
+        BackstopEvents::donate(&e, tier, pool_address.clone(), from, amount);
+        if result.buyback > 0 {
+            BackstopEvents::buyback_accrued(
+                &e,
+                pool_address,
+                result.buyback,
+                result.pending_buyback,
+            );
+        }
     }
 }
 

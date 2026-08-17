@@ -22,3 +22,15 @@ pub const MAX_INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
 
 /// The verified USDC value required for pool activation.
 pub const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
+
+/// Numerator and denominator for the one-percent USDC interest-proceeds haircut.
+pub const USDC_BUYBACK_HAIRCUT_NUMERATOR: i128 = 1;
+pub const USDC_BUYBACK_HAIRCUT_DENOMINATOR: i128 = 100;
+
+/// Process at most 0.5% of the canonical Comet's current USDC reserve per buyback.
+pub const BUYBACK_MAX_RESERVE_NUMERATOR: i128 = 1;
+pub const BUYBACK_MAX_RESERVE_DENOMINATOR: i128 = 200;
+
+/// Permit at most a one-percent increase over the Comet's current fee-inclusive spot price.
+pub const BUYBACK_MAX_PRICE_NUMERATOR: i128 = 101;
+pub const BUYBACK_MAX_PRICE_DENOMINATOR: i128 = 100;

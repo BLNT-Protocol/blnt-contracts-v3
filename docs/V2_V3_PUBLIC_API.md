@@ -44,8 +44,9 @@ Private storage-only types are excluded.
 | `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation threshold and zero-BLND exception. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLND-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `drop()` | Same | Extended | Keeps the v2 drop surface while verifying and funding the scheduled migration backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-migration-lifecycle-and-backfill--extended) |
+| — | `buy_and_burn() -> i128` | Added | Permissionlessly swaps one bounded pending-USDC haircut batch through the canonical BLND:USDC Comet and burns the exact BLND output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 | `draw(pool, amount, to)` | `draw(tier, pool, amount, to)` | Extended | A pool draws loss capital from the tier selected by the waterfall. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
-| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits auction proceeds or voluntary recapitalization to one tier. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
+| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLND-tier payment or 99% of a plain-USDC payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 
 ### Data types
 

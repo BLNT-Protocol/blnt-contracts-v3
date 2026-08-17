@@ -53,6 +53,18 @@ single_value_event!(
     amount: i128
 );
 vec_event!(
+    BuybackAccruedEvent,
+    "buyback_accrued",
+    [pool_address: Address],
+    [usdc_amount: i128, pending_usdc: i128]
+);
+vec_event!(
+    BuyAndBurnEvent,
+    "buy_and_burn",
+    [],
+    [usdc_amount: i128, blnd_burned: i128, pending_usdc: i128]
+);
+vec_event!(
     TierDepositEvent,
     "deposit",
     [tier: BackstopTier, pool_address: Address, from: Address],
@@ -323,6 +335,24 @@ impl BackstopEvents {
         }
         .publish(e);
     }
+
+    pub fn buyback_accrued(e: &Env, pool_address: Address, usdc_amount: i128, pending_usdc: i128) {
+        BuybackAccruedEvent {
+            pool_address,
+            usdc_amount,
+            pending_usdc,
+        }
+        .publish(e);
+    }
+
+    pub fn buy_and_burn(e: &Env, usdc_amount: i128, blnd_burned: i128, pending_usdc: i128) {
+        BuyAndBurnEvent {
+            usdc_amount,
+            blnd_burned,
+            pending_usdc,
+        }
+        .publish(e);
+    }
 }
 
 #[cfg(test)]
@@ -342,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn typed_events_preserve_legacy_backstop_shapes() {
+    fn typed_events_preserve_backstop_shapes() {
         let e = Env::default();
         let pool = Address::generate(&e);
         let user = Address::generate(&e);
@@ -374,7 +404,7 @@ mod tests {
                 to_remove: Some(removed.clone()),
             },
             (Symbol::new(&e, "rw_zone_add"),).into_val(&e),
-            (pool, Some(removed)).into_val(&e),
+            (pool.clone(), Some(removed)).into_val(&e),
         );
 
         assert_legacy_shape(
@@ -382,6 +412,28 @@ mod tests {
             &BackfillFundedEvent { amount: 100 },
             (Symbol::new(&e, "backfill_funded"),).into_val(&e),
             100_i128.into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &BuybackAccruedEvent {
+                pool_address: pool.clone(),
+                usdc_amount: 10,
+                pending_usdc: 30,
+            },
+            (Symbol::new(&e, "buyback_accrued"), pool).into_val(&e),
+            (10_i128, 30_i128).into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &BuyAndBurnEvent {
+                usdc_amount: 20,
+                blnd_burned: 200,
+                pending_usdc: 10,
+            },
+            (Symbol::new(&e, "buy_and_burn"),).into_val(&e),
+            (20_i128, 200_i128, 10_i128).into_val(&e),
         );
     }
 }
