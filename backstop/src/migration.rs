@@ -347,7 +347,7 @@ mod tests {
         emissions, storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
-            create_token, create_usdc_token,
+            create_token, create_usdc_token, sync_mock_pool_factory_config,
         },
         BackstopClient,
     };
@@ -390,6 +390,7 @@ mod tests {
                 storage::set_blnd_usdc_token(&e, &blnd_usdc);
                 storage::set_blnd_xlm_token(&e, &blnd_xlm);
             });
+            sync_mock_pool_factory_config(&e, &backstop);
 
             let pool = e.register(MockPool, ());
             MockPoolClient::new(&e, &pool).set_backstop(&backstop);
@@ -408,8 +409,8 @@ mod tests {
             usdc_client.mint(&user, &(20 * SCALAR_7));
 
             let client = BackstopClient::new(&e, &backstop);
-            client.deposit(&BackstopTier::BlndUsdc, &user, &pool, &(20 * SCALAR_7));
-            client.deposit(&BackstopTier::BlndXlm, &user, &pool, &(5 * SCALAR_7));
+            client.deposit(&BackstopTier::SecondLoss, &user, &pool, &(20 * SCALAR_7));
+            client.deposit(&BackstopTier::FirstLoss, &user, &pool, &(5 * SCALAR_7));
             e.as_contract(&backstop, || {
                 storage::set_reward_zone(&e, &vec![&e, pool.clone()]);
                 emissions::refresh_pool_ongoing_assets(&e, &pool);
@@ -496,7 +497,7 @@ mod tests {
         assert_eq!(pool_state.pending_blnd_xlm, 0);
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
@@ -504,7 +505,7 @@ mod tests {
         );
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
@@ -513,7 +514,7 @@ mod tests {
         assert!(fixture
             .client()
             .try_claim(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
                 &0,
@@ -532,7 +533,7 @@ mod tests {
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
@@ -541,7 +542,7 @@ mod tests {
         assert!(fixture
             .client()
             .try_claim(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
                 &0,
@@ -563,7 +564,7 @@ mod tests {
         assert!(fixture.client().try_drop().is_err());
         assert!(
             fixture.client().claim(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
                 &0,
@@ -583,7 +584,7 @@ mod tests {
 
         assert_eq!(
             fixture.client().deposit(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &fixture.pool,
                 &SCALAR_7,
@@ -594,7 +595,7 @@ mod tests {
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
@@ -634,12 +635,12 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_010 + DAY_IN_SECONDS);
         fixture.client().distribute();
         let accrued_before_queue = fixture.claimable(
-            &BackstopTier::BlndUsdc,
+            &BackstopTier::SecondLoss,
             &fixture.user,
             &vec![&fixture.e, fixture.pool.clone()],
         );
         fixture.client().queue_withdrawal(
-            &BackstopTier::BlndUsdc,
+            &BackstopTier::SecondLoss,
             &fixture.user,
             &fixture.pool,
             &(20 * SCALAR_7),
@@ -651,7 +652,7 @@ mod tests {
         fixture.client().distribute();
         assert_eq!(
             fixture.client().withdraw(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &fixture.pool,
                 &(20 * SCALAR_7),
@@ -662,7 +663,7 @@ mod tests {
         assert_eq!(
             fixture
                 .client()
-                .user_balance(&BackstopTier::BlndUsdc, &fixture.pool, &fixture.user)
+                .user_balance(&BackstopTier::SecondLoss, &fixture.pool, &fixture.user)
                 .shares,
             0
         );
@@ -683,7 +684,7 @@ mod tests {
         fixture.client().drop();
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
             ),
@@ -691,7 +692,7 @@ mod tests {
         );
         assert!(
             fixture.client().claim(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &vec![&fixture.e, fixture.pool.clone()],
                 &0,
@@ -700,7 +701,7 @@ mod tests {
         assert!(
             fixture
                 .client()
-                .user_balance(&BackstopTier::BlndUsdc, &fixture.pool, &fixture.user)
+                .user_balance(&BackstopTier::SecondLoss, &fixture.pool, &fixture.user)
                 .shares
                 > 0
         );
@@ -726,7 +727,7 @@ mod tests {
         assert!(fixture
             .client()
             .try_deposit(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &fixture.user,
                 &fixture.pool,
                 &SCALAR_7
@@ -735,16 +736,19 @@ mod tests {
         assert!(fixture
             .client()
             .try_deposit(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &fixture.user,
                 &fixture.pool,
                 &SCALAR_7
             )
             .is_err());
         assert_eq!(
-            fixture
-                .client()
-                .deposit(&BackstopTier::Usdc, &fixture.user, &fixture.pool, &SCALAR_7),
+            fixture.client().deposit(
+                &BackstopTier::ThirdLoss,
+                &fixture.user,
+                &fixture.pool,
+                &SCALAR_7
+            ),
             SCALAR_7
         );
 
@@ -756,7 +760,7 @@ mod tests {
         );
         assert_eq!(
             fixture.client().deposit(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &fixture.user,
                 &fixture.pool,
                 &SCALAR_7

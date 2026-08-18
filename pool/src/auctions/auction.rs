@@ -44,7 +44,7 @@ pub struct AuctionData {
     /// The bid is different based on each auction type:
     /// - UserLiquidation: dTokens
     /// - BadDebtAuction: dTokens
-    /// - InterestAuction: Underlying assets (backstop token)
+    /// - InterestAuction: The selected backstop token
     pub bid: Map<Address, i128>,
     /// A map of the assets being auctioned off and the amount being auctioned. These are tokens
     /// received by the filler of the auction.
@@ -336,13 +336,13 @@ pub(crate) fn require_unique_addresses(e: &Env, list: &Vec<Address>) {
     }
 }
 
-/// The fixed v3 backstop tier identifiers used by pool auctions.
+/// The immutable loss-waterfall positions used by pool auctions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 pub enum BackstopTier {
-    BlndUsdc,
-    BlndXlm,
-    Usdc,
+    FirstLoss,
+    SecondLoss,
+    ThirdLoss,
 }
 
 /// One active auction backed by a single v3 backstop tier.
@@ -406,9 +406,9 @@ pub(crate) fn remove_tier_auction(e: &Env, auction_type: AuctionType) {
 
 pub(crate) fn to_backstop_tier(tier: BackstopTier) -> BackstopContractTier {
     match tier {
-        BackstopTier::BlndUsdc => BackstopContractTier::BlndUsdc,
-        BackstopTier::BlndXlm => BackstopContractTier::BlndXlm,
-        BackstopTier::Usdc => BackstopContractTier::Usdc,
+        BackstopTier::SecondLoss => BackstopContractTier::SecondLoss,
+        BackstopTier::FirstLoss => BackstopContractTier::FirstLoss,
+        BackstopTier::ThirdLoss => BackstopContractTier::ThirdLoss,
     }
 }
 
@@ -468,7 +468,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_address,
             &50_000_0000000,
@@ -590,7 +590,7 @@ mod tests {
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &bombadil,
             &pool_address,
             &(50 * SCALAR_7),
@@ -1057,7 +1057,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_address,
             &50_000_0000000,
@@ -1186,7 +1186,7 @@ mod tests {
         let (backstop_address, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &bombadil,
             &pool_address,
             &(50 * SCALAR_7),
@@ -2186,7 +2186,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::SecondLoss, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2293,7 +2293,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::SecondLoss, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2401,7 +2401,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::SecondLoss, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -2506,7 +2506,7 @@ mod tests {
     //         &vec![&e, 500_001_0000000, 12_501_0000000],
     //         &frodo,
     //     );
-    //     backstop_client.deposit(&backstop::BackstopTier::BlndUsdc, &frodo, &pool_address, &backstop_tokens);
+    //     backstop_client.deposit(&backstop::BackstopTier::SecondLoss, &frodo, &pool_address, &backstop_tokens);
 
     //     let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
     //     let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();

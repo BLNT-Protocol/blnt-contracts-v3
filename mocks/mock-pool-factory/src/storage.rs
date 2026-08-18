@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env};
+use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env, Vec};
 
 /********** Ledger Thresholds **********/
 
@@ -14,7 +14,25 @@ const LEDGER_BUMP_SHARED: u32 = LEDGER_THRESHOLD_SHARED + ONE_DAY_LEDGERS; // ~ 
 #[contracttype]
 pub enum PoolFactoryDataKey {
     Contracts(Address),
+    BackstopConfig(Address),
+    DefaultBackstopConfig,
     PoolInitMeta,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopAsset {
+    BlndXlm,
+    BlndUsdc,
+    Usdc,
+    Xlm,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BackstopTierConfig {
+    pub asset: BackstopAsset,
+    pub take_rate_weight: u32,
 }
 
 #[derive(Clone)]
@@ -74,7 +92,7 @@ pub fn is_deployed(e: &Env, contract_id: &Address) -> bool {
 ///
 /// ### Arguments
 /// * `contract_id` - The contract_id that was deployed by the factory
-pub fn set_deployed(e: &Env, contract_id: &Address) {
+pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<BackstopTierConfig>) {
     let key = PoolFactoryDataKey::Contracts(contract_id.clone());
     e.storage()
         .persistent()
@@ -82,4 +100,30 @@ pub fn set_deployed(e: &Env, contract_id: &Address) {
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+    let config_key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    e.storage().persistent().set(&config_key, backstop_config);
+    e.storage()
+        .persistent()
+        .extend_ttl(&config_key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+pub fn get_backstop_config(e: &Env, contract_id: &Address) -> Vec<BackstopTierConfig> {
+    let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    e.storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(e))
+}
+
+pub fn set_default_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>) {
+    e.storage()
+        .instance()
+        .set(&PoolFactoryDataKey::DefaultBackstopConfig, config);
+}
+
+pub fn get_default_backstop_config(e: &Env) -> Vec<BackstopTierConfig> {
+    e.storage()
+        .instance()
+        .get(&PoolFactoryDataKey::DefaultBackstopConfig)
+        .unwrap_or_else(|| Vec::new(e))
 }

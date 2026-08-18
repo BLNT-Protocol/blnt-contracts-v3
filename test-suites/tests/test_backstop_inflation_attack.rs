@@ -41,7 +41,7 @@ fn test_backstop_inflation_attack() {
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
     let sauron_shares = fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sauron,
         &pool_address,
         &sauron_deposit_amount,
@@ -56,7 +56,7 @@ fn test_backstop_inflation_attack() {
     // contract correctly mints share amounts regardless of the token balance
     let deposit_amount = 100;
     let pippen_shares = fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &pippen,
         &pool_address,
         &deposit_amount,
@@ -74,7 +74,7 @@ fn test_backstop_inflation_attack() {
         &fixture.env.ledger().sequence(),
     );
     fixture.backstop.donate(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sauron,
         &pool_address,
         &inflation_amount,
@@ -82,7 +82,7 @@ fn test_backstop_inflation_attack() {
 
     // contracts stop any zero share deposits
     let bad_deposit_result = fixture.backstop.try_deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &pippen,
         &pool_address,
         &deposit_amount,
@@ -129,7 +129,7 @@ fn test_backstop_interest_auction_inflation_attack() {
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sauron,
         &pool_address,
         &sauron_deposit_amount,
@@ -149,7 +149,7 @@ fn test_backstop_interest_auction_inflation_attack() {
     // 3. Attacker enables borrowing on the pool and fills interest auction to cause share inflation
     let remaining_to_threshold = 21_000 * SCALAR_7;
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sauron,
         &pool_address,
         &remaining_to_threshold,
@@ -190,15 +190,17 @@ fn test_backstop_interest_auction_inflation_attack() {
     // -> check new backstop share value
     let backstop_data = fixture.backstop.pool_data(&pool_address);
     let shares_to_tokens = backstop_data
-        .blnd_usdc
+        .tiers
+        .get(1)
+        .unwrap()
         .tokens
-        .fixed_div_floor(backstop_data.blnd_usdc.shares, SCALAR_7)
+        .fixed_div_floor(backstop_data.tiers.get(1).unwrap().shares, SCALAR_7)
         .unwrap();
 
     // 4. Victim uses pool with inflated backstop share value
     let pippen_deposit_amount = SCALAR_7;
     let pippen_shares = fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &pippen,
         &pool_address,
         &pippen_deposit_amount,

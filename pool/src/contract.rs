@@ -163,7 +163,7 @@ pub trait Pool {
         requests: Vec<Request>,
     ) -> Positions;
 
-    /// Update the pool status from canonical three-tier USDC valuation and Q4W value.
+    /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
     ///
     /// Backstop-triggered statuses are odd:
     /// * 1 = active
@@ -301,7 +301,7 @@ pub trait Pool {
     ///
     /// * If the user is not the backstop and they have bad debt, the backstop will take over the debt.
     /// * If the user is the backstop, residual debt defaults to suppliers only
-    ///   after all three tiers are verified to have no usable value.
+    ///   after all configured tiers are verified to have no usable value.
     ///
     /// ### Arguments
     /// * `user` - The address of the user to check for bad debt

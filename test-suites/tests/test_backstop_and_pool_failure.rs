@@ -203,8 +203,8 @@ fn test_backstop_and_pool_failure() {
 
     // create bad debt auction to empty the backstop
     let pool_backstop_data = fixture.backstop.pool_data(&pool_fixture.pool.address);
-    assert!(pool_backstop_data.blnd_usdc.tokens > 0);
-    assert!(pool_backstop_data.blnd_usdc.shares > 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().tokens > 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().shares > 0);
 
     let elrond_backstop_collateral = 100_000 * stable_scalar;
     pool_fixture.pool.submit(
@@ -232,12 +232,13 @@ fn test_backstop_and_pool_failure() {
         bad_debt_auction.bid.get_unchecked(stable.address.clone()),
         bad_debt_1
     );
-    let blnd_usdc_token = fixture
-        .backstop
-        .backstop_token(&backstop::BackstopTier::BlndUsdc);
+    let blnd_usdc_token = fixture.backstop.backstop_token(
+        &backstop::BackstopTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     assert_eq!(
         bad_debt_auction.lot.get(blnd_usdc_token).unwrap(),
-        pool_backstop_data.blnd_usdc.tokens
+        pool_backstop_data.tiers.get(1).unwrap().tokens
     );
 
     // wait 200 blocks (plus 1 block for auction to start)
@@ -270,8 +271,8 @@ fn test_backstop_and_pool_failure() {
     );
 
     let pool_backstop_data = fixture.backstop.pool_data(&pool_fixture.pool.address);
-    assert_eq!(pool_backstop_data.blnd_usdc.tokens, 0);
-    assert!(pool_backstop_data.blnd_usdc.shares > 0);
+    assert_eq!(pool_backstop_data.tiers.get(1).unwrap().tokens, 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().shares > 0);
 
     // ***** Liquidate Pippin and auction off the bad debt *****
 

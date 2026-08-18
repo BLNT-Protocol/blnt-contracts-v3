@@ -7,7 +7,10 @@ use soroban_sdk::{
 #[cfg(test)]
 use crate::storage::UserEmissionData;
 use crate::{
-    backstop::{credit_tier_shares, require_registered_pool, tier_token, BackstopTier},
+    backstop::{
+        credit_tier_shares, is_blnd_emission_tier, require_registered_pool, tier_token,
+        BackstopTier,
+    },
     dependencies::CometClient,
     errors::BackstopError,
     migration, storage,
@@ -36,7 +39,6 @@ pub fn execute_claim(
 ) -> ClaimResult {
     migration::require_backfill_funded(e);
     from.require_auth();
-    require_emission_tier(e, tier);
     if pool_addresses.is_empty() {
         panic_with_error!(e, BackstopError::BadRequest);
     }
@@ -46,12 +48,19 @@ pub fn execute_claim(
 
     let mut blnd_amount = 0_i128;
     let mut claims = Map::<Address, i128>::new(e);
+    let first_pool = pool_addresses.get(0).unwrap();
+    require_emission_tier(e, tier, &first_pool);
+    let lp_token = tier_token(e, &first_pool, tier);
     for pool in pool_addresses.iter() {
         if claims.contains_key(pool.clone()) {
             panic_with_error!(e, BackstopError::BadRequest);
         }
         require_registered_pool(e, &pool);
-        prepare_pool_weight_change(e, tier);
+        require_emission_tier(e, tier, &pool);
+        if tier_token(e, &pool, tier) != lp_token {
+            panic_with_error!(e, BackstopError::InvalidEmissionValue);
+        }
+        prepare_pool_weight_change(e, tier, &pool);
 
         let pool_claim = distributor::claim_emissions(e, tier, &pool, from);
         claims.set(pool.clone(), pool_claim);
@@ -71,7 +80,6 @@ pub fn execute_claim(
 
     let backstop = e.current_contract_address();
     let blnd = storage::get_blnd_token(e);
-    let lp_token = tier_token(e, tier);
     let blnd_client = TokenClient::new(e, &blnd);
     let lp_client = TokenClient::new(e, &lp_token);
     let blnd_before = blnd_client.balance(&backstop);
@@ -124,7 +132,7 @@ pub fn execute_claim(
             continue;
         }
         let shares = credit_tier_shares(e, tier, from, &pool, pool_lp_amount);
-        finish_pool_weight_change(e, tier, &pool);
+        finish_pool_weight_change(e, &pool, true);
         allocations.push_back((pool, pool_claim, pool_lp_amount, shares));
     }
     ClaimResult {
@@ -133,8 +141,8 @@ pub fn execute_claim(
     }
 }
 
-fn require_emission_tier(e: &Env, tier: BackstopTier) {
-    if tier == BackstopTier::Usdc {
+fn require_emission_tier(e: &Env, tier: BackstopTier, pool: &Address) {
+    if !is_blnd_emission_tier(e, pool, tier) {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
 }
@@ -146,7 +154,7 @@ pub(crate) fn preview_user_emissions(
     user: &Address,
     pool: &Address,
 ) -> UserEmissionData {
-    require_emission_tier(e, tier);
+    require_emission_tier(e, tier, pool);
     distributor::preview_user_emissions(e, tier, pool, user)
 }
 
@@ -157,18 +165,27 @@ pub(crate) fn preview_claim(
     user: &Address,
     pool_addresses: &Vec<Address>,
 ) -> i128 {
-    require_emission_tier(e, tier);
     if pool_addresses.is_empty() {
         panic_with_error!(e, BackstopError::BadRequest);
     }
 
     let mut claimable = 0_i128;
     let mut pools = Map::<Address, ()>::new(e);
+    let mut lp_token: Option<Address> = None;
     for pool in pool_addresses.iter() {
         if pools.contains_key(pool.clone()) {
             panic_with_error!(e, BackstopError::BadRequest);
         }
         require_registered_pool(e, &pool);
+        require_emission_tier(e, tier, &pool);
+        let pool_token = tier_token(e, &pool, tier);
+        if lp_token
+            .as_ref()
+            .is_some_and(|expected| expected != &pool_token)
+        {
+            panic_with_error!(e, BackstopError::InvalidEmissionValue);
+        }
+        lp_token = Some(pool_token);
         pools.set(pool.clone(), ());
         claimable = checked_add(
             e,
@@ -225,7 +242,7 @@ mod tests {
         pools: &Vec<Address>,
         min_lp_tokens_out: &i128,
     ) -> i128 {
-        super::execute_claim(e, BackstopTier::BlndUsdc, from, pools, *min_lp_tokens_out).lp_amount
+        super::execute_claim(e, BackstopTier::SecondLoss, from, pools, *min_lp_tokens_out).lp_amount
     }
 
     mod storage {
@@ -233,15 +250,32 @@ mod tests {
 
         fn register_pool(e: &Env, pool: &Address) {
             let factory = crate::storage::get_pool_factory(e);
-            MockPoolFactoryClient::new(e, &factory).set_pool(pool);
+            MockPoolFactoryClient::new(e, &factory).set_pool_config(
+                pool,
+                &vec![
+                    e,
+                    mock_pool_factory::BackstopTierConfig {
+                        asset: mock_pool_factory::BackstopAsset::BlndXlm,
+                        take_rate_weight: 4,
+                    },
+                    mock_pool_factory::BackstopTierConfig {
+                        asset: mock_pool_factory::BackstopAsset::BlndUsdc,
+                        take_rate_weight: 3,
+                    },
+                    mock_pool_factory::BackstopTierConfig {
+                        asset: mock_pool_factory::BackstopAsset::Usdc,
+                        take_rate_weight: 2,
+                    },
+                ],
+            );
         }
 
         pub fn set_backstop_emis_data(e: &Env, pool: &Address, data: &BackstopEmissionData) {
-            crate::storage::set_backstop_emis_data(e, BackstopTier::BlndUsdc, pool, data);
+            crate::storage::set_backstop_emis_data(e, BackstopTier::SecondLoss, pool, data);
         }
 
         pub fn get_backstop_emis_data(e: &Env, pool: &Address) -> Option<BackstopEmissionData> {
-            crate::storage::get_backstop_emis_data(e, BackstopTier::BlndUsdc, pool)
+            crate::storage::get_backstop_emis_data(e, BackstopTier::SecondLoss, pool)
         }
 
         pub fn set_user_emis_data(
@@ -250,7 +284,7 @@ mod tests {
             user: &Address,
             data: &UserEmissionData,
         ) {
-            crate::storage::set_user_emis_data(e, BackstopTier::BlndUsdc, pool, user, data);
+            crate::storage::set_user_emis_data(e, BackstopTier::SecondLoss, pool, user, data);
         }
 
         pub fn get_user_emis_data(
@@ -258,22 +292,22 @@ mod tests {
             pool: &Address,
             user: &Address,
         ) -> Option<UserEmissionData> {
-            crate::storage::get_user_emis_data(e, BackstopTier::BlndUsdc, pool, user)
+            crate::storage::get_user_emis_data(e, BackstopTier::SecondLoss, pool, user)
         }
 
         pub fn set_pool_balance(e: &Env, pool: &Address, balance: &PoolBalance) {
             register_pool(e, pool);
-            crate::storage::set_pool_balance_for_tier(e, BackstopTier::BlndUsdc, pool, balance);
+            crate::storage::set_pool_balance_for_tier(e, BackstopTier::SecondLoss, pool, balance);
         }
 
         pub fn get_pool_balance(e: &Env, pool: &Address) -> PoolBalance {
-            crate::storage::get_pool_balance_for_tier(e, BackstopTier::BlndUsdc, pool)
+            crate::storage::get_pool_balance_for_tier(e, BackstopTier::SecondLoss, pool)
         }
 
         pub fn set_user_balance(e: &Env, pool: &Address, user: &Address, balance: &UserBalance) {
             crate::storage::set_user_balance_for_tier(
                 e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 pool,
                 user,
                 balance,
@@ -281,7 +315,7 @@ mod tests {
         }
 
         pub fn get_user_balance(e: &Env, pool: &Address, user: &Address) -> UserBalance {
-            crate::storage::get_user_balance_for_tier(e, BackstopTier::BlndUsdc, pool, user)
+            crate::storage::get_user_balance_for_tier(e, BackstopTier::SecondLoss, pool, user)
         }
 
         pub fn set_backstop_token(e: &Env, token: &Address) {
@@ -556,7 +590,7 @@ mod tests {
         let client = crate::BackstopClient::new(&e, &backstop_address);
         let claim_error = client
             .try_claim(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &samwise,
                 &vec![&e, pool_1_id.clone(), pool_2_id.clone()],
                 &6_5000000,

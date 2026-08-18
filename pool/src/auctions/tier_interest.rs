@@ -24,9 +24,6 @@ const MAX_INTEREST_LOT_ASSETS: u32 = 4;
 const INTEREST_AUCTION_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
 const INTEREST_STATE_TTL_THRESHOLD: u32 = 179 * ONE_DAY_LEDGERS;
 const INTEREST_STATE_TTL_BUMP: u32 = 180 * ONE_DAY_LEDGERS;
-const TAKE_RATE_WEIGHT_BLND_XLM: i128 = 4;
-const TAKE_RATE_WEIGHT_BLND_USDC: i128 = 3;
-const TAKE_RATE_WEIGHT_USDC: i128 = 2;
 
 pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -> TierAuctionData {
     if has_tier_auction(e, AuctionType::InterestAuction) {
@@ -66,33 +63,36 @@ pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -
     let pool_address = e.current_contract_address();
     let backstop_client = BackstopClient::new(e, &backstop);
     let pool_data = backstop_client.pool_data(&pool_address);
-    let take_rate_values = [
-        pool_data.blnd_usdc.value,
-        pool_data.blnd_xlm.value,
-        pool_data.usdc.value,
-    ];
     for (asset, distribution) in distributions.iter() {
-        let allocation = allocate_take_rate(e, distribution, take_rate_values);
+        let allocation = allocate_take_rate(e, distribution, &pool_data.tiers);
         apply_take_rate_allocation(e, &mut states, &asset, allocation);
     }
 
-    let mut tier_values = [0_i128; 3];
+    let mut tier_values = Vec::new(e);
+    for _ in 0..pool_data.tiers.len() {
+        tier_values.push_back(0_i128);
+    }
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
         let reserve = pool.load_reserve(e, &asset, false);
         let price = pool.load_price(e, &asset);
-        let values = [
-            value_reserve_amount(e, price, state.blnd_usdc, reserve.scalar, oracle_scalar),
-            value_reserve_amount(e, price, state.blnd_xlm, reserve.scalar, oracle_scalar),
-            value_reserve_amount(e, price, state.usdc, reserve.scalar, oracle_scalar),
-        ];
-        for index in 0..3 {
-            tier_values[index] = checked_add(e, tier_values[index], values[index]);
+        for index in 0..pool_data.tiers.len() {
+            let value = value_reserve_amount(
+                e,
+                price,
+                state.tier_amount(tier_from_index(e, index)),
+                reserve.scalar,
+                oracle_scalar,
+            );
+            tier_values.set(
+                index,
+                checked_add(e, tier_values.get(index).unwrap(), value),
+            );
         }
     }
 
-    let tier = select_interest_tier(e, interest_tier_cursor(e), tier_values);
-    let lot_value = tier_values[tier_index(tier) as usize];
+    let tier = select_interest_tier(e, interest_tier_cursor(e), &tier_values);
+    let lot_value = tier_values.get(tier_index(tier)).unwrap();
     let mut lot = Map::new(e);
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
@@ -121,9 +121,10 @@ pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -
         tier,
     };
     set_tier_auction(e, AuctionType::InterestAuction, &auction);
-    e.storage()
-        .instance()
-        .set(&InterestDataKey::Cursor, &((tier_index(tier) + 1) % 3));
+    e.storage().instance().set(
+        &InterestDataKey::Cursor,
+        &((tier_index(tier) + 1) % pool_data.tiers.len()),
+    );
     pool.store_cached_reserves(e);
     auction
 }
@@ -198,43 +199,43 @@ pub(crate) fn fill_interest_auction(
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 struct InterestReserveState {
-    blnd_usdc: i128,
-    blnd_xlm: i128,
     carry: i128,
-    usdc: i128,
+    first_loss: i128,
+    second_loss: i128,
+    third_loss: i128,
 }
 
 impl InterestReserveState {
     fn empty() -> Self {
         Self {
-            blnd_usdc: 0,
-            blnd_xlm: 0,
             carry: 0,
-            usdc: 0,
+            first_loss: 0,
+            second_loss: 0,
+            third_loss: 0,
         }
     }
 
     fn total(&self, e: &Env) -> i128 {
         checked_add(
             e,
-            checked_add(e, self.blnd_usdc, self.blnd_xlm),
-            checked_add(e, self.usdc, self.carry),
+            checked_add(e, self.first_loss, self.second_loss),
+            checked_add(e, self.third_loss, self.carry),
         )
     }
 
     fn tier_amount(&self, tier: super::BackstopTier) -> i128 {
         match tier {
-            super::BackstopTier::BlndUsdc => self.blnd_usdc,
-            super::BackstopTier::BlndXlm => self.blnd_xlm,
-            super::BackstopTier::Usdc => self.usdc,
+            super::BackstopTier::FirstLoss => self.first_loss,
+            super::BackstopTier::SecondLoss => self.second_loss,
+            super::BackstopTier::ThirdLoss => self.third_loss,
         }
     }
 
     fn set_tier_amount(&mut self, tier: super::BackstopTier, amount: i128) {
         match tier {
-            super::BackstopTier::BlndUsdc => self.blnd_usdc = amount,
-            super::BackstopTier::BlndXlm => self.blnd_xlm = amount,
-            super::BackstopTier::Usdc => self.usdc = amount,
+            super::BackstopTier::FirstLoss => self.first_loss = amount,
+            super::BackstopTier::SecondLoss => self.second_loss = amount,
+            super::BackstopTier::ThirdLoss => self.third_loss = amount,
         }
     }
 }
@@ -277,7 +278,7 @@ fn get_interest_reserve_state(e: &Env, asset: &Address) -> InterestReserveState 
 }
 
 fn set_interest_reserve_state(e: &Env, asset: &Address, state: &InterestReserveState) {
-    if state.blnd_usdc < 0 || state.blnd_xlm < 0 || state.usdc < 0 || state.carry < 0 {
+    if state.first_loss < 0 || state.second_loss < 0 || state.third_loss < 0 || state.carry < 0 {
         panic_with_error!(e, PoolError::OverflowError);
     }
     let key = InterestDataKey::Reserve(asset.clone());
@@ -301,38 +302,46 @@ fn consume_pending_interest_lot(
     }
 }
 
-fn allocate_take_rate(e: &Env, distribution: i128, values: [i128; 3]) -> InterestReserveState {
-    if distribution < 0 || values.iter().any(|value| *value < 0) {
+fn allocate_take_rate(
+    e: &Env,
+    distribution: i128,
+    tiers: &Vec<crate::dependencies::BackstopPoolTierData>,
+) -> InterestReserveState {
+    if distribution < 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
-
-    let blnd_usdc_weighted = checked_mul(e, values[0], TAKE_RATE_WEIGHT_BLND_USDC);
-    let blnd_xlm_weighted = checked_mul(e, values[1], TAKE_RATE_WEIGHT_BLND_XLM);
-    let usdc_weighted = checked_mul(e, values[2], TAKE_RATE_WEIGHT_USDC);
-    let denominator = checked_add(
-        e,
-        checked_add(e, blnd_usdc_weighted, blnd_xlm_weighted),
-        usdc_weighted,
-    );
+    let mut weighted_values = Vec::new(e);
+    let mut denominator = 0_i128;
+    for tier in tiers.iter() {
+        if tier.value < 0 || tier.take_rate_weight == 0 {
+            panic_with_error!(e, PoolError::InvalidLot);
+        }
+        let weighted = checked_mul(e, tier.value, i128::from(tier.take_rate_weight));
+        denominator = checked_add(e, denominator, weighted);
+        weighted_values.push_back(weighted);
+    }
     if denominator == 0 {
         return InterestReserveState {
-            blnd_usdc: 0,
-            blnd_xlm: 0,
             carry: distribution,
-            usdc: 0,
+            first_loss: 0,
+            second_loss: 0,
+            third_loss: 0,
         };
     }
-
-    let blnd_usdc = proportional_floor(e, distribution, blnd_usdc_weighted, denominator);
-    let blnd_xlm = proportional_floor(e, distribution, blnd_xlm_weighted, denominator);
-    let usdc = proportional_floor(e, distribution, usdc_weighted, denominator);
-    let allocated = checked_add(e, checked_add(e, blnd_usdc, blnd_xlm), usdc);
-    InterestReserveState {
-        blnd_usdc,
-        blnd_xlm,
-        carry: checked_sub(e, distribution, allocated),
-        usdc,
+    let mut result = InterestReserveState::empty();
+    let mut allocated = 0_i128;
+    for index in 0..weighted_values.len() {
+        let amount = proportional_floor(
+            e,
+            distribution,
+            weighted_values.get(index).unwrap(),
+            denominator,
+        );
+        result.set_tier_amount(tier_from_index(e, index), amount);
+        allocated = checked_add(e, allocated, amount);
     }
+    result.carry = checked_sub(e, distribution, allocated);
+    result
 }
 
 fn apply_take_rate_allocation(
@@ -342,9 +351,9 @@ fn apply_take_rate_allocation(
     allocation: InterestReserveState,
 ) {
     let mut state = states.get(asset.clone()).unwrap();
-    state.blnd_usdc = checked_add(e, state.blnd_usdc, allocation.blnd_usdc);
-    state.blnd_xlm = checked_add(e, state.blnd_xlm, allocation.blnd_xlm);
-    state.usdc = checked_add(e, state.usdc, allocation.usdc);
+    state.first_loss = checked_add(e, state.first_loss, allocation.first_loss);
+    state.second_loss = checked_add(e, state.second_loss, allocation.second_loss);
+    state.third_loss = checked_add(e, state.third_loss, allocation.third_loss);
     state.carry = allocation.carry;
     states.set(asset.clone(), state);
 }
@@ -356,28 +365,19 @@ fn build_interest_bid(
     tier: super::BackstopTier,
     lot_value: i128,
 ) -> (Address, i128) {
-    let (tokens, shares, value) = match tier {
-        super::BackstopTier::BlndUsdc => (
-            pool_data.blnd_usdc.tokens,
-            pool_data.blnd_usdc.shares,
-            pool_data.blnd_usdc.value,
-        ),
-        super::BackstopTier::BlndXlm => (
-            pool_data.blnd_xlm.tokens,
-            pool_data.blnd_xlm.shares,
-            pool_data.blnd_xlm.value,
-        ),
-        super::BackstopTier::Usdc => (
-            pool_data.usdc.tokens,
-            pool_data.usdc.shares,
-            pool_data.usdc.value,
-        ),
-    };
+    let tier_data = pool_data
+        .tiers
+        .get(tier_index(tier))
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot));
+    let tokens = tier_data.tokens;
+    let shares = tier_data.shares;
+    let value = tier_data.value;
     if lot_value <= 0 || tokens <= 0 || shares <= 0 || value <= 0 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
 
-    let bid_token = BackstopClient::new(e, backstop).backstop_token(&to_backstop_tier(tier));
+    let bid_token = BackstopClient::new(e, backstop)
+        .backstop_token(&to_backstop_tier(tier), &e.current_contract_address());
     if TokenClient::new(e, &bid_token).decimals() != 7 {
         panic_with_error!(e, PoolError::InvalidLot);
     }
@@ -486,19 +486,23 @@ fn interest_tier_cursor(e: &Env) -> u32 {
     cursor
 }
 
-fn tier_from_index(index: u32) -> super::BackstopTier {
+fn tier_from_index(e: &Env, index: u32) -> super::BackstopTier {
     match index {
-        0 => super::BackstopTier::BlndUsdc,
-        1 => super::BackstopTier::BlndXlm,
-        _ => super::BackstopTier::Usdc,
+        0 => super::BackstopTier::FirstLoss,
+        1 => super::BackstopTier::SecondLoss,
+        2 => super::BackstopTier::ThirdLoss,
+        _ => panic_with_error!(e, PoolError::InvalidLot),
     }
 }
 
-fn select_interest_tier(e: &Env, cursor: u32, tier_values: [i128; 3]) -> super::BackstopTier {
-    for offset in 0..3_u32 {
-        let index = (cursor + offset) % 3;
-        if tier_values[index as usize] >= INTEREST_AUCTION_MINIMUM_VALUE_USDC {
-            return tier_from_index(index);
+fn select_interest_tier(e: &Env, cursor: u32, tier_values: &Vec<i128>) -> super::BackstopTier {
+    if tier_values.is_empty() || cursor >= tier_values.len() {
+        panic_with_error!(e, PoolError::InvalidLot);
+    }
+    for offset in 0..tier_values.len() {
+        let index = (cursor + offset) % tier_values.len();
+        if tier_values.get(index).unwrap() >= INTEREST_AUCTION_MINIMUM_VALUE_USDC {
+            return tier_from_index(e, index);
         }
     }
     panic_with_error!(e, PoolError::NoInterestAuctionCapacity)
@@ -506,9 +510,9 @@ fn select_interest_tier(e: &Env, cursor: u32, tier_values: [i128; 3]) -> super::
 
 fn tier_index(tier: super::BackstopTier) -> u32 {
     match tier {
-        super::BackstopTier::BlndUsdc => 0,
-        super::BackstopTier::BlndXlm => 1,
-        super::BackstopTier::Usdc => 2,
+        super::BackstopTier::FirstLoss => 0,
+        super::BackstopTier::SecondLoss => 1,
+        super::BackstopTier::ThirdLoss => 2,
     }
 }
 
@@ -530,24 +534,45 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::testutils::Address as _;
+    use soroban_sdk::{testutils::Address as _, vec};
 
     use crate::testutils::create_pool;
 
     use super::*;
 
+    fn tier_data(e: &Env, value: i128, weight: u32) -> crate::dependencies::BackstopPoolTierData {
+        crate::dependencies::BackstopPoolTierData {
+            asset: crate::dependencies::BackstopContractAsset::BlndXlm,
+            blnd_emission_eligible: false,
+            take_rate_weight: weight,
+            token: Address::generate(e),
+            tokens: value,
+            shares: value,
+            value,
+        }
+    }
+
     #[test]
     fn take_rate_allocation_applies_pool_weights() {
         let e = Env::default();
-        let allocation = allocate_take_rate(&e, 90, [1, 1, 1]);
+        let allocation = allocate_take_rate(
+            &e,
+            90,
+            &vec![
+                &e,
+                tier_data(&e, 1, 4),
+                tier_data(&e, 1, 3),
+                tier_data(&e, 1, 2),
+            ],
+        );
 
         assert_eq!(
             allocation,
             InterestReserveState {
-                blnd_usdc: 30,
-                blnd_xlm: 40,
                 carry: 0,
-                usdc: 20,
+                first_loss: 40,
+                second_loss: 30,
+                third_loss: 20,
             }
         );
     }
@@ -555,10 +580,22 @@ mod tests {
     #[test]
     fn take_rate_allocation_conserves_rounding_remainder() {
         let e = Env::default();
-        let allocation = allocate_take_rate(&e, 10, [3, 2, 1]);
+        let allocation = allocate_take_rate(
+            &e,
+            10,
+            &vec![
+                &e,
+                tier_data(&e, 3, 1),
+                tier_data(&e, 2, 1),
+                tier_data(&e, 1, 1),
+            ],
+        );
 
         assert_eq!(
-            allocation.blnd_usdc + allocation.blnd_xlm + allocation.usdc + allocation.carry,
+            allocation.first_loss
+                + allocation.second_loss
+                + allocation.third_loss
+                + allocation.carry,
             10
         );
         assert_eq!(allocation.carry, 1);
@@ -571,13 +608,14 @@ mod tests {
             select_interest_tier(
                 &e,
                 0,
-                [
+                &vec![
+                    &e,
                     INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
                     INTEREST_AUCTION_MINIMUM_VALUE_USDC,
                     0,
                 ],
             ),
-            super::super::BackstopTier::BlndXlm
+            super::super::BackstopTier::SecondLoss
         );
     }
 
@@ -588,7 +626,8 @@ mod tests {
         select_interest_tier(
             &e,
             0,
-            [
+            &vec![
+                &e,
                 INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
                 INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
                 INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
@@ -608,7 +647,7 @@ mod tests {
                 lot: soroban_sdk::map![&e, (asset, 10)],
                 block: 1,
             },
-            tier: super::super::BackstopTier::BlndUsdc,
+            tier: super::super::BackstopTier::SecondLoss,
         };
         e.as_contract(&contract, || {
             set_tier_auction(&e, AuctionType::InterestAuction, &blnd_usdc_auction);

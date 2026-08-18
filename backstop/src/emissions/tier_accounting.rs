@@ -1,5 +1,5 @@
 use crate::{
-    backstop::BackstopTier,
+    backstop::{is_blnd_emission_tier, tier_for_token, BackstopTier},
     constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
     errors::BackstopError,
     migration,
@@ -19,7 +19,10 @@ pub(crate) fn pool_weight(e: &Env, pool: &Address) -> i128 {
     if migration::is_active(e) {
         pool_spot_blnd_emission_weight(e, pool)
     } else {
-        pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool)
+        let token = storage::get_blnd_usdc_token(e);
+        tier_for_token(e, pool, &token)
+            .map(|tier| pool_active_emission_assets(e, tier, pool))
+            .unwrap_or(0)
     }
 }
 
@@ -69,12 +72,12 @@ pub(crate) fn collect_weights(
         return (Vec::new(e), 0);
     }
     let (blnd_usdc_supply, blnd_usdc_reserve) = if use_underlying_blnd {
-        comet_composition(e, BackstopTier::BlndUsdc)
+        comet_composition(e, &storage::get_blnd_usdc_token(e))
     } else {
         (0, 0)
     };
     let (blnd_xlm_supply, blnd_xlm_reserve) = if use_underlying_blnd {
-        comet_composition(e, BackstopTier::BlndXlm)
+        comet_composition(e, &storage::get_blnd_xlm_token(e))
     } else {
         (0, 0)
     };
@@ -195,8 +198,12 @@ pub(crate) fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoing
 
 pub(crate) fn refresh_pool_ongoing_assets(e: &Env, pool: &Address) {
     let mut state = get_pool_ongoing_emissions(e, pool);
-    state.active_blnd_usdc = pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool);
-    state.active_blnd_xlm = pool_active_emission_assets(e, BackstopTier::BlndXlm, pool);
+    state.active_blnd_usdc = tier_for_token(e, pool, &storage::get_blnd_usdc_token(e))
+        .map(|tier| pool_active_emission_assets(e, tier, pool))
+        .unwrap_or(0);
+    state.active_blnd_xlm = tier_for_token(e, pool, &storage::get_blnd_xlm_token(e))
+        .map(|tier| pool_active_emission_assets(e, tier, pool))
+        .unwrap_or(0);
     set_pool_ongoing_emissions(e, pool, &state);
 }
 
@@ -205,8 +212,9 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
     tier: BackstopTier,
     user: &Address,
     pool: &Address,
+    emission_eligible: bool,
 ) {
-    if tier != BackstopTier::Usdc {
+    if emission_eligible {
         distributor::update_emissions(e, tier, pool, user);
     }
 }
@@ -214,16 +222,18 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
 /// Preserve the migration transition gate while inheriting v2's global
 /// weight-sampling behavior. Tier and user streams are checkpointed
 /// separately before their balances change.
-pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier) {
-    if tier != BackstopTier::Usdc {
+pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) -> bool {
+    let emission_eligible = is_blnd_emission_tier(e, pool, tier);
+    if emission_eligible {
         migration::require_weight_mutation_allowed(e);
     }
+    emission_eligible
 }
 
-pub(crate) fn finish_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) {
+pub(crate) fn finish_pool_weight_change(e: &Env, pool: &Address, emission_eligible: bool) {
     // Keep the cached active LP amount synchronized for the next global
     // allocation checkpoint. Tier stream indexes read canonical balances.
-    if tier != BackstopTier::Usdc {
+    if emission_eligible {
         refresh_pool_ongoing_assets(e, pool);
     }
 }

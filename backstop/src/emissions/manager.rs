@@ -1,5 +1,8 @@
 use crate::{
-    backstop::{build_pool_valuation, quote_activation, require_registered_pool, BackstopTier},
+    backstop::{
+        build_pool_valuation, quote_activation, require_registered_pool, tier_for_token,
+        BackstopTier,
+    },
     constants::MAX_RZ_SIZE,
     dependencies::EmitterClient,
     errors::BackstopError,
@@ -42,9 +45,6 @@ pub fn add_to_reward_zone(e: &Env, to_add: Address, to_remove: Option<Address>) 
         panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
     let entrant_weight = pool_weight(e, &to_add);
-    if entrant_weight <= 0 {
-        panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
-    }
     if !reward_zone.is_empty() || !migration::is_active(e) {
         require_distribute_run_recently(e);
     }
@@ -78,14 +78,11 @@ pub fn remove_from_reward_zone(e: &Env, to_remove: Address) {
     let remove_index = reward_zone
         .first_index_of(to_remove.clone())
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidRewardZoneEntry));
-    let removed_weight = pool_weight(e, &to_remove);
-    if removed_weight > 0 {
-        let valuation = build_pool_valuation(e, &to_remove);
-        if quote_activation(e, &valuation.active_values).meets_threshold {
-            panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
-        }
-        require_distribute_run_recently(e);
+    let valuation = build_pool_valuation(e, &to_remove);
+    if quote_activation(e, &valuation.active_values).meets_threshold {
+        panic_with_error!(e, BackstopError::InvalidRewardZoneEntry);
     }
+    require_distribute_run_recently(e);
 
     reward_zone.remove(remove_index);
     set_reward_zone(e, &reward_zone);
@@ -208,13 +205,18 @@ pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     if backstop_amount == 0 && pool_amount == 0 {
         return (0, 0);
     }
-    set_backstop_emission_eps(
+    set_token_emission_eps(
         e,
-        BackstopTier::BlndUsdc,
         pool,
+        &storage::get_blnd_usdc_token(e),
         pool_state.pending_blnd_usdc,
     );
-    set_backstop_emission_eps(e, BackstopTier::BlndXlm, pool, pool_state.pending_blnd_xlm);
+    set_token_emission_eps(
+        e,
+        pool,
+        &storage::get_blnd_xlm_token(e),
+        pool_state.pending_blnd_xlm,
+    );
     pool_state.pending_blnd_usdc = 0;
     pool_state.pending_blnd_xlm = 0;
     pool_state.accrued_pool = 0;
@@ -241,6 +243,15 @@ pub fn set_backstop_emission_eps(e: &Env, tier: BackstopTier, pool: &Address, pe
     distributor::set_backstop_emission_eps(e, tier, pool, pending);
 }
 
+fn set_token_emission_eps(e: &Env, pool: &Address, token: &Address, pending: i128) {
+    if pending == 0 {
+        return;
+    }
+    let tier = tier_for_token(e, pool, token)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidEmissionValue));
+    set_backstop_emission_eps(e, tier, pool, pending);
+}
+
 #[cfg(test)]
 mod tests {
     use mock_pool_factory::MockPoolFactoryClient;
@@ -253,12 +264,14 @@ mod tests {
     use crate::{
         backstop::{BackstopTier, PoolBalance, UserBalance},
         constants::{MAX_RZ_SIZE, SCALAR_7},
+        dependencies::{BackstopTierConfig, FactoryBackstopAsset},
         emissions::preview_user_ongoing_blnd,
         migration,
         storage::{self, OngoingEmissionState, PoolOngoingEmissions},
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_emitter,
             create_mock_pool, create_mock_pool_factory, create_token, create_usdc_token,
+            sync_mock_pool_factory_config,
         },
         BackstopClient,
     };
@@ -271,6 +284,7 @@ mod tests {
         blnd: Address,
         blnd_usdc: Address,
         blnd_xlm: Address,
+        config: Vec<BackstopTierConfig>,
         e: Env,
         factory: Address,
     }
@@ -294,11 +308,29 @@ mod tests {
                 storage::set_blnd_usdc_token(&e, &blnd_usdc);
                 storage::set_blnd_xlm_token(&e, &blnd_xlm);
             });
+            sync_mock_pool_factory_config(&e, &backstop);
             let (emitter, _) = create_emitter(&e, &backstop, &blnd_usdc, &blnd, 1_000);
             blnd_client.set_admin(&emitter);
             e.as_contract(&backstop, || {
                 migration::activate_for_test(&e, 1_000);
             });
+            let config = Vec::from_array(
+                &e,
+                [
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::BlndXlm,
+                        take_rate_weight: 4,
+                    },
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::BlndUsdc,
+                        take_rate_weight: 3,
+                    },
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::Usdc,
+                        take_rate_weight: 2,
+                    },
+                ],
+            );
 
             Self {
                 admin,
@@ -306,6 +338,7 @@ mod tests {
                 blnd,
                 blnd_usdc,
                 blnd_xlm,
+                config,
                 e,
                 factory,
             }
@@ -346,9 +379,10 @@ mod tests {
             let (pool, _) = create_mock_pool(&self.e, &self.backstop);
             MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
+                storage::set_pool_backstop_config(&self.e, &pool, &self.config);
                 storage::set_pool_balance_for_tier(
                     &self.e,
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     &pool,
                     &PoolBalance {
                         q4w: 0,
@@ -358,7 +392,7 @@ mod tests {
                 );
                 storage::set_pool_balance_for_tier(
                     &self.e,
-                    BackstopTier::BlndXlm,
+                    BackstopTier::FirstLoss,
                     &pool,
                     &PoolBalance {
                         q4w: 0,
@@ -449,35 +483,35 @@ mod tests {
         let active_shares = 10 * SCALAR_7;
         let allocation = 7 * SCALAR_7;
         let start = 1_000;
-        fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, active_shares);
+        fixture.user_position(BackstopTier::SecondLoss, &user, &pool, active_shares);
         fixture.e.as_contract(&fixture.backstop, || {
-            set_backstop_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
+            set_backstop_emission_eps(&fixture.e, BackstopTier::SecondLoss, &pool, allocation);
         });
         let stream = fixture.e.as_contract(&fixture.backstop, || {
-            storage::get_backstop_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool).unwrap()
+            storage::get_backstop_emis_data(&fixture.e, BackstopTier::SecondLoss, &pool).unwrap()
         });
         assert_eq!(stream.expiration, start + distributor::STREAM_SECONDS);
 
         let next_gulp = start + 24 * 60 * 60;
         fixture.e.ledger().set_timestamp(next_gulp);
         let first_day = fixture.e.as_contract(&fixture.backstop, || {
-            distributor::update_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            distributor::update_emissions(&fixture.e, BackstopTier::SecondLoss, &pool, &user)
         });
         assert!((SCALAR_7 - 1..=SCALAR_7).contains(&first_day.accrued));
 
         fixture.e.as_contract(&fixture.backstop, || {
-            set_backstop_emission_eps(&fixture.e, BackstopTier::BlndUsdc, &pool, allocation);
+            set_backstop_emission_eps(&fixture.e, BackstopTier::SecondLoss, &pool, allocation);
         });
         fixture
             .e
             .ledger()
             .set_timestamp(next_gulp + distributor::STREAM_SECONDS);
         let completed = fixture.e.as_contract(&fixture.backstop, || {
-            distributor::update_emissions(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            distributor::update_emissions(&fixture.e, BackstopTier::SecondLoss, &pool, &user)
         });
         assert_eq!(completed.accrued, 2 * allocation);
         let stream = fixture.e.as_contract(&fixture.backstop, || {
-            storage::get_backstop_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool).unwrap()
+            storage::get_backstop_emis_data(&fixture.e, BackstopTier::SecondLoss, &pool).unwrap()
         });
         assert_eq!(stream.schedule_carry, 0);
     }
@@ -566,13 +600,13 @@ mod tests {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
-        fixture.user_position(BackstopTier::BlndUsdc, &user, &pool, 10 * SCALAR_7);
+        fixture.user_position(BackstopTier::SecondLoss, &user, &pool, 10 * SCALAR_7);
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &user,
                 &vec![&fixture.e, pool.clone()],
             ),
@@ -585,11 +619,11 @@ mod tests {
             .set_timestamp(1_010 + distributor::STREAM_SECONDS);
 
         let stored_before = fixture.e.as_contract(&fixture.backstop, || {
-            storage::get_user_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            storage::get_user_emis_data(&fixture.e, BackstopTier::SecondLoss, &pool, &user)
         });
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &user,
                 &vec![&fixture.e, pool.clone()],
             ),
@@ -597,7 +631,7 @@ mod tests {
         );
         assert!(fixture.e.auths().is_empty());
         let stored_after = fixture.e.as_contract(&fixture.backstop, || {
-            storage::get_user_emis_data(&fixture.e, BackstopTier::BlndUsdc, &pool, &user)
+            storage::get_user_emis_data(&fixture.e, BackstopTier::SecondLoss, &pool, &user)
         });
         assert_eq!(stored_after, stored_before);
     }
@@ -609,12 +643,17 @@ mod tests {
         let blnd_usdc_user = Address::generate(&fixture.e);
         let blnd_xlm_user = Address::generate(&fixture.e);
         fixture.user_position(
-            BackstopTier::BlndUsdc,
+            BackstopTier::SecondLoss,
             &blnd_usdc_user,
             &pool,
             10 * SCALAR_7,
         );
-        fixture.user_position(BackstopTier::BlndXlm, &blnd_xlm_user, &pool, 10 * SCALAR_7);
+        fixture.user_position(
+            BackstopTier::FirstLoss,
+            &blnd_xlm_user,
+            &pool,
+            10 * SCALAR_7,
+        );
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
 
         fixture.e.ledger().set_timestamp(1_010);
@@ -626,7 +665,7 @@ mod tests {
             .set_timestamp(1_010 + distributor::STREAM_SECONDS);
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &blnd_usdc_user,
                 &vec![&fixture.e, pool.clone()],
             ),
@@ -634,7 +673,7 @@ mod tests {
         );
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &blnd_xlm_user,
                 &vec![&fixture.e, pool.clone()],
             ),
@@ -651,14 +690,14 @@ mod tests {
         let blnd_xlm_before =
             TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop);
         let blnd_usdc_out = fixture.client().claim(
-            &BackstopTier::BlndUsdc,
+            &BackstopTier::SecondLoss,
             &blnd_usdc_user,
             &vec![&fixture.e, pool.clone()],
             &0,
         );
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndUsdc,
+                &BackstopTier::SecondLoss,
                 &blnd_usdc_user,
                 &vec![&fixture.e, pool.clone()],
             ),
@@ -666,14 +705,14 @@ mod tests {
         );
         assert_eq!(
             fixture.claimable(
-                &BackstopTier::BlndXlm,
+                &BackstopTier::FirstLoss,
                 &blnd_xlm_user,
                 &vec![&fixture.e, pool.clone()],
             ),
             35_000_000
         );
         let blnd_xlm_out = fixture.client().claim(
-            &BackstopTier::BlndXlm,
+            &BackstopTier::FirstLoss,
             &blnd_xlm_user,
             &vec![&fixture.e, pool.clone()],
             &0,
@@ -702,8 +741,8 @@ mod tests {
         let first = fixture.pool(10 * SCALAR_7, 0);
         let second = fixture.pool(20 * SCALAR_7, 0);
         let user = Address::generate(&fixture.e);
-        fixture.user_position(BackstopTier::BlndUsdc, &user, &first, 10 * SCALAR_7);
-        fixture.user_position(BackstopTier::BlndUsdc, &user, &second, 20 * SCALAR_7);
+        fixture.user_position(BackstopTier::SecondLoss, &user, &first, 10 * SCALAR_7);
+        fixture.user_position(BackstopTier::SecondLoss, &user, &second, 20 * SCALAR_7);
         fixture.set_reward_zone(&vec![&fixture.e, first.clone(), second.clone()]);
 
         fixture.e.ledger().set_timestamp(1_010);
@@ -717,22 +756,22 @@ mod tests {
         fixture.client().distribute();
 
         let pool_addresses = vec![&fixture.e, first.clone(), second.clone()];
-        let aggregate_claim = fixture.claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses);
+        let aggregate_claim = fixture.claimable(&BackstopTier::SecondLoss, &user, &pool_addresses);
         assert!(aggregate_claim > 0);
         let first_shares = fixture
             .client()
-            .user_balance(&BackstopTier::BlndUsdc, &first, &user)
+            .user_balance(&BackstopTier::SecondLoss, &first, &user)
             .shares;
         let second_shares = fixture
             .client()
-            .user_balance(&BackstopTier::BlndUsdc, &second, &user)
+            .user_balance(&BackstopTier::SecondLoss, &second, &user)
             .shares;
         let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
         let lp_before = TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
 
         let lp_out = fixture
             .client()
-            .claim(&BackstopTier::BlndUsdc, &user, &pool_addresses, &0);
+            .claim(&BackstopTier::SecondLoss, &user, &pool_addresses, &0);
 
         assert!(lp_out > 0);
         assert_eq!(
@@ -744,20 +783,20 @@ mod tests {
             lp_before + lp_out
         );
         assert_eq!(
-            fixture.claimable(&BackstopTier::BlndUsdc, &user, &pool_addresses,),
+            fixture.claimable(&BackstopTier::SecondLoss, &user, &pool_addresses,),
             0
         );
         assert!(
             fixture
                 .client()
-                .user_balance(&BackstopTier::BlndUsdc, &first, &user)
+                .user_balance(&BackstopTier::SecondLoss, &first, &user)
                 .shares
                 > first_shares
         );
         assert!(
             fixture
                 .client()
-                .user_balance(&BackstopTier::BlndUsdc, &second, &user)
+                .user_balance(&BackstopTier::SecondLoss, &second, &user)
                 .shares
                 > second_shares
         );
@@ -773,7 +812,7 @@ mod tests {
         assert!(fixture
             .client()
             .try_claim(
-                &BackstopTier::Usdc,
+                &BackstopTier::ThirdLoss,
                 &user,
                 &vec![&fixture.e, pool.clone()],
                 &0,
@@ -890,7 +929,7 @@ mod tests {
         );
 
         fixture.client().deposit(
-            &crate::BackstopTier::BlndUsdc,
+            &crate::BackstopTier::SecondLoss,
             &fixture.admin,
             &pool,
             &SCALAR_7,
@@ -909,7 +948,7 @@ mod tests {
         fixture.e.as_contract(&fixture.backstop, || {
             storage::set_user_balance_for_tier(
                 &fixture.e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool,
                 &user,
                 &UserBalance {
@@ -923,9 +962,12 @@ mod tests {
         fixture.client().distribute();
 
         fixture.e.ledger().set_timestamp(1_016);
-        fixture
-            .client()
-            .queue_withdrawal(&crate::BackstopTier::BlndUsdc, &user, &pool, &SCALAR_7);
+        fixture.client().queue_withdrawal(
+            &crate::BackstopTier::SecondLoss,
+            &user,
+            &pool,
+            &SCALAR_7,
+        );
         assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, 9 * SCALAR_7);
     }
 }
@@ -935,16 +977,17 @@ mod reward_zone_tests {
     use mock_pool_factory::MockPoolFactoryClient;
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
-        Address, Env,
+        Address, Env, Vec,
     };
 
     use crate::{
         backstop::{BackstopTier, PoolBalance},
         constants::{ACTIVATION_THRESHOLD_USDC, MAX_RZ_SIZE, SCALAR_7},
+        dependencies::{BackstopTierConfig, FactoryBackstopAsset},
         storage,
         testutils::{
             create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
-            create_token, create_usdc_token,
+            create_token, create_usdc_token, sync_mock_pool_factory_config,
         },
         BackstopClient,
     };
@@ -953,6 +996,7 @@ mod reward_zone_tests {
 
     struct Fixture {
         backstop: Address,
+        config: Vec<BackstopTierConfig>,
         e: Env,
         factory: Address,
     }
@@ -974,8 +1018,27 @@ mod reward_zone_tests {
                 storage::set_blnd_usdc_token(&e, &blnd_usdc);
                 storage::set_blnd_xlm_token(&e, &blnd_xlm);
             });
+            sync_mock_pool_factory_config(&e, &backstop);
+            let config = Vec::from_array(
+                &e,
+                [
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::BlndXlm,
+                        take_rate_weight: 4,
+                    },
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::BlndUsdc,
+                        take_rate_weight: 3,
+                    },
+                    BackstopTierConfig {
+                        asset: FactoryBackstopAsset::Usdc,
+                        take_rate_weight: 2,
+                    },
+                ],
+            );
             Self {
                 backstop,
+                config,
                 e,
                 factory,
             }
@@ -989,9 +1052,10 @@ mod reward_zone_tests {
             let pool = Address::generate(&self.e);
             MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
+                storage::set_pool_backstop_config(&self.e, &pool, &self.config);
                 storage::set_pool_balance_for_tier(
                     &self.e,
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     &pool,
                     &PoolBalance {
                         q4w: queued_blnd_usdc,
@@ -1001,7 +1065,7 @@ mod reward_zone_tests {
                 );
                 storage::set_pool_balance_for_tier(
                     &self.e,
-                    BackstopTier::Usdc,
+                    BackstopTier::ThirdLoss,
                     &pool,
                     &PoolBalance {
                         q4w: 0,
@@ -1083,7 +1147,7 @@ mod reward_zone_tests {
             .try_add_reward(&equal, &Some(removed.clone()))
             .is_err());
 
-        fixture.set_pool_tier(&equal, BackstopTier::BlndUsdc, 2 * SCALAR_7, 0);
+        fixture.set_pool_tier(&equal, BackstopTier::SecondLoss, 2 * SCALAR_7, 0);
         client.add_reward(&equal, &Some(removed.clone()));
         assert_eq!(client.reward_zone().len(), MAX_RZ_SIZE);
         assert_eq!(client.reward_zone().first(), Some(equal));
@@ -1091,25 +1155,25 @@ mod reward_zone_tests {
     }
 
     #[test]
-    fn entry_requires_value_and_blnd_while_removal_uses_same_threshold() {
+    fn entry_requires_value_while_removal_uses_same_threshold() {
         let fixture = Fixture::create();
         let client = fixture.client();
-        let usdc_only = fixture.pool(0, 0, ACTIVATION_THRESHOLD_USDC);
-        assert!(client.try_add_reward(&usdc_only, &None).is_err());
+        let below_threshold = fixture.pool(0, 0, ACTIVATION_THRESHOLD_USDC - 1);
+        assert!(client.try_add_reward(&below_threshold, &None).is_err());
 
-        let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
-        client.add_reward(&pool, &None);
+        let usdc_only = fixture.pool(0, 0, ACTIVATION_THRESHOLD_USDC);
+        client.add_reward(&usdc_only, &None);
+        assert!(client.reward_zone().contains(&usdc_only));
         fixture.mark_distribution_started(fixture.e.ledger().timestamp());
-        fixture.set_pool_tier(&pool, BackstopTier::Usdc, ACTIVATION_THRESHOLD_USDC, 0);
-        assert!(client.try_remove_reward(&pool).is_err());
+        assert!(client.try_remove_reward(&usdc_only).is_err());
 
         fixture.set_pool_tier(
-            &pool,
-            BackstopTier::Usdc,
-            ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
+            &usdc_only,
+            BackstopTier::ThirdLoss,
+            ACTIVATION_THRESHOLD_USDC - 1,
             0,
         );
-        client.remove_reward(&pool);
+        client.remove_reward(&usdc_only);
         assert!(client.reward_zone().is_empty());
     }
 
@@ -1126,7 +1190,7 @@ mod reward_zone_tests {
 
         fixture.set_pool_tier(
             &first,
-            BackstopTier::Usdc,
+            BackstopTier::ThirdLoss,
             ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
             0,
         );
@@ -1155,7 +1219,7 @@ mod reward_zone_tests {
         client.add_reward(&pool, &None);
         fixture.set_pool_tier(
             &pool,
-            BackstopTier::Usdc,
+            BackstopTier::ThirdLoss,
             ACTIVATION_THRESHOLD_USDC - 2 * SCALAR_7,
             0,
         );
@@ -1165,16 +1229,26 @@ mod reward_zone_tests {
     }
 
     #[test]
-    fn zero_blnd_member_can_be_removed_without_a_fresh_checkpoint() {
+    fn zero_blnd_member_requires_threshold_failure_and_a_fresh_checkpoint() {
         let fixture = Fixture::create();
         let client = fixture.client();
         let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC);
         client.add_reward(&pool, &None);
-        fixture.set_pool_tier(&pool, BackstopTier::BlndUsdc, SCALAR_7, SCALAR_7);
+        fixture.set_pool_tier(&pool, BackstopTier::SecondLoss, SCALAR_7, SCALAR_7);
         fixture.mark_distribution_started(
             fixture.e.ledger().timestamp() - CHECKPOINT_MAX_AGE_SECONDS - 1,
         );
 
+        assert!(client.try_remove_reward(&pool).is_err());
+        fixture.set_pool_tier(
+            &pool,
+            BackstopTier::ThirdLoss,
+            ACTIVATION_THRESHOLD_USDC - SCALAR_7,
+            0,
+        );
+        assert!(client.try_remove_reward(&pool).is_err());
+
+        fixture.checkpoint(fixture.e.ledger().timestamp());
         client.remove_reward(&pool);
         assert!(client.reward_zone().is_empty());
     }

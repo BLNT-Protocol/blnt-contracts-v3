@@ -121,7 +121,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -194,7 +194,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -302,7 +302,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -392,7 +392,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -539,7 +539,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -624,7 +624,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,
@@ -709,7 +709,7 @@ mod tests {
             &frodo,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &frodo,
             &pool,
             &backstop_tokens,

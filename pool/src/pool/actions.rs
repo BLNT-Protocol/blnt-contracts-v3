@@ -1723,7 +1723,7 @@ mod tests {
         );
         backstop_token_client.approve(&samwise, &backstop_address, &i128::MAX, &1000000);
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_address,
             &95_2000000,
@@ -1801,7 +1801,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &bombadil,
             &pool_address,
             &(50 * SCALAR_7),

@@ -9,4 +9,4 @@ mod storage;
 
 pub use errors::PoolFactoryError;
 pub use pool_factory::*;
-pub use storage::{PoolFactoryDataKey, PoolInitMeta};
+pub use storage::{BackstopAsset, BackstopTierConfig, PoolFactoryDataKey, PoolInitMeta};

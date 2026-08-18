@@ -30,7 +30,7 @@ fn test_pool_inflation_attack() {
         &whale,
     );
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &whale,
         &fixture.pools[0].pool.address,
         &(50_000 * SCALAR_7),

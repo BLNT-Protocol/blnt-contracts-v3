@@ -1,12 +1,12 @@
 use crate::{
-    constants::{USDC_BUYBACK_HAIRCUT_DENOMINATOR, USDC_BUYBACK_HAIRCUT_NUMERATOR},
+    constants::{BUYBACK_HAIRCUT_DENOMINATOR, BUYBACK_HAIRCUT_NUMERATOR},
     contract::require_nonnegative,
     emissions, storage, BackstopError,
 };
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{require_is_from_pool_factory, tier_token, BackstopTier};
+use super::{require_is_from_pool_factory, tier_asset, tier_token, BackstopAsset, BackstopTier};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DonationResult {
@@ -29,15 +29,19 @@ pub fn execute_draw(
     if amount == 0 {
         return;
     }
-    emissions::prepare_pool_weight_change(e, tier);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
 
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
 
     pool_balance.withdraw(e, amount, 0);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, tier, pool_address);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
 
-    TokenClient::new(e, &tier_token(e, tier)).transfer(&e.current_contract_address(), to, &amount);
+    TokenClient::new(e, &tier_token(e, pool_address, tier)).transfer(
+        &e.current_contract_address(),
+        to,
+        &amount,
+    );
 }
 
 /// Perform a donation to one tier of a pool's backstop.
@@ -52,42 +56,44 @@ pub fn execute_donate(
     if from == pool_address || from == &e.current_contract_address() {
         panic_with_error!(e, &BackstopError::BadRequest)
     }
-    emissions::prepare_pool_weight_change(e, tier);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
 
     let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
     require_is_from_pool_factory(e, pool_address, pool_balance.shares);
 
-    TokenClient::new(e, &tier_token(e, tier)).transfer_from(
+    TokenClient::new(e, &tier_token(e, pool_address, tier)).transfer_from(
         &e.current_contract_address(),
         from,
         &e.current_contract_address(),
         &amount,
     );
 
-    let (credited, buyback, pending_buyback) = if tier == BackstopTier::Usdc {
-        let carry = storage::get_buyback_carry(e, pool_address);
-        let haircut_numerator = amount
-            .checked_mul(USDC_BUYBACK_HAIRCUT_NUMERATOR)
-            .and_then(|value| value.checked_add(carry))
-            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-        let buyback = haircut_numerator / USDC_BUYBACK_HAIRCUT_DENOMINATOR;
-        let next_carry = haircut_numerator % USDC_BUYBACK_HAIRCUT_DENOMINATOR;
-        let credited = amount
-            .checked_sub(buyback)
-            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-        let pending = storage::get_buyback_pending(e)
-            .checked_add(buyback)
-            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-        storage::set_buyback_carry(e, pool_address, next_carry);
-        storage::set_buyback_pending(e, pending);
-        (credited, buyback, pending)
-    } else {
-        (amount, 0, 0)
-    };
+    let asset = tier_asset(e, pool_address, tier);
+    let (credited, buyback, pending_buyback) =
+        if matches!(asset, BackstopAsset::Usdc | BackstopAsset::Xlm) {
+            let carry = storage::get_buyback_carry(e, pool_address, tier);
+            let haircut_numerator = amount
+                .checked_mul(BUYBACK_HAIRCUT_NUMERATOR)
+                .and_then(|value| value.checked_add(carry))
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+            let buyback = haircut_numerator / BUYBACK_HAIRCUT_DENOMINATOR;
+            let next_carry = haircut_numerator % BUYBACK_HAIRCUT_DENOMINATOR;
+            let credited = amount
+                .checked_sub(buyback)
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+            let pending = storage::get_buyback_pending(e, asset)
+                .checked_add(buyback)
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+            storage::set_buyback_carry(e, pool_address, tier, next_carry);
+            storage::set_buyback_pending(e, asset, pending);
+            (credited, buyback, pending)
+        } else {
+            (amount, 0, 0)
+        };
 
     pool_balance.deposit(credited, 0);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, tier, pool_address);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
 
     DonationResult {
         credited,
@@ -130,18 +136,25 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndXlm, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit(&e, BackstopTier::FirstLoss, &frodo, &pool_0_id, 25_0000000);
         });
 
         backstop_token_client.approve(&samwise, &backstop_id, &30_0000000, &e.ledger().sequence());
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, BackstopTier::BlndXlm, &samwise, &pool_0_id, 30_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::FirstLoss,
+                &samwise,
+                &pool_0_id,
+                30_0000000,
+            );
 
             let new_pool_balance =
-                storage::get_pool_balance_for_tier(&e, BackstopTier::BlndXlm, &pool_0_id);
+                storage::get_pool_balance_for_tier(&e, BackstopTier::FirstLoss, &pool_0_id);
             assert_eq!(new_pool_balance.shares, 25_0000000);
             assert_eq!(new_pool_balance.tokens, 55_0000000);
-            assert_eq!(storage::get_buyback_pending(&e), 0);
+            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Usdc), 0);
+            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Xlm), 0);
         });
     }
 
@@ -169,22 +182,28 @@ mod tests {
         );
 
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::Usdc, &depositor, &pool, 1_000);
+            execute_deposit(&e, BackstopTier::ThirdLoss, &depositor, &pool, 1_000);
 
-            let first = execute_donate(&e, BackstopTier::Usdc, &donor, &pool, 150);
+            let first = execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 150);
             assert_eq!(first.credited, 149);
             assert_eq!(first.buyback, 1);
             assert_eq!(first.pending_buyback, 1);
-            assert_eq!(storage::get_buyback_carry(&e, &pool), 50);
+            assert_eq!(
+                storage::get_buyback_carry(&e, &pool, BackstopTier::ThirdLoss),
+                50
+            );
 
-            let second = execute_donate(&e, BackstopTier::Usdc, &donor, &pool, 50);
+            let second = execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 50);
             assert_eq!(second.credited, 49);
             assert_eq!(second.buyback, 1);
             assert_eq!(second.pending_buyback, 2);
-            assert_eq!(storage::get_buyback_carry(&e, &pool), 0);
-            assert_eq!(storage::get_buyback_pending(&e), 2);
+            assert_eq!(
+                storage::get_buyback_carry(&e, &pool, BackstopTier::ThirdLoss),
+                0
+            );
+            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Usdc), 2);
 
-            let balance = storage::get_pool_balance_for_tier(&e, BackstopTier::Usdc, &pool);
+            let balance = storage::get_pool_balance_for_tier(&e, BackstopTier::ThirdLoss, &pool);
             assert_eq!(balance.shares, 1_000);
             assert_eq!(balance.tokens, 1_198);
         });
@@ -213,13 +232,13 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_0_id,
                 -30_0000000,
@@ -249,13 +268,13 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_0_id,
                 &pool_0_id,
                 10_0000000,
@@ -285,13 +304,13 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_id, || {
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &backstop_id,
                 &pool_0_id,
                 10_0000000,
@@ -319,7 +338,13 @@ mod tests {
         create_mock_pool_factory(&e, &backstop_id);
 
         e.as_contract(&backstop_id, || {
-            execute_donate(&e, BackstopTier::BlndUsdc, &samwise, &pool_0_id, 30_0000000);
+            execute_donate(
+                &e,
+                BackstopTier::SecondLoss,
+                &samwise,
+                &pool_0_id,
+                30_0000000,
+            );
         });
     }
 
@@ -343,11 +368,17 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 50_0000000);
         });
 
         e.as_contract(&backstop_address, || {
-            execute_draw(&e, BackstopTier::BlndUsdc, &pool_0_id, 30_0000000, &samwise);
+            execute_draw(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_0_id,
+                30_0000000,
+                &samwise,
+            );
 
             let new_pool_balance = storage::get_pool_balance(&e, &pool_0_id);
             assert_eq!(new_pool_balance.shares, 50_0000000);
@@ -380,12 +411,18 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_1_id, 50_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_1_id, 50_0000000);
         });
 
         e.as_contract(&backstop_id, || {
-            execute_draw(&e, BackstopTier::BlndUsdc, &pool_0_id, 51_0000000, &samwise);
+            execute_draw(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_0_id,
+                51_0000000,
+                &samwise,
+            );
         });
     }
 
@@ -410,13 +447,13 @@ mod tests {
 
         // initialize pool 0 with funds
         e.as_contract(&backstop_id, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_0_id, 50_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 50_0000000);
         });
 
         e.as_contract(&backstop_id, || {
             execute_draw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_0_id,
                 -30_0000000,
                 &samwise,

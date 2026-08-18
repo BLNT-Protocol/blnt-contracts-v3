@@ -251,7 +251,7 @@ impl ClaimBackstop {
         let pool_fixture = fixture.pools.get(0).unwrap();
         let user = fixture.users.get(user_index).unwrap();
         let r = fixture.backstop.try_claim(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &user,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,

@@ -268,13 +268,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -285,27 +285,37 @@ mod tests {
                 tokens: 200_0000000,
                 q4w: 0,
             };
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             let user_balance = UserBalance {
                 shares: 9_0000000,
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 82488886666666);
@@ -344,20 +354,25 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1);
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1);
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
             assert!(new_backstop_data.is_none());
             assert!(new_user_data.is_none());
         });
@@ -393,7 +408,7 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
@@ -408,21 +423,26 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 345882220000000);
@@ -461,7 +481,7 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
@@ -476,21 +496,26 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 345660000000000);
@@ -534,13 +559,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -560,21 +585,26 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 85033216563573);
@@ -618,13 +648,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -644,21 +674,26 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, backstop_emissions_data.index);
@@ -702,13 +737,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -719,27 +754,37 @@ mod tests {
                 tokens: 200_0000000,
                 q4w: 0,
             };
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             let user_balance = UserBalance {
                 shares: 9_0000000,
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            let result = claim_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            let result = claim_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
             let new_backstop_data =
-                storage::get_backstop_emis_data(&e, BackstopTier::BlndUsdc, &pool_1)
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
                     .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, BackstopTier::BlndUsdc, &pool_1, &samwise)
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
                     .unwrap_optimized();
             assert_eq!(result, 7_4140001);
             assert_eq!(new_backstop_data.last_time, block_timestamp);
@@ -788,13 +833,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -814,15 +859,20 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 
@@ -862,13 +912,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -884,15 +934,20 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 
@@ -932,13 +987,13 @@ mod tests {
         e.as_contract(&backstop_id, || {
             storage::set_backstop_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &backstop_emissions_data,
             );
             storage::set_user_emis_data(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_emissions_data,
@@ -954,15 +1009,20 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            storage::set_pool_balance_for_tier(&e, BackstopTier::BlndUsdc, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             storage::set_user_balance_for_tier(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_1,
                 &samwise,
                 &user_balance,
             );
-            update_emissions(&e, BackstopTier::BlndUsdc, &pool_1, &samwise);
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 }

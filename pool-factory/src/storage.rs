@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env, Symbol};
+use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env, Symbol, Vec};
 
 /********** Ledger Thresholds **********/
 
@@ -14,6 +14,27 @@ const LEDGER_BUMP_USER: u32 = LEDGER_THRESHOLD_USER + 20 * ONE_DAY_LEDGERS; // ~
 #[contracttype]
 pub enum PoolFactoryDataKey {
     Contracts(Address),
+    BackstopConfig(Address),
+}
+
+/// One of the four canonical assets accepted by the v3 backstop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopAsset {
+    BlndXlm,
+    BlndUsdc,
+    Usdc,
+    Xlm,
+}
+
+/// One immutable loss-waterfall position configured for a pool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BackstopTierConfig {
+    /// Canonical asset deposited into this waterfall position.
+    pub asset: BackstopAsset,
+    /// Relative take-rate allocation weight from 1 through 10.
+    pub take_rate_weight: u32,
 }
 
 #[derive(Clone)]
@@ -73,7 +94,7 @@ pub fn is_deployed(e: &Env, contract_id: &Address) -> bool {
 ///
 /// ### Arguments
 /// * `contract_id` - The contract_id that was deployed by the factory
-pub fn set_deployed(e: &Env, contract_id: &Address) {
+pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<BackstopTierConfig>) {
     let key = PoolFactoryDataKey::Contracts(contract_id.clone());
     e.storage()
         .persistent()
@@ -81,4 +102,27 @@ pub fn set_deployed(e: &Env, contract_id: &Address) {
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+
+    let config_key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    e.storage().persistent().set(&config_key, backstop_config);
+    e.storage()
+        .persistent()
+        .extend_ttl(&config_key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/// Fetch one deployed pool's immutable backstop configuration.
+pub fn get_backstop_config(e: &Env, contract_id: &Address) -> Vec<BackstopTierConfig> {
+    if !is_deployed(e, contract_id) {
+        return Vec::new(e);
+    }
+    let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    let config = e
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(e));
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+    config
 }

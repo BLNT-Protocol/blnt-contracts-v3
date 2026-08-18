@@ -45,29 +45,36 @@ This section replaces `V2-BACKSTOP-001`'s single token and extends
 
 ### 3.1 Asset configuration
 
-The candidate immutably binds exactly these three seven-decimal assets:
+At deployment, each pool operator supplies an ordered list of one to three
+`BackstopTierConfig` values. Entry order maps to `FirstLoss`, `SecondLoss`, and
+`ThirdLoss`; omitted trailing positions do not exist. Each entry selects one
+unique asset from canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM and one
+integer take-rate weight from 1 through 10. Weights MUST strictly decrease in
+loss-waterfall order. The factory stores this immutable configuration with the
+pool registration, and the backstop verifies and caches it before accepting the
+pool.
 
-| Tier | Asset | USDC valuation | Ongoing BLND weight |
-| ---: | --- | --- | --- |
-| 1 | BLND:XLM 80:20 LP | Comet-implied valuation | Yes |
-| 2 | BLND:USDC 80:20 LP | Comet-implied valuation | Yes |
-| 3 | Plain USDC | One-for-one | No |
+The candidate also immutably binds the canonical BLND:USDC and BLND:XLM 80:20
+Comets and canonical BLND, USDC, and XLM assets. No other backstop asset is
+accepted and no backstop tier has an oracle configuration.
 
-All three count equally per verified USDC for activation, participate in the
-fixed-weight take-rate policy, and absorb loss in table order without an
-asset-specific activation or loss haircut or concentration limit. Plain-USDC
-interest proceeds have the buy-and-burn haircut specified in Section 5.3. No
-other tier is supported. Eligibility follows Section 3.3.
+Every tier counts equally per verified USDC for activation, participates in
+take-rate allocation using its configured weight, and absorbs loss in
+configured order without a protocol-level haircut or concentration limit.
+Only exact canonical BLND:USDC and BLND:XLM Comet tiers are BLND-emission
+eligible. A pool with neither receives no BLND emissions. Plain-USDC and
+plain-XLM interest proceeds have the buy-and-burn haircut in Section 5.3.
 
 ### 3.2 Position accounting
 
-Each pool-tier independently applies `V2-BACKSTOP-001` and
+Each configured pool-tier independently applies `V2-BACKSTOP-001` and
 `V2-BACKSTOP-002`; every deposit additionally verifies the pool through the
 immutable factory before custody changes. Public share operations and
-pool-authorized `donate` select a `BackstopTier`. The consolidated `pool_data`
-returns each tier's tokens, shares, and USDC value plus aggregate active value
-and value-weighted Q4W; active BLND, queued value, emission data, and migration
-data remain internal.
+pool-authorized `donate` select a configured `BackstopTier`. The consolidated
+`pool_data` returns an ordered tier vector containing asset identity, token,
+configured weight, emission eligibility, tokens, shares, and USDC-equivalent
+value, plus aggregate active value and value-weighted Q4W. Active BLND, queued
+value, emission data, and migration data remain internal.
 
 As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
@@ -78,7 +85,7 @@ an exchange rate directly.
 ### 3.3 Withdrawals
 
 Each tier independently applies `V2-BACKSTOP-003`, except that its 20-entry
-limit is aggregate per user and pool across all three tier queues.
+limit is aggregate per user and pool across all configured tier queues.
 
 Capital state has these canonical policy effects:
 
@@ -95,13 +102,11 @@ supplier default clears it atomically.
 
 ## 4. Pool activation — **Replaced**
 
-This replaces `V2-BACKSTOP-004`. In seven-decimal USDC units:
+This replaces `V2-BACKSTOP-004`. For configured tiers (i=1\ldots n), in
+seven-decimal USDC units:
 
 \[
-E_p =
-V_{p,\mathrm{BLND:XLM}} +
-V_{p,\mathrm{BLND:USDC}} +
-V_{p,\mathrm{USDC}}
+E_p=\sum_{i=1}^{n}V_{p,i},\qquad 1\le n\le3.
 \]
 
 Each \(V_{p,i}\) is eligible pool-attributed value. Every verified USDC has
@@ -128,8 +133,8 @@ V_u(A_u)=\left\lfloor A_u\frac{5U}{S_u}\right\rfloor
 \]
 
 The same Comet implies a BLND price of \(4U/B_u\). Let the BLND:XLM Comet hold
-BLND reserve \(B_x\) and LP supply \(S_x\). Its implied total USDC value and
-the value of BLND:XLM LP amount \(A_x\) are:
+BLND reserve \(B_x\), XLM reserve \(X\), and LP supply \(S_x\). Its implied
+total USDC value and the value of BLND:XLM LP amount \(A_x\) are:
 
 \[
 T_x=\left\lfloor\frac{5B_xU}{B_u}\right\rfloor,
@@ -139,22 +144,34 @@ V_x(A_x)=\left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
 
 For either Comet, underlying BLND is
 \(B(A)=\lfloor AR_b/S\rfloor\). Every quote rechecks positive LP supply and
-reserves and the immutable weights. Zero LP needs no quote. Plain USDC is
-valued one-for-one, and active and queued LP amounts are quoted separately.
+reserves and the immutable weights. Canonical USDC is valued one-for-one. The
+same two Comets imply the USDC-equivalent value of plain-XLM amount \(A\):
+
+\[
+V_{XLM}(A)=\left\lfloor
+A\frac{UB_x}{B_uX}
+\right\rfloor.
+\]
+
+Active and queued amounts are quoted separately. A zero amount has zero value
+without reading an otherwise unnecessary Comet. No backstop valuation uses a
+pool oracle, separate oracle, or caller-supplied price.
 
 Each operation MUST obtain all backstop values it consumes from one canonical
 snapshot. A verified zero is the only skippable result; unavailable,
 incompatible, negative, inconsistent, or overflowing inputs fail atomically.
 
-These values deliberately reflect current Comet composition rather than an
-external fair-market price. Swaps, one-sided liquidity changes, donations, and
-issuer deauthorization effects can change them; BLND:USDC remains the USDC
-anchor. The protocol does not automatically pause activation, emissions,
-take-rate allocation, or auctions based on issuer authorization state.
+Canonical LP values deliberately reflect current Comet composition rather
+than an external fair-market price. Swaps, one-sided liquidity changes,
+donations, and issuer deauthorization effects can change them; BLND:USDC
+remains the USDC and BLND-price anchor. The protocol does not automatically
+pause activation, emissions, take-rate allocation, or auctions based on issuer
+authorization state.
 
 The consumers are activation, status, reward-zone membership, take-rate
 allocation, auction sizing, and supplier-loss eligibility. Emission weight
-instead uses the same-invocation underlying-BLND composition in Section 6.2.
+instead recognizes only canonical BLND LPs and uses their same-invocation
+underlying-BLND composition under Section 6.2.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -202,8 +219,8 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
     vector MUST exactly match the canonical debt-asset or selected-tier-token
     set, respectively.
   - For interest, `bid = []` means no caller assertion and a nonempty `bid` MUST
-    exactly match the selected-tier-token set. `lot` remains a required,
-    nonempty reserve-asset input; `lot = []` is invalid.
+    contain exactly the selected tier token. `lot` remains a required, nonempty
+    reserve-asset input; `lot = []` is invalid.
   Assertions are order-independent and MUST NOT influence selection, amounts,
   or pricing. A mismatch fails atomically.
 
@@ -248,16 +265,12 @@ liabilities, pending credit, balances, or tier assets.
 
 ### 5.2 Bad-debt waterfall
 
-1. BLND:XLM LP.
-2. BLND:USDC LP.
-3. Plain USDC.
-4. Pool suppliers.
+One auction sells the first configured tier with positive eligible assets and
+value under Section 4. The configured `FirstLoss`, `SecondLoss`, and optional
+`ThirdLoss` order is immutable. Supplier loss begins only after every
+configured tier has no usable value.
 
-One auction sells the first tier in this order with positive eligible assets
-and value under Section 4. Supplier loss begins only after every tier has no
-usable value.
-
-The auction targets 120% of oracle-valued debt. Only the pool may authorize a
+The auction targets 120% of reserve-oracle-valued debt. Only the pool may authorize a
 lot, which is the smaller of available tier tokens and the target amount. A
 partial LP amount rounds up and requires linear per-share valuation so it
 cannot underfill. Loss passed onward MUST NOT be understated.
@@ -295,8 +308,8 @@ and recomputes withdrawal eligibility atomically.
 
 ### 5.3 Take-rate allocation — **Replaced**
 
-Tier weights are `4:3:2` in loss order: BLND:XLM, BLND:USDC, and plain USDC.
-For reserve credit \(D\), eligible value \(R_i\), and tier weight \(w_i\):
+For reserve credit \(D\), eligible value \(R_i\), and the pool's immutable
+tier weight \(w_i\):
 
 \[
 D_i=\left\lfloor
@@ -305,14 +318,14 @@ D_i=\left\lfloor
 \qquad C'=D+C-\sum_iD_i.
 \]
 
-A zero-value tier is omitted. Each pool and reserve stores the three resulting
-pending amounts and its Section 1.1 carry. Section 3.3 determines eligible
+A zero-value tier is omitted. Each pool and reserve stores one pending amount
+per configured tier and its Section 1.1 carry. Section 3.3 determines eligible
 value, including capital selected for bad debt until drawn.
 
 Persistent per-reserve tier amounts and carry are a direct-ledger client
 boundary; reads do not renew TTL and report only live RPC entries. The pool
-applies `4:3:2` using canonical `pool_data`; the backstop exposes no weighting
-entry point.
+applies the immutable weights returned by canonical `pool_data`; the backstop
+exposes no mutable weighting entry point.
 
 With no active interest auction, any caller may invoke
 `new_auction(2, backstop, [], reserve_assets, 100)` with one to
@@ -320,14 +333,14 @@ With no active interest auction, any caller may invoke
 this atomic pipeline:
 
 `bid = []` accepts whichever tier the canonical cursor and value checks
-select. A caller MAY instead provide the exact expected tier-token set; a
-mismatch fails atomically and does not redirect the auction.
+select. A caller MAY instead provide the exact expected selected-tier token.
+A mismatch fails atomically and does not redirect the auction.
 
 | Phase | Required behavior |
 | --- | --- |
 | Checkpoint | Accrue and persist the supplied reserves. Omitted reserves remain pending or uncheckpointed. |
 | Allocate | Use one canonical `pool_data` snapshot and the formula above to move new credit into persistent tier amounts. |
-| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic tier cursor, choose the first tier meeting the inclusive 200-USDC minimum. |
+| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first tier meeting the inclusive 200-USDC minimum. |
 | Create | Store the selected persistent amounts in a next-ledger auction, privately bind its tier, and advance the cursor. No second interest auction may start before fill or stale deletion. |
 | Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically transfer and account for the realized bid under the selected tier's rules below. |
 | Recover | Stale deletion releases the selection; unfilled amounts remain in their original pending and credit accumulators. |
@@ -339,12 +352,12 @@ operations remain available. A partial fill releases its base-lot discount,
 and only reserve assets actually transferred reduce pending amounts and
 accrued credit. BLND:XLM and BLND:USDC bids are donated in full. Donation mints
 no shares or user claim but appreciates active and queued shares and assumes
-the tier's protocol roles. The `4:3:2` ratio governs credit allocation, not
+the tier's protocol roles. Configured weights govern credit allocation, not
 necessarily the timing of realized donations.
 
-For each plain-USDC bid \(B\), the backstop transfers the full amount from the
-filler but credits only 99% to the pool tier. It carries fractional haircut
-dust per pool in raw seven-decimal units:
+For each plain-USDC or plain-XLM bid \(B\), the backstop transfers the full
+amount from the filler but credits only 99% to the pool tier. It carries
+fractional haircut dust per pool-tier in raw seven-decimal units:
 
 \[
 H=\left\lfloor\frac{B+C_h}{100}\right\rfloor,
@@ -352,20 +365,20 @@ H=\left\lfloor\frac{B+C_h}{100}\right\rfloor,
 \qquad B_{\mathrm{tier}}=B-H.
 \]
 
-The haircut \(H\) joins a global pending-USDC buyback balance. Pending USDC
-mints no shares, has no activation, loss, take-rate, or emission role, and is
-not created by an unsolicited token transfer.
+The haircut \(H\) joins the global pending balance for its asset. Pending
+USDC or XLM mints no shares, has no activation, loss, take-rate, or emission
+role, and is not created by an unsolicited token transfer.
 
-Any caller MAY invoke `buy_and_burn()`. One call processes
-\(X=\min(P,\lfloor R_{USDC}/200\rfloor)\), where \(P\) is pending USDC and
-\(R_{USDC}\) is the canonical BLND:USDC Comet's current USDC reserve. The
-backstop reads that Comet's fee-inclusive USDC-per-BLND spot price \(p\), sets
+Any caller MAY invoke `buy_and_burn(asset)` for USDC or XLM. One call processes
+\(X=\min(P,\lfloor R/200\rfloor)\), where \(P\) is that asset's pending balance
+and \(R\) is its reserve in the matching canonical BLND Comet. The backstop
+reads that Comet's fee-inclusive paired-asset-per-BLND spot price \(p\), sets
 the maximum final price to \(\lceil1.01p\rceil\), and requires at least
 \(\lfloor X10^7/p_{max}\rfloor\) BLND from an exact-input swap. It verifies the
 exact USDC decrease, exact BLND receipt, reported final price, and exact BLND
-burn before reducing pending USDC. A zero-work call returns zero. Any swap,
+burn before reducing pending balance. A zero-work call returns zero. Any swap,
 authorization, balance, or burn failure rolls back without changing pending
-USDC or the prior interest-auction settlement. No oracle or TWAP supplements
+balance or the prior interest-auction settlement. No oracle or TWAP supplements
 the canonical Comet spot; the reserve-fraction limit bounds one call's
 exposure to current-spot manipulation.
 
@@ -387,11 +400,12 @@ initial-drop ceiling. V3 adds the following migration constraints:
   emitter recognizes this backstop and the observation occurs within the
   attested grace period. The deployed emitter's deleted queue is why prior
   attestation is required.
-- Until activation succeeds after emitter replacement, BLND-bearing tier
-  mutations and reward-zone edits fail closed; plain-USDC operations remain
+- Until activation succeeds after emitter replacement, canonical BLND LP tier
+  mutations and reward-zone edits fail closed; other tier operations remain
   available.
-- Backfill retains v2 pool weight, but only BLND:USDC receives the 70%
-  backstop tranche; BLND:XLM and plain USDC are ineligible.
+- Backfill retains v2 pool weight, but only the canonical BLND:USDC tier,
+  wherever configured, receives the 70% backstop tranche; every other tier is
+  ineligible.
 - `drop` records and verifies the exact scheduled backfill received by the
   backstop. Positive backstop-tier claims remain disabled until the complete
   schedule is funded. BLND:USDC claims and the 30% pool tranche then use their
@@ -413,18 +427,18 @@ balance increase.
 
 The inherited reward zone changes as follows:
 
-- Entry requires Section 4's activation threshold and positive eligible
-  underlying BLND.
-- Ordinary removal requires failure of Section 4's activation threshold.
-- A zero-underlying-BLND member may be removed regardless of activation value
-  and without a checkpoint.
+- Entry requires Section 4's activation threshold. A pool with no eligible
+  underlying BLND may occupy an open slot but receives no BLND allocation.
+- Standalone removal requires failure of Section 4's activation threshold,
+  regardless of eligible underlying BLND.
 - Full-zone replacement compares eligible underlying BLND and remains strict.
-- Before distribution begins, entry and ordinary removal require no
+- Before distribution begins, entry and standalone removal require no
   checkpoint; afterward they retain the inherited one-hour checkpoint.
 
-A plain-USDC-only pool may activate but cannot enter or earn without positive
-active, nonqueued BLND-bearing capital. For active LP amount \(A_t\), current
-Comet BLND reserve \(R_t\), and LP supply \(S_t\), post-activation weight is:
+A pool without either canonical BLND LP may activate and enter an open
+reward-zone slot but cannot earn backstop BLND. For active canonical LP amount \(A_t\),
+current Comet BLND reserve \(R_t\), and LP supply \(S_t\), post-activation
+weight is:
 
 \[
 B_t(A_t)=\left\lfloor\frac{A_tR_t}{S_t}\right\rfloor,
@@ -432,10 +446,12 @@ B_t(A_t)=\left\lfloor\frac{A_tR_t}{S_t}\right\rfloor,
 B_p=B_{p,\mathrm{BLND:USDC}}+B_{p,\mathrm{BLND:XLM}}.
 \]
 
-Plain USDC, paired USDC/XLM, queued shares, and raw transfers contribute no
-weight. Nonpositive supply, negative inputs, or aggregate accounted LP greater
-than supply fails atomically. Composition is read in the same invocation;
-checkpoint manipulation exposure is accepted and MUST be disclosed.
+Plain USDC, plain XLM, paired USDC/XLM, queued shares, and raw transfers
+contribute no weight. A canonical LP earns regardless of its configured tier
+position. Nonpositive supply, negative inputs, or aggregate accounted LP
+greater than supply fails atomically. Composition is read in the same
+invocation; checkpoint manipulation exposure is accepted and MUST be
+disclosed.
 
 All stages are bounded and use Section 1.1 at the stated scope:
 
@@ -443,7 +459,7 @@ All stages are bounded and use Section 1.1 at the stated scope:
 | --- | --- |
 | Protocol split | Split emitted BLND `7:3` between backstop and pool tranches; retain global split carry. |
 | Pool allocation | Allocate both tranches across reward-zone pools by \(B_p\); retain separate global backstop and pool carries. |
-| Tier allocation | Split each pool's backstop tranche by its two \(B_{p,t}\) values; retain pool-local tier carry and fix the result as pending BLND. Later composition cannot redirect it. |
+| Tier allocation | Split each pool's backstop tranche between its configured canonical BLND:USDC and BLND:XLM tiers by their \(B_{p,t}\) values; retain pool-local tier carry and fix the result as pending BLND. Later composition cannot redirect it. |
 | Pool gulp | At most once per 24 hours, checkpoint both tier streams, replace each with a seven-day stream over pending plus its exact unstreamed predecessor, and grant the pool tranche through the inherited allowance. |
 | Tier index | Advance each \(10^{14}\)-scaled cumulative index over active, nonqueued tier shares, retaining pool-tier schedule and index carries. No active shares means no depositor credit. |
 | User index | Accrue each user from tier shares and index change, retaining user-tier carry. |
@@ -477,7 +493,7 @@ loss changes future weight. Selection, discount, stale release, composition,
 membership, and status never rewrite prior allocation.
 
 The inherited client estimate applies per tier but omits internal carries;
-only `claim` is authoritative. Plain USDC is ineligible.
+only `claim` is authoritative. Plain-USDC and plain-XLM tiers are ineligible.
 
 The inherited owner-authorized claim selects one eligible tier and a nonempty
 unique pool list. It aggregates that tier's accrual, performs one single-sided
@@ -485,9 +501,9 @@ BLND Comet deposit, and credits the resulting LP proportionally to the same
 owner and pool positions using v2 rounding. Exact BLND and LP balance deltas
 govern settlement; zero output or a mismatch fails atomically. A successful
 claim increments the backstop-claimed BLND counter. Compounded shares are
-active but receive no retroactive credit. BLND:USDC and BLND:XLM compound only
-into themselves and are claimed separately; plain USDC and the 30% pool
-tranche are ineligible.
+active but receive no retroactive credit. Canonical BLND:USDC and BLND:XLM
+compound only into themselves and are claimed separately, regardless of tier
+position; other tiers and the 30% pool tranche are ineligible.
 
 ### 6.3 Pool supply and borrow emissions — **Extended**
 

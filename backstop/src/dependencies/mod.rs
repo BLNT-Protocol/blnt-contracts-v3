@@ -1,5 +1,7 @@
 mod pool_factory;
-pub use pool_factory::PoolFactoryClient;
+pub use pool_factory::{
+    BackstopAsset as FactoryBackstopAsset, BackstopTierConfig, PoolFactoryClient,
+};
 
 mod comet;
 pub use comet::Client as CometClient;

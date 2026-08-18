@@ -71,7 +71,7 @@ fn test_pool_interest() {
         &whale,
     );
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &whale,
         &pool_client.address,
         &(50_000 * SCALAR_7),

@@ -40,9 +40,10 @@ fn test_wasm_prepares_and_releases_bad_debt_lot() {
         &vec![&fixture.env],
         &100,
     );
-    let blnd_usdc_token = fixture
-        .backstop
-        .backstop_token(&BackstopContractTier::BlndUsdc);
+    let blnd_usdc_token = fixture.backstop.backstop_token(
+        &BackstopContractTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     assert!(auction.lot.get(blnd_usdc_token).unwrap() > 0);
     assert!(!pool_fixture
         .pool
@@ -94,16 +95,19 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         &vec![&fixture.env],
         &100,
     );
-    let blnd_usdc_token = fixture
-        .backstop
-        .backstop_token(&BackstopContractTier::BlndUsdc);
+    let blnd_usdc_token = fixture.backstop.backstop_token(
+        &BackstopContractTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     let base_lot_amount = auction.lot.get(blnd_usdc_token.clone()).unwrap();
     let filler_positions_before = pool_fixture.pool.get_positions(&filler);
     let filler_lp_before = fixture.lp.balance(&filler);
     let tier_assets_before = fixture
         .backstop
         .pool_data(&pool_fixture.pool.address)
-        .blnd_usdc
+        .tiers
+        .get(1)
+        .unwrap()
         .tokens;
 
     fixture
@@ -163,7 +167,9 @@ fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
         fixture
             .backstop
             .pool_data(&pool_fixture.pool.address)
-            .blnd_usdc
+            .tiers
+            .get(1)
+            .unwrap()
             .tokens,
         tier_assets_before - first_lot
     );
@@ -281,7 +287,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
 
     fixture.backstop.distribute();
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -289,7 +295,7 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     fixture.jump(17 * 24 * 60 * 60 + 1);
     fixture.backstop.distribute();
     fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -299,14 +305,16 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
         fixture
             .backstop
             .pool_data(&pool_fixture.pool.address)
-            .blnd_usdc
+            .tiers
+            .get(1)
+            .unwrap()
             .tokens,
         0
     );
     // Force the supplier-loss path to obtain a valuation quote from a positive
     // tier before the test explicitly exhausts it.
     fixture.backstop.deposit(
-        &BackstopContractTier::BlndUsdc,
+        &BackstopContractTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &SCALAR_7,
@@ -339,7 +347,9 @@ fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
     let tier_state = fixture
         .backstop
         .pool_data(&pool_fixture.pool.address)
-        .blnd_usdc;
+        .tiers
+        .get(1)
+        .unwrap();
     let tier_key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
     fixture.env.as_contract(&fixture.backstop.address, || {
         fixture.env.storage().persistent().set(
@@ -468,7 +478,7 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
 
     fixture.backstop.distribute();
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -476,7 +486,7 @@ fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
     fixture.jump(17 * 24 * 60 * 60 + 1);
     fixture.backstop.distribute();
     fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &deposited_shares,
@@ -787,7 +797,7 @@ fn test_wasm_happy_path() {
     );
     backstop_blnd_balance += fixture.backstop.distribute();
     let compounded_lp = fixture.backstop.claim(
-        &BackstopContractTier::BlndUsdc,
+        &BackstopContractTier::SecondLoss,
         &frodo,
         &vec![&fixture.env, pool_fixture.pool.address.clone()],
         &0,
@@ -989,7 +999,7 @@ fn test_wasm_happy_path() {
 
     assert!(
         fixture.backstop.claim(
-            &BackstopContractTier::BlndUsdc,
+            &BackstopContractTier::SecondLoss,
             &frodo,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
@@ -1038,7 +1048,7 @@ fn test_wasm_happy_path() {
         fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     assert!(
         fixture.backstop.claim(
-            &BackstopContractTier::BlndUsdc,
+            &BackstopContractTier::SecondLoss,
             &frodo,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
@@ -1210,7 +1220,7 @@ fn test_wasm_happy_path() {
     let mut backstop_bstop_token_balance = fixture.lp.balance(&fixture.backstop.address);
     let amount = 500 * SCALAR_7;
     let result = fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &amount,
@@ -1232,7 +1242,7 @@ fn test_wasm_happy_path() {
     fixture.jump(60 * 60 * 24 * 17 + 1);
     fixture.backstop.distribute();
     let result = fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &amount,

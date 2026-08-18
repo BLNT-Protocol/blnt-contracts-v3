@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, Address, Env, I256};
 
 use crate::{
-    backstop::{tier_token, BackstopTier},
+    backstop::{tier_for_token, BackstopTier},
     dependencies::CometClient,
     errors::BackstopError,
     storage,
@@ -84,17 +84,19 @@ fn quote_user_blnd_emissions(
 }
 
 pub(crate) fn pool_spot_blnd_emission_weight(e: &Env, pool: &Address) -> i128 {
-    let blnd_usdc = spot_underlying_blnd(
-        e,
-        BackstopTier::BlndUsdc,
-        pool_active_emission_assets(e, BackstopTier::BlndUsdc, pool),
-    );
-    let blnd_xlm = spot_underlying_blnd(
-        e,
-        BackstopTier::BlndXlm,
-        pool_active_emission_assets(e, BackstopTier::BlndXlm, pool),
-    );
+    let blnd_usdc_token = storage::get_blnd_usdc_token(e);
+    let blnd_xlm_token = storage::get_blnd_xlm_token(e);
+    let blnd_usdc = spot_underlying_blnd_for_token(e, pool, &blnd_usdc_token);
+    let blnd_xlm = spot_underlying_blnd_for_token(e, pool, &blnd_xlm_token);
     checked_add(e, blnd_usdc, blnd_xlm)
+}
+
+fn spot_underlying_blnd_for_token(e: &Env, pool: &Address, token: &Address) -> i128 {
+    if let Some(tier) = tier_for_token(e, pool, token) {
+        spot_underlying_blnd(e, token, pool_active_emission_assets(e, tier, pool))
+    } else {
+        0
+    }
 }
 
 pub(crate) fn quote_ongoing_blnd_split(
@@ -139,19 +141,19 @@ pub(crate) fn pool_active_emission_assets(e: &Env, tier: BackstopTier, pool: &Ad
     balance.convert_to_tokens(active_shares)
 }
 
-fn spot_underlying_blnd(e: &Env, tier: BackstopTier, lp_amount: i128) -> i128 {
+fn spot_underlying_blnd(e: &Env, token: &Address, lp_amount: i128) -> i128 {
     if lp_amount < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
-    let (total_supply, blnd_reserve) = comet_composition(e, tier);
+    let (total_supply, blnd_reserve) = comet_composition(e, token);
     underlying_blnd_from_composition(e, lp_amount, total_supply, blnd_reserve)
 }
 
-pub(crate) fn comet_composition(e: &Env, tier: BackstopTier) -> (i128, i128) {
-    if tier == BackstopTier::Usdc {
+pub(crate) fn comet_composition(e: &Env, token: &Address) -> (i128, i128) {
+    if *token != storage::get_blnd_usdc_token(e) && *token != storage::get_blnd_xlm_token(e) {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
-    let comet = CometClient::new(e, &tier_token(e, tier));
+    let comet = CometClient::new(e, token);
     let total_supply = comet.get_total_supply();
     let blnd_reserve = comet.get_balance(&storage::get_blnd_token(e));
     if total_supply <= 0 || blnd_reserve < 0 {

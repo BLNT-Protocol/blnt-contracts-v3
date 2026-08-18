@@ -16,7 +16,9 @@ mod testutils;
 
 #[cfg(any(test, feature = "testutils"))]
 pub use backstop::set_test_valuation_override;
-pub use backstop::{BackstopTier, PoolBackstopData, PoolBalance, PoolTierData, UserBalance, Q4W};
+pub use backstop::{
+    BackstopAsset, BackstopTier, PoolBackstopData, PoolBalance, PoolTierData, UserBalance, Q4W,
+};
 pub use contract::*;
 pub use dependencies::EmitterClient;
 pub use errors::BackstopError;

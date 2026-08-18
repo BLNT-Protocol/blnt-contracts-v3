@@ -16,7 +16,7 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, Vec,
 };
 
-use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
+use mock_pool_factory::{BackstopTierConfig, MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
 use sep_41_token::testutils::{MockToken, MockTokenClient};
 
 #[derive(Clone)]
@@ -101,6 +101,21 @@ fn register_backstop(
     let pool_factory = e.register(MockPoolFactory {}, (pool_init_meta,));
     let emitter = e.register(MockEmitter, ());
     EmitterClient::new(e, &emitter).initialize(&blnd, &Address::generate(e), &blnd_usdc);
+    let default_config = vec![
+        e,
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::BlndXlm,
+            take_rate_weight: 4,
+        },
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::BlndUsdc,
+            take_rate_weight: 3,
+        },
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::Usdc,
+            take_rate_weight: 2,
+        },
+    ];
     e.register_at(
         &backstop,
         BackstopContract {},
@@ -111,10 +126,11 @@ fn register_backstop(
             blnd,
             usdc,
             xlm,
-            pool_factory,
+            pool_factory.clone(),
             Vec::<(Address, i128)>::new(e),
         ),
     );
+    MockPoolFactoryClient::new(e, &pool_factory).set_default_backstop_config(&default_config);
     e.as_contract(&backstop, || {
         set_test_valuation_override(e, Some(false));
     });
@@ -156,6 +172,7 @@ pub(crate) fn create_usdc_token<'a>(
     e.as_contract(backstop, || {
         storage::set_usdc_token(e, &contract_address);
     });
+    sync_mock_pool_factory_config(e, backstop);
     (contract_address, client)
 }
 
@@ -169,6 +186,7 @@ pub(crate) fn create_backstop_token<'a>(
     e.as_contract(backstop, || {
         storage::set_blnd_usdc_token(e, &contract_address);
     });
+    sync_mock_pool_factory_config(e, backstop);
     (contract_address, client)
 }
 
@@ -182,6 +200,7 @@ pub(crate) fn create_blnd_xlm_token<'a>(
     e.as_contract(backstop, || {
         storage::set_blnd_xlm_token(e, &contract_address);
     });
+    sync_mock_pool_factory_config(e, backstop);
     (contract_address, client)
 }
 
@@ -195,6 +214,27 @@ pub(crate) fn create_mock_pool_factory<'a>(
         contract_address.clone(),
         MockPoolFactoryClient::new(e, &contract_address),
     )
+}
+
+/// Keep unit-test factory defaults aligned when a fixture replaces one of the
+/// constructor-bound canonical tier tokens.
+pub(crate) fn sync_mock_pool_factory_config(e: &Env, backstop: &Address) {
+    let factory = e.as_contract(backstop, || storage::get_pool_factory(e));
+    MockPoolFactoryClient::new(e, &factory).set_default_backstop_config(&vec![
+        e,
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::BlndXlm,
+            take_rate_weight: 4,
+        },
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::BlndUsdc,
+            take_rate_weight: 3,
+        },
+        BackstopTierConfig {
+            asset: mock_pool_factory::BackstopAsset::Usdc,
+            take_rate_weight: 2,
+        },
+    ]);
 }
 
 pub(crate) fn create_emitter<'a>(

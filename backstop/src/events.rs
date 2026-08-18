@@ -1,6 +1,6 @@
 use soroban_sdk::{contractevent, Address, Env};
 
-use crate::backstop::BackstopTier;
+use crate::backstop::{BackstopAsset, BackstopTier};
 
 macro_rules! single_value_event {
     (
@@ -55,14 +55,14 @@ single_value_event!(
 vec_event!(
     BuybackAccruedEvent,
     "buyback_accrued",
-    [pool_address: Address],
-    [usdc_amount: i128, pending_usdc: i128]
+    [asset: BackstopAsset, pool_address: Address],
+    [amount: i128, pending: i128]
 );
 vec_event!(
     BuyAndBurnEvent,
     "buy_and_burn",
-    [],
-    [usdc_amount: i128, blnd_burned: i128, pending_usdc: i128]
+    [asset: BackstopAsset],
+    [amount: i128, blnd_burned: i128, pending: i128]
 );
 vec_event!(
     TierDepositEvent,
@@ -336,20 +336,34 @@ impl BackstopEvents {
         .publish(e);
     }
 
-    pub fn buyback_accrued(e: &Env, pool_address: Address, usdc_amount: i128, pending_usdc: i128) {
+    pub fn buyback_accrued(
+        e: &Env,
+        asset: BackstopAsset,
+        pool_address: Address,
+        amount: i128,
+        pending: i128,
+    ) {
         BuybackAccruedEvent {
+            asset,
             pool_address,
-            usdc_amount,
-            pending_usdc,
+            amount,
+            pending,
         }
         .publish(e);
     }
 
-    pub fn buy_and_burn(e: &Env, usdc_amount: i128, blnd_burned: i128, pending_usdc: i128) {
+    pub fn buy_and_burn(
+        e: &Env,
+        asset: BackstopAsset,
+        amount: i128,
+        blnd_burned: i128,
+        pending: i128,
+    ) {
         BuyAndBurnEvent {
-            usdc_amount,
+            asset,
+            amount,
             blnd_burned,
-            pending_usdc,
+            pending,
         }
         .publish(e);
     }
@@ -381,7 +395,7 @@ mod tests {
         assert_legacy_shape(
             &e,
             &TierDepositEvent {
-                tier: BackstopTier::BlndUsdc,
+                tier: BackstopTier::SecondLoss,
                 pool_address: pool.clone(),
                 from: user.clone(),
                 tokens_in: 50,
@@ -389,7 +403,7 @@ mod tests {
             },
             (
                 Symbol::new(&e, "deposit"),
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 pool.clone(),
                 user.clone(),
             )
@@ -417,22 +431,29 @@ mod tests {
         assert_legacy_shape(
             &e,
             &BuybackAccruedEvent {
+                asset: BackstopAsset::Usdc,
                 pool_address: pool.clone(),
-                usdc_amount: 10,
-                pending_usdc: 30,
+                amount: 10,
+                pending: 30,
             },
-            (Symbol::new(&e, "buyback_accrued"), pool).into_val(&e),
+            (
+                Symbol::new(&e, "buyback_accrued"),
+                BackstopAsset::Usdc,
+                pool,
+            )
+                .into_val(&e),
             (10_i128, 30_i128).into_val(&e),
         );
 
         assert_legacy_shape(
             &e,
             &BuyAndBurnEvent {
-                usdc_amount: 20,
+                asset: BackstopAsset::Xlm,
+                amount: 20,
                 blnd_burned: 200,
-                pending_usdc: 10,
+                pending: 10,
             },
-            (Symbol::new(&e, "buy_and_burn"),).into_val(&e),
+            (Symbol::new(&e, "buy_and_burn"), BackstopAsset::Xlm).into_val(&e),
             (20_i128, 200_i128, 10_i128).into_val(&e),
         );
     }

@@ -5,7 +5,20 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, String, Symbol,
 };
 
-use crate::{PoolFactoryClient, PoolFactoryContract, PoolInitMeta};
+use crate::{
+    pool_factory::validate_backstop_config, BackstopAsset, BackstopTierConfig, PoolFactoryClient,
+    PoolFactoryContract, PoolInitMeta,
+};
+
+fn backstop_config(e: &Env) -> soroban_sdk::Vec<BackstopTierConfig> {
+    vec![
+        e,
+        BackstopTierConfig {
+            asset: BackstopAsset::BlndXlm,
+            take_rate_weight: 1,
+        },
+    ]
+}
 
 mod pool {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/pool.wasm");
@@ -40,6 +53,7 @@ fn test_pool_factory() {
     let name2 = String::from_str(&e, "pool2");
     let salt = BytesN::<32>::random(&e);
 
+    let config = backstop_config(&e);
     let deployed_pool_address_1 = pool_factory_client.deploy(
         &bombadil,
         &name1,
@@ -48,6 +62,7 @@ fn test_pool_factory() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &config,
     );
 
     let event = e.events().all().filter_by_contract(&pool_factory_address);
@@ -72,6 +87,7 @@ fn test_pool_factory() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 
     e.as_contract(&deployed_pool_address_1, || {
@@ -114,6 +130,173 @@ fn test_pool_factory() {
     assert!(pool_factory_client.is_pool(&deployed_pool_address_1));
     assert!(pool_factory_client.is_pool(&deployed_pool_address_2));
     assert!(!pool_factory_client.is_pool(&Address::generate(&e)));
+    assert_eq!(
+        pool_factory_client.backstop_config(&deployed_pool_address_1),
+        config
+    );
+}
+
+#[test]
+fn test_pool_factory_accepts_three_ordered_backstop_tiers() {
+    let e = Env::default();
+    let config = vec![
+        &e,
+        BackstopTierConfig {
+            asset: BackstopAsset::BlndXlm,
+            take_rate_weight: 4,
+        },
+        BackstopTierConfig {
+            asset: BackstopAsset::BlndUsdc,
+            take_rate_weight: 3,
+        },
+        BackstopTierConfig {
+            asset: BackstopAsset::Usdc,
+            take_rate_weight: 2,
+        },
+    ];
+    validate_backstop_config(&e, &config);
+}
+
+#[test]
+fn test_pool_factory_accepts_maximum_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 10,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_empty_backstop_config() {
+    let e = Env::default();
+    validate_backstop_config(&e, &soroban_sdk::Vec::new(&e));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_duplicate_backstop_tokens() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 2,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_zero_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 0,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_more_than_three_backstop_tiers() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 1,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_excessive_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 11,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_equal_backstop_weights() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 4,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_ascending_backstop_weights() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 4,
+            },
+        ],
+    );
 }
 
 #[test]
@@ -152,6 +335,7 @@ fn test_pool_factory_invalid_pool_init_args_backstop_rate() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 }
 
@@ -191,6 +375,7 @@ fn test_pool_factory_invalid_pool_init_args_max_positions() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 }
 
@@ -230,6 +415,7 @@ fn test_pool_factory_invalid_pool_init_args_max_positions_large() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 }
 
@@ -269,6 +455,7 @@ fn test_pool_factory_invalid_pool_init_args_min_collateral() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 }
 
@@ -312,6 +499,7 @@ fn test_pool_factory_frontrun_protection() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 
     let deployed_pool_address_bombadil = pool_factory_client.deploy(
@@ -322,6 +510,7 @@ fn test_pool_factory_frontrun_protection() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
     );
 
     assert!(deployed_pool_address_sauron != deployed_pool_address_bombadil);

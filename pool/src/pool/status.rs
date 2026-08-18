@@ -151,7 +151,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -203,7 +203,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &9_999_9999999,
@@ -252,13 +252,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &30_000_0000000,
@@ -305,7 +305,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -357,13 +357,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &40_000_0000000,
@@ -411,13 +411,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &40_000_0000000,
@@ -464,7 +464,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -515,7 +515,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -563,7 +563,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -615,7 +615,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -667,7 +667,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &9_999_9999999,
@@ -719,13 +719,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &15_000_0000000,
@@ -777,13 +777,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &15_000_0000000,
@@ -835,13 +835,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &25_000_0000000,
@@ -893,13 +893,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &30_000_0000000,
@@ -950,13 +950,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &30_000_0000000,
@@ -1008,13 +1008,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &40_000_0000000,
@@ -1067,7 +1067,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -1116,7 +1116,7 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
@@ -1165,13 +1165,13 @@ mod tests {
             &samwise,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &50_000_0000000,
         );
         backstop_client.queue_withdrawal(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &samwise,
             &pool_id,
             &12_500_0000000,

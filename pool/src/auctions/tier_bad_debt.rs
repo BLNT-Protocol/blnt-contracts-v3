@@ -102,7 +102,8 @@ pub(crate) fn fill_bad_debt_auction(
     }
 
     backstop_state.store(e);
-    let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(fill.tier));
+    let lot_token = BackstopClient::new(e, &backstop)
+        .backstop_token(&to_backstop_tier(fill.tier), &e.current_contract_address());
     let lot = if fill.lot_amount > 0 {
         map![e, (lot_token, fill.lot_amount)]
     } else {
@@ -208,7 +209,8 @@ fn commit_prepared_bad_debt_auction(
         .checked_add(1)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
     let backstop = storage::get_backstop(e);
-    let lot_token = BackstopClient::new(e, &backstop).backstop_token(&to_backstop_tier(tier));
+    let lot_token = BackstopClient::new(e, &backstop)
+        .backstop_token(&to_backstop_tier(tier), &e.current_contract_address());
     let auction = TierAuctionData {
         auction: AuctionData {
             bid: bid_amounts.clone(),
@@ -356,16 +358,15 @@ fn select_bad_debt_lot(
         BAD_DEBT_LOT_PREMIUM_NUMERATOR,
         BAD_DEBT_LOT_PREMIUM_DENOMINATOR,
     );
-    for tier in [
-        BackstopTier::BlndXlm,
-        BackstopTier::BlndUsdc,
-        BackstopTier::Usdc,
-    ] {
-        let (tokens, value) = match tier {
-            BackstopTier::BlndUsdc => (pool_data.blnd_usdc.tokens, pool_data.blnd_usdc.value),
-            BackstopTier::BlndXlm => (pool_data.blnd_xlm.tokens, pool_data.blnd_xlm.value),
-            BackstopTier::Usdc => (pool_data.usdc.tokens, pool_data.usdc.value),
+    for (index, tier_data) in pool_data.tiers.iter().enumerate() {
+        let tier = match index {
+            0 => BackstopTier::FirstLoss,
+            1 => BackstopTier::SecondLoss,
+            2 => BackstopTier::ThirdLoss,
+            _ => panic_with_error!(e, PoolError::InvalidLot),
         };
+        let tokens = tier_data.tokens;
+        let value = tier_data.value;
         if tokens < 0 || value < 0 || (tokens == 0 && value > 0) {
             panic_with_error!(e, PoolError::InvalidLot);
         }
@@ -476,8 +477,12 @@ mod tests {
         .is_ok()
     }
 
-    fn test_tier_data(tokens: i128, value: i128) -> BackstopPoolTierData {
+    fn test_tier_data(e: &Env, tokens: i128, value: i128) -> BackstopPoolTierData {
         BackstopPoolTierData {
+            asset: crate::dependencies::BackstopContractAsset::BlndXlm,
+            blnd_emission_eligible: false,
+            take_rate_weight: 1,
+            token: Address::generate(e),
             tokens,
             shares: tokens,
             value,
@@ -485,6 +490,7 @@ mod tests {
     }
 
     fn test_pool_data(
+        e: &Env,
         blnd_xlm: BackstopPoolTierData,
         blnd_usdc: BackstopPoolTierData,
         usdc: BackstopPoolTierData,
@@ -495,10 +501,8 @@ mod tests {
                 .checked_add(blnd_usdc.value)
                 .and_then(|total| total.checked_add(usdc.value))
                 .unwrap(),
-            blnd_usdc,
-            blnd_xlm,
             q4w_pct: 0,
-            usdc,
+            tiers: vec![e, blnd_xlm, blnd_usdc, usdc],
         }
     }
 
@@ -506,13 +510,14 @@ mod tests {
     fn bad_debt_selection_enforces_the_strict_tier_waterfall() {
         let e = Env::default();
         let pool_data = test_pool_data(
-            test_tier_data(200 * SCALAR_7, 200 * SCALAR_7),
-            test_tier_data(300 * SCALAR_7, 300 * SCALAR_7),
-            test_tier_data(400 * SCALAR_7, 400 * SCALAR_7),
+            &e,
+            test_tier_data(&e, 200 * SCALAR_7, 200 * SCALAR_7),
+            test_tier_data(&e, 300 * SCALAR_7, 300 * SCALAR_7),
+            test_tier_data(&e, 400 * SCALAR_7, 400 * SCALAR_7),
         );
 
         let (tier, lot_amount) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(tier, BackstopTier::BlndXlm);
+        assert_eq!(tier, BackstopTier::FirstLoss);
         assert_eq!(lot_amount, 60 * SCALAR_7);
     }
 
@@ -520,13 +525,14 @@ mod tests {
     fn bad_debt_selection_uses_positive_subminimum_tiers() {
         let e = Env::default();
         let pool_data = test_pool_data(
-            test_tier_data(99 * SCALAR_7, 99 * SCALAR_7),
-            test_tier_data(0, 0),
-            test_tier_data(500 * SCALAR_7, 500 * SCALAR_7),
+            &e,
+            test_tier_data(&e, 99 * SCALAR_7, 99 * SCALAR_7),
+            test_tier_data(&e, 0, 0),
+            test_tier_data(&e, 500 * SCALAR_7, 500 * SCALAR_7),
         );
 
         let (tier, lot_amount) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(tier, BackstopTier::BlndXlm);
+        assert_eq!(tier, BackstopTier::FirstLoss);
         assert_eq!(lot_amount, 60 * SCALAR_7);
     }
 
@@ -534,13 +540,14 @@ mod tests {
     fn bad_debt_selection_skips_zero_value_tiers() {
         let e = Env::default();
         let pool_data = test_pool_data(
-            test_tier_data(99 * SCALAR_7, 0),
-            test_tier_data(0, 0),
-            test_tier_data(500 * SCALAR_7, 500 * SCALAR_7),
+            &e,
+            test_tier_data(&e, 99 * SCALAR_7, 0),
+            test_tier_data(&e, 0, 0),
+            test_tier_data(&e, 500 * SCALAR_7, 500 * SCALAR_7),
         );
 
         let (tier, _) = select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7).unwrap();
-        assert_eq!(tier, BackstopTier::Usdc);
+        assert_eq!(tier, BackstopTier::ThirdLoss);
     }
 
     #[test]
@@ -548,9 +555,10 @@ mod tests {
     fn bad_debt_selection_rejects_value_without_assets() {
         let e = Env::default();
         let pool_data = test_pool_data(
-            test_tier_data(0, SCALAR_7),
-            test_tier_data(0, 0),
-            test_tier_data(0, 0),
+            &e,
+            test_tier_data(&e, 0, SCALAR_7),
+            test_tier_data(&e, 0, 0),
+            test_tier_data(&e, 0, 0),
         );
 
         select_bad_debt_lot(&e, &pool_data, 50 * SCALAR_7);
@@ -560,9 +568,10 @@ mod tests {
     fn bad_debt_partial_tier_selection_rounds_assets_up() {
         let e = Env::default();
         let pool_data = test_pool_data(
-            test_tier_data(101, 200 * SCALAR_7),
-            test_tier_data(0, 0),
-            test_tier_data(0, 0),
+            &e,
+            test_tier_data(&e, 101, 200 * SCALAR_7),
+            test_tier_data(&e, 0, 0),
+            test_tier_data(&e, 0, 0),
         );
 
         let (_, lot_amount) = select_bad_debt_lot(&e, &pool_data, 100 * SCALAR_7).unwrap();
@@ -607,7 +616,7 @@ mod tests {
             &depositor,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &depositor,
             &pool_address,
             &50_000_0000000,
@@ -803,7 +812,7 @@ mod tests {
         // Keep a small positive tier balance so creation must obtain a valid
         // quote and use the tier before supplier default is allowed.
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &admin,
             &pool_address,
             &SCALAR_7,
@@ -950,7 +959,7 @@ mod tests {
             &depositor,
         );
         backstop_client.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &depositor,
             &pool_address,
             &(500 * SCALAR_7),

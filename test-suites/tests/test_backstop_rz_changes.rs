@@ -36,13 +36,13 @@ fn test_backstop_rz_changes_handle_emissions() {
     );
     fixture.backstop.distribute();
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool_fixture.pool.address,
         &(12500 * SCALAR_7),
     );
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         frodo,
         &pool_fixture.pool.address,
         &(45000 * SCALAR_7),
@@ -52,7 +52,7 @@ fn test_backstop_rz_changes_handle_emissions() {
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
     fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         frodo,
         &pool_fixture.pool.address,
         &(45000 * SCALAR_7),
@@ -65,14 +65,14 @@ fn test_backstop_rz_changes_handle_emissions() {
     // Sam's position to leave 7,500 active shares (about $9,375).
     let membership_reduction = 10_000 * SCALAR_7;
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool_fixture.pool.address,
         &membership_reduction,
     );
     fixture.backstop.remove_reward(&pool_fixture.pool.address);
     fixture.backstop.dequeue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool_fixture.pool.address,
         &membership_reduction,
@@ -86,7 +86,7 @@ fn test_backstop_rz_changes_handle_emissions() {
     fixture.jump(60 * 60 * 24 * 3);
     assert!(
         fixture.backstop.claim(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &sam,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
@@ -96,7 +96,7 @@ fn test_backstop_rz_changes_handle_emissions() {
     fixture.jump(60 * 60 * 24 * 4);
     assert!(
         fixture.backstop.claim(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &sam,
             &vec![&fixture.env, pool_fixture.pool.address.clone()],
             &0,
@@ -104,7 +104,7 @@ fn test_backstop_rz_changes_handle_emissions() {
     );
 
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         frodo,
         &pool_fixture.pool.address,
         &(50000 * SCALAR_7),
@@ -158,9 +158,10 @@ fn test_backstop_full_rz_under_limits() {
             &0,
             &6,
             &0,
+            &fixture.backstop_config,
         );
         fixture.backstop.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &sam,
             &pool_address,
             &per_pool_lp_deposit,

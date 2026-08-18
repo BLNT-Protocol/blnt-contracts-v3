@@ -89,7 +89,7 @@ fn test_liquidations() {
     let frodo_pre_q4w_amount = 10_000 * SCALAR_7;
     fixture.backstop.distribute();
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -440,7 +440,7 @@ fn test_liquidations() {
 
     // validate that frodo cannot withdraw backstop deposits if bad debt exists
     let withdraw_result = fixture.backstop.try_withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -452,9 +452,10 @@ fn test_liquidations() {
     );
 
     // create a committed single-tier bad-debt auction
-    let blnd_usdc_token = fixture
-        .backstop
-        .backstop_token(&backstop::BackstopTier::BlndUsdc);
+    let blnd_usdc_token = fixture.backstop.backstop_token(
+        &backstop::BackstopTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     let bad_debt_auction_data = pool_fixture.pool.new_auction(
         &1,
         &fixture.backstop.address,
@@ -556,7 +557,7 @@ fn test_liquidations() {
     assert_eq!(new_auction.block, bad_debt_auction_data.block);
     // validate that frodo cannot withdraw backstop during bad debt auction
     let withdraw_result = fixture.backstop.try_withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
@@ -608,14 +609,14 @@ fn test_liquidations() {
     let pre_withdraw_frodo_bstp = fixture.lp.balance(&frodo);
     // withdraw pre_q4w_amount
     let first_withdrawal = fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &frodo_pre_q4w_amount,
         &frodo,
     );
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
@@ -624,7 +625,7 @@ fn test_liquidations() {
     fixture.jump(45 * 24 * 60 * 60);
     fixture.backstop.distribute();
     let second_withdrawal = fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
@@ -640,7 +641,7 @@ fn test_liquidations() {
     // Deposit a small positive tier balance. Bad-debt resolution must auction
     // all of it before defaulting any residual debt to suppliers.
     fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &(10 * SCALAR_7),
@@ -1201,7 +1202,7 @@ fn test_bad_debt() {
     fixture.env.as_contract(&fixture.backstop.address, || {
         let key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
         let new_balance = PoolBalance {
-            shares: cur_pool_data.blnd_usdc.shares,
+            shares: cur_pool_data.tiers.get(1).unwrap().shares,
             tokens: 0,
             q4w: 0,
         };

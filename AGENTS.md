@@ -68,30 +68,37 @@ silently create a new v3 policy.
 Preserve these specified v3 boundaries unless the specification is changed
 first:
 
-- Exactly three immutable backstop tiers: BLND:USDC LP, BLND:XLM LP, and plain
-  USDC.
-- Strict loss order: BLND:XLM LP, BLND:USDC LP, plain USDC, then suppliers.
+- Each pool immutably configures one to three positional backstop tiers from
+  the canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM assets. Configured
+  assets are unique, integer take-rate weights are 1 through 10 and strictly
+  decrease by tier, and tier order is the strict loss waterfall before
+  suppliers.
 - One tier per auction and at most one active interest auction per pool.
   Interest requires at least 200 USDC; bad debt uses every positively valued
   tier before suppliers.
 - A single inclusive 12,500-USDC activation threshold.
-- Take-rate weighting of `4:3:2` in loss order.
-- Plain-USDC interest-auction payments credit 99% to that tier and reserve an
-  exact cumulative 1% for bounded swaps through the canonical BLND:USDC Comet
-  followed by an exact BLND burn. Buyback failure must not unwind or block the
-  completed interest settlement.
+- Take-rate allocation uses each pool's immutable tier weights and verified
+  USDC values.
+- Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
+  and reserve an exact cumulative 1% for bounded swaps through the matching
+  canonical BLND Comet followed by an exact BLND burn. Buyback failure must
+  not unwind or block the completed interest settlement.
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
-- Ongoing BLND weight only for active, nonqueued underlying BLND in the two
-  BLND-bearing tiers.
+- Ongoing BLND weight only for active, nonqueued underlying BLND held in the
+  exact canonical BLND:USDC or BLND:XLM Comet LPs, regardless of tier position.
 - Migration backfill starts with the first pre-replacement `distribute`, not
   with an emitter queue, and remains capped at 10 million BLND.
 - A compatible BLND:XLM emitter queue must be attested no earlier than its
   final seven days, and local activation must occur within seven days after
   unlock.
-- Backstop BLND claims compound into the originating BLND-bearing tier and
-  credit active shares to the same user and pool.
-- Backstop value is derived only from current 80:20 Comet reserves, with
-  BLND:USDC as the USDC anchor; do not add a backstop price oracle.
+- Backstop BLND claims compound into the originating canonical BLND-bearing
+  tier and credit active shares to the same user and pool.
+- Backstop value comes only from current canonical Comet reserves. BLND:USDC
+  is the USDC anchor, canonical USDC is one-for-one, and canonical XLM is
+  priced by the BLND reserve ratio between the two Comets. Backstop valuation
+  has no oracle input.
+- Exact canonical BLND LP interest-auction bids donate 100%. Plain-USDC and
+  plain-XLM bids apply the failure-isolated 1% buy-and-burn rule above.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.
 

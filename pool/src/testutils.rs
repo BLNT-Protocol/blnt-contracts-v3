@@ -13,7 +13,9 @@ use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, IntoVal, String};
 
 use backstop::{BackstopClient, BackstopContract, EmitterClient};
-use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
+use mock_pool_factory::{
+    BackstopAsset, BackstopTierConfig, MockPoolFactory, MockPoolFactoryClient, PoolInitMeta,
+};
 use moderc3156_example::{
     FlashLoanReceiverModifiedERC3156, FlashLoanReceiverModifiedERC3156Client,
 };
@@ -128,7 +130,24 @@ pub(crate) fn create_backstop<'a>(
     let (xlm_token, _) = create_token_contract(e, &comet_admin);
     let (blnd_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnd_token, &xlm_token);
     let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
-    mock_pool_factory_client.set_pool(pool_address);
+    mock_pool_factory_client.set_pool_config(
+        pool_address,
+        &vec![
+            e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 2,
+            },
+        ],
+    );
     let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnd_token);
     e.register_at(
         &backstop_id,

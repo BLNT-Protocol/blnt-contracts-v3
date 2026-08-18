@@ -5,9 +5,12 @@ use crate::{
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
 
-use super::{tier_token, BackstopTier, Q4W};
+use super::{
+    pool::{pool_backstop_config, tier_from_index},
+    tier_token, BackstopTier, Q4W,
+};
 
-/// Perform a queue for withdrawal from one fixed backstop tier.
+/// Perform a queue for withdrawal from one configured backstop tier.
 pub fn execute_queue_withdrawal(
     e: &Env,
     tier: BackstopTier,
@@ -21,18 +24,24 @@ pub fn execute_queue_withdrawal(
     require_q4w_entry_capacity(e, from, pool_address);
     user_balance.queue_shares_for_withdrawal(e, amount);
 
-    emissions::prepare_pool_weight_change(e, tier);
-    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(
+        e,
+        tier,
+        from,
+        pool_address,
+        emission_eligible,
+    );
     pool_balance.queue_for_withdraw(amount);
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, tier, pool_address);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
 
     user_balance.q4w.last().unwrap_optimized()
 }
 
-/// Dequeue a withdrawal from one fixed backstop tier.
+/// Dequeue a withdrawal from one configured backstop tier.
 pub fn execute_dequeue_withdrawal(
     e: &Env,
     tier: BackstopTier,
@@ -45,17 +54,23 @@ pub fn execute_dequeue_withdrawal(
     let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, from);
     user_balance.dequeue_shares(e, amount);
 
-    emissions::prepare_pool_weight_change(e, tier);
-    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(
+        e,
+        tier,
+        from,
+        pool_address,
+        emission_eligible,
+    );
     user_balance.add_shares(amount);
     pool_balance.dequeue_q4w(e, amount);
 
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, tier, pool_address);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
 }
 
-/// Withdraw expired shares from one fixed backstop tier.
+/// Withdraw expired shares from one configured backstop tier.
 pub fn execute_withdraw(
     e: &Env,
     tier: BackstopTier,
@@ -81,15 +96,21 @@ pub fn execute_withdraw(
         panic_with_error!(e, &BackstopError::InvalidTokenWithdrawAmount);
     }
 
-    emissions::prepare_pool_weight_change(e, tier);
-    emissions::checkpoint_user_ongoing_for_weight_change(e, tier, from, pool_address);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(
+        e,
+        tier,
+        from,
+        pool_address,
+        emission_eligible,
+    );
     pool_balance.withdraw(e, to_return, amount);
     storage::set_user_balance_for_tier(e, tier, pool_address, from, &user_balance);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
-    emissions::finish_pool_weight_change(e, tier, pool_address);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
 
     if to_return > 0 {
-        let backstop_token_client = TokenClient::new(e, &tier_token(e, tier));
+        let backstop_token_client = TokenClient::new(e, &tier_token(e, pool_address, tier));
         backstop_token_client.transfer(&e.current_contract_address(), to, &to_return);
     }
 
@@ -98,11 +119,9 @@ pub fn execute_withdraw(
 
 fn require_q4w_entry_capacity(e: &Env, from: &Address, pool: &Address) {
     let mut entries = 0;
-    for tier in [
-        BackstopTier::BlndUsdc,
-        BackstopTier::BlndXlm,
-        BackstopTier::Usdc,
-    ] {
+    let config = pool_backstop_config(e, pool);
+    for index in 0..config.len() {
+        let tier = tier_from_index(e, index);
         entries += storage::get_user_balance_for_tier(e, tier, pool, from)
             .q4w
             .len();
@@ -151,7 +170,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 100_0000000,
@@ -172,7 +191,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
@@ -223,7 +242,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 100_0000000,
@@ -244,7 +263,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 -42_0000000,
@@ -272,7 +291,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 75_0000000,
@@ -291,7 +310,7 @@ mod tests {
 
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 25_0000000,
@@ -310,7 +329,7 @@ mod tests {
 
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 40_0000000,
@@ -331,7 +350,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_dequeue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 30_0000000,
@@ -379,14 +398,14 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 75_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 25_0000000,
@@ -405,7 +424,7 @@ mod tests {
 
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 40_0000000,
@@ -426,7 +445,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_dequeue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 -30_0000000,
@@ -472,21 +491,21 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
             );
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 50_0000000,
@@ -507,7 +526,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             let tokens = execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
@@ -571,21 +590,21 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
             );
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 50_0000000,
@@ -606,7 +625,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 -42_0000000,
@@ -648,22 +667,34 @@ mod tests {
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
+                &frodo,
+                &pool_address,
+                1_0000001,
+            );
+            execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
-            execute_draw(&e, BackstopTier::BlndUsdc, &pool_address, 1_9999999, &frodo);
+            execute_draw(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_address,
+                1_9999999,
+                &frodo,
+            );
         });
 
         e.ledger().set(LedgerInfo {
@@ -680,7 +711,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 1_0000000,
@@ -737,21 +768,21 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 100_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
             );
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 50_0000000,
@@ -772,7 +803,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             let tokens = execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 42_0000000,
@@ -829,22 +860,34 @@ mod tests {
 
         // setup pool with queue for withdrawal and allow the backstop to incur a profit
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, BackstopTier::BlndUsdc, &frodo, &pool_address, 1_0000001);
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
+                &frodo,
+                &pool_address,
+                1_0000001,
+            );
+            execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 1_0000000,
             );
-            execute_draw(&e, BackstopTier::BlndUsdc, &pool_address, 2_0000001, &frodo);
+            execute_draw(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_address,
+                2_0000001,
+                &frodo,
+            );
         });
 
         e.ledger().set(LedgerInfo {
@@ -862,7 +905,7 @@ mod tests {
             assert_eq!(
                 execute_withdraw(
                     &e,
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     &samwise,
                     &pool_address,
                     1_0000000,
@@ -920,21 +963,21 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
             execute_donate(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 donate_amount,
@@ -955,7 +998,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             let tokens = execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,
@@ -1011,21 +1054,21 @@ mod tests {
         e.as_contract(&backstop_address, || {
             execute_deposit(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
             execute_queue_withdrawal(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,
             );
             execute_draw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &pool_address,
                 draw_amount,
                 &samwise,
@@ -1046,7 +1089,7 @@ mod tests {
         e.as_contract(&backstop_address, || {
             let tokens = execute_withdraw(
                 &e,
-                BackstopTier::BlndUsdc,
+                BackstopTier::SecondLoss,
                 &samwise,
                 &pool_address,
                 deposit_amount,

@@ -1,7 +1,7 @@
 use crate::{
     backstop::{
-        self, load_pool_backstop_data, tier_token, validate_backstop_assets, BackstopTier,
-        PoolBackstopData, UserBalance, Q4W,
+        self, load_pool_backstop_data, tier_token, validate_backstop_assets, BackstopAsset,
+        BackstopTier, PoolBackstopData, UserBalance, Q4W,
     },
     constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     emissions,
@@ -63,14 +63,14 @@ pub trait Backstop {
 
     /// Fetch the backstop data for the pool
     ///
-    /// Return the pool's complete three-tier accounting and valuation.
+    /// Return the pool's complete configured-tier accounting and valuation.
     ///
     /// ### Arguments
     /// * `pool_address` - The address of the pool
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData;
 
-    /// Fetch the token contract bound to one fixed backstop tier.
-    fn backstop_token(e: Env, tier: BackstopTier) -> Address;
+    /// Fetch the token contract bound to one pool's loss-waterfall position.
+    fn backstop_token(e: Env, tier: BackstopTier, pool: Address) -> Address;
 
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
@@ -83,7 +83,7 @@ pub trait Backstop {
     /// Start or refresh the pool's tier streams and grant its accrued 30% allowance.
     fn gulp_emissions(e: Env, pool: Address) -> i128;
 
-    /// Add a threshold-qualified pool with positive active BLND to the reward zone.
+    /// Add a threshold-qualified pool to the reward zone.
     ///
     /// If all 30 slots are occupied, the replacement must have strictly more
     /// active underlying BLND than the named member.
@@ -97,9 +97,6 @@ pub trait Backstop {
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>);
 
     /// Remove a pool below the activation threshold from the reward zone.
-    ///
-    /// A member with zero active underlying BLND can be removed regardless of
-    /// activation value and without a recent distribution checkpoint.
     ///
     /// ### Arguments
     /// * `to_remove` - The address of the pool to remove
@@ -120,8 +117,8 @@ pub trait Backstop {
     /// Execute the configured initial drop and fund any scheduled migration backfill.
     fn drop(e: Env);
 
-    /// Swap a bounded pending-USDC haircut through the canonical Comet and burn the BLND output.
-    fn buy_and_burn(e: Env) -> i128;
+    /// Swap a bounded pending USDC or XLM haircut through its canonical Comet and burn the BLND output.
+    fn buy_and_burn(e: Env, asset: BackstopAsset) -> i128;
 
     /********** Fund Management *********/
 
@@ -139,7 +136,7 @@ pub trait Backstop {
     fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address);
 
     /// (Only Pool) Sends one tier token from `from` to a pool's backstop.
-    /// Plain-USDC donations credit 99% and reserve 1% for BLND buy-and-burn.
+    /// Plain-USDC and plain-XLM donations credit 99% and reserve 1% for BLND buy-and-burn.
     ///
     /// NOTE: This is not a deposit, and `from` will permanently lose access to the funds
     ///
@@ -160,8 +157,8 @@ impl BackstopContract {
     /// Construct the backstop contract
     ///
     /// ### Arguments
-    /// * `blnd_usdc_token` - The second-loss LP token with the pair BLND:USDC
-    /// * `blnd_xlm_token` - The first-loss LP token with the pair BLND:XLM
+    /// * `blnd_usdc_token` - The canonical BLND:USDC LP token
+    /// * `blnd_xlm_token` - The canonical BLND:XLM LP token
     /// * `emitter` - The Emitter contract ID
     /// * `blnd_token` - The BLND token ID
     /// * `usdc_token` - The USDC token ID
@@ -282,6 +279,7 @@ impl Backstop for BackstopContract {
     }
 
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance {
+        tier_token(&e, &pool, tier);
         storage::get_user_balance_for_tier(&e, tier, &pool, &user)
     }
 
@@ -289,8 +287,8 @@ impl Backstop for BackstopContract {
         load_pool_backstop_data(&e, &pool)
     }
 
-    fn backstop_token(e: Env, tier: BackstopTier) -> Address {
-        tier_token(&e, tier)
+    fn backstop_token(e: Env, tier: BackstopTier, pool: Address) -> Address {
+        tier_token(&e, &pool, tier)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
@@ -349,15 +347,16 @@ impl Backstop for BackstopContract {
         migration::drop(&e)
     }
 
-    fn buy_and_burn(e: Env) -> i128 {
+    fn buy_and_burn(e: Env, asset: BackstopAsset) -> i128 {
         storage::extend_instance(&e);
-        let result = backstop::execute_buy_and_burn(&e);
-        if result.usdc_in > 0 {
+        let result = backstop::execute_buy_and_burn(&e, asset);
+        if result.pair_in > 0 {
             BackstopEvents::buy_and_burn(
                 &e,
-                result.usdc_in,
+                asset,
+                result.pair_in,
                 result.blnd_burned,
-                result.pending_usdc,
+                result.pending,
             );
         }
         result.blnd_burned
@@ -385,6 +384,7 @@ impl Backstop for BackstopContract {
         if result.buyback > 0 {
             BackstopEvents::buyback_accrued(
                 &e,
+                backstop::tier_asset(&e, &pool_address, tier),
                 pool_address,
                 result.buyback,
                 result.pending_buyback,

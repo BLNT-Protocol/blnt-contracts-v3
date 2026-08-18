@@ -10,7 +10,7 @@ use crate::pool_factory::create_pool_factory;
 use crate::token::{create_stellar_token, create_token};
 use backstop::{BackstopClient, EmitterClient};
 use pool::{PoolClient, PoolConfig, PoolDataKey, ReserveConfig, ReserveData, ReserveEmissionData};
-use pool_factory::{PoolFactoryClient, PoolInitMeta};
+use pool_factory::{BackstopAsset, BackstopTierConfig, PoolFactoryClient, PoolInitMeta};
 use sep_40_oracle::testutils::{Asset, MockPriceOracleClient};
 use sep_41_token::testutils::MockTokenClient;
 use soroban_sdk::testutils::{Address as _, BytesN as _, EnvTestConfig, Ledger, LedgerInfo};
@@ -47,6 +47,7 @@ pub struct TestFixture<'a> {
     pub users: Vec<Address>,
     pub emitter: EmitterClient<'a>,
     pub backstop: BackstopClient<'a>,
+    pub backstop_config: soroban_sdk::Vec<BackstopTierConfig>,
     pub pool_factory: PoolFactoryClient<'a>,
     pub oracle: MockPriceOracleClient<'a>,
     pub lp: LPClient<'a>,
@@ -119,6 +120,21 @@ impl TestFixture<'_> {
             &xlm_id,
             &pool_factory_id,
         );
+        let backstop_config = svec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlndUsdc,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 2,
+            },
+        ];
 
         // Exercise the production incumbent-emitter queue before using this
         // fixture as an active v3 deployment. One unattributed LP base unit is
@@ -148,7 +164,7 @@ impl TestFixture<'_> {
             &svec![
                 &e,
                 Asset::Stellar(eth_id.clone()),
-                Asset::Stellar(usdc_id),
+                Asset::Stellar(usdc_id.clone()),
                 Asset::Stellar(xlm_id.clone()),
                 Asset::Stellar(stable_id.clone()),
             ],
@@ -169,6 +185,7 @@ impl TestFixture<'_> {
             users: vec![frodo],
             emitter: emitter_client,
             backstop: backstop_client,
+            backstop_config,
             pool_factory: pool_factory_client,
             oracle: mock_oracle_client,
             lp: lp_client,
@@ -200,6 +217,7 @@ impl TestFixture<'_> {
             &backstop_take_rate,
             &max_positions,
             &min_collateral,
+            &self.backstop_config,
         );
         self.pools.push(PoolFixture {
             pool: PoolClient::new(&self.env, &pool_id),

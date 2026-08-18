@@ -3,7 +3,8 @@ use soroban_sdk::{
     TryFromVal, Val, Vec,
 };
 
-use crate::backstop::{BackstopTier, PoolBalance, UserBalance};
+use crate::backstop::{BackstopAsset, BackstopTier, PoolBalance, UserBalance};
+use crate::dependencies::BackstopTierConfig;
 use crate::BackstopError;
 
 /********** Ledger Thresholds **********/
@@ -84,7 +85,8 @@ const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
-const BUYBACK_PENDING_KEY: &str = "BuybackUSDC";
+const BUYBACK_USDC_PENDING_KEY: &str = "BuybackUSDC";
+const BUYBACK_XLM_PENDING_KEY: &str = "BuybackXLM";
 
 #[derive(Clone)]
 #[contracttype(export = false)]
@@ -120,7 +122,8 @@ pub enum BackstopDataKey {
     UEmisData(PoolUserTierKey),
     PoolOngoingEmissions(Address),
     PoolEmissionGulp(Address),
-    BuybackCarry(Address),
+    BuybackCarry(PoolTierKey),
+    PoolBackstopConfig(Address),
 }
 
 /****************************
@@ -274,30 +277,44 @@ pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
 }
 
-/// Return USDC reserved for the next canonical BLND buy-and-burn.
-pub fn get_buyback_pending(e: &Env) -> i128 {
+/// Return a canonical pair asset reserved for its next BLND buy-and-burn.
+pub fn get_buyback_pending(e: &Env, asset: BackstopAsset) -> i128 {
     e.storage()
         .instance()
-        .get(&Symbol::new(e, BUYBACK_PENDING_KEY))
+        .get(&buyback_pending_key(e, asset))
         .unwrap_or(0)
 }
 
-/// Store USDC reserved for the next canonical BLND buy-and-burn.
-pub fn set_buyback_pending(e: &Env, amount: i128) {
+/// Store a canonical pair asset reserved for its next BLND buy-and-burn.
+pub fn set_buyback_pending(e: &Env, asset: BackstopAsset, amount: i128) {
     e.storage()
         .instance()
-        .set(&Symbol::new(e, BUYBACK_PENDING_KEY), &amount);
+        .set(&buyback_pending_key(e, asset), &amount);
 }
 
-/// Return the sub-stroop haircut remainder for one pool's USDC auction proceeds.
-pub fn get_buyback_carry(e: &Env, pool: &Address) -> i128 {
-    let key = BackstopDataKey::BuybackCarry(pool.clone());
+fn buyback_pending_key(e: &Env, asset: BackstopAsset) -> Symbol {
+    match asset {
+        BackstopAsset::Usdc => Symbol::new(e, BUYBACK_USDC_PENDING_KEY),
+        BackstopAsset::Xlm => Symbol::new(e, BUYBACK_XLM_PENDING_KEY),
+        _ => panic_with_error!(e, BackstopError::BadRequest),
+    }
+}
+
+/// Return the sub-stroop haircut remainder for one pool tier's auction proceeds.
+pub fn get_buyback_carry(e: &Env, pool: &Address, tier: BackstopTier) -> i128 {
+    let key = BackstopDataKey::BuybackCarry(PoolTierKey {
+        pool: pool.clone(),
+        tier,
+    });
     get_persistent_default(e, &key, || 0, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED)
 }
 
-/// Store the sub-stroop haircut remainder for one pool's USDC auction proceeds.
-pub fn set_buyback_carry(e: &Env, pool: &Address, carry: i128) {
-    let key = BackstopDataKey::BuybackCarry(pool.clone());
+/// Store the sub-stroop haircut remainder for one pool tier's auction proceeds.
+pub fn set_buyback_carry(e: &Env, pool: &Address, tier: BackstopTier, carry: i128) {
+    let key = BackstopDataKey::BuybackCarry(PoolTierKey {
+        pool: pool.clone(),
+        tier,
+    });
     e.storage().persistent().set(&key, &carry);
     e.storage()
         .persistent()
@@ -347,14 +364,14 @@ pub fn set_user_balance(e: &Env, pool: &Address, user: &Address, balance: &UserB
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 }
 
-/// Fetch a user's balance for one fixed backstop tier.
+/// Fetch a user's balance for one configured backstop tier.
 pub fn get_user_balance_for_tier(
     e: &Env,
     tier: BackstopTier,
     pool: &Address,
     user: &Address,
 ) -> UserBalance {
-    if tier == BackstopTier::BlndUsdc {
+    if tier == BackstopTier::SecondLoss {
         return get_user_balance(e, pool, user);
     }
     let key = BackstopDataKey::TierUserBalance(PoolUserTierKey {
@@ -371,7 +388,7 @@ pub fn get_user_balance_for_tier(
     )
 }
 
-/// Set a user's balance for one fixed backstop tier.
+/// Set a user's balance for one configured backstop tier.
 pub fn set_user_balance_for_tier(
     e: &Env,
     tier: BackstopTier,
@@ -379,7 +396,7 @@ pub fn set_user_balance_for_tier(
     user: &Address,
     balance: &UserBalance,
 ) {
-    if tier == BackstopTier::BlndUsdc {
+    if tier == BackstopTier::SecondLoss {
         set_user_balance(e, pool, user, balance);
         return;
     }
@@ -397,6 +414,27 @@ pub fn set_user_balance_for_tier(
 }
 
 /********** Pool Balance **********/
+
+/// Fetch a previously verified immutable pool backstop configuration.
+pub fn get_pool_backstop_config(e: &Env, pool: &Address) -> Option<Vec<BackstopTierConfig>> {
+    let key = BackstopDataKey::PoolBackstopConfig(pool.clone());
+    let config = e.storage().persistent().get(&key);
+    if config.is_some() {
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+    }
+    config
+}
+
+/// Cache a factory-verified immutable pool backstop configuration.
+pub fn set_pool_backstop_config(e: &Env, pool: &Address, config: &Vec<BackstopTierConfig>) {
+    let key = BackstopDataKey::PoolBackstopConfig(pool.clone());
+    e.storage().persistent().set(&key, config);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
 
 /// Fetch the balances for a given pool
 ///
@@ -432,9 +470,9 @@ pub fn set_pool_balance(e: &Env, pool: &Address, balance: &PoolBalance) {
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
-/// Fetch a pool's balance for one fixed backstop tier.
+/// Fetch a pool's balance for one configured backstop tier.
 pub fn get_pool_balance_for_tier(e: &Env, tier: BackstopTier, pool: &Address) -> PoolBalance {
-    if tier == BackstopTier::BlndUsdc {
+    if tier == BackstopTier::SecondLoss {
         return get_pool_balance(e, pool);
     }
     let key = BackstopDataKey::TierPoolBalance(PoolTierKey {
@@ -454,14 +492,14 @@ pub fn get_pool_balance_for_tier(e: &Env, tier: BackstopTier, pool: &Address) ->
     )
 }
 
-/// Set a pool's balance for one fixed backstop tier.
+/// Set a pool's balance for one configured backstop tier.
 pub fn set_pool_balance_for_tier(
     e: &Env,
     tier: BackstopTier,
     pool: &Address,
     balance: &PoolBalance,
 ) {
-    if tier == BackstopTier::BlndUsdc {
+    if tier == BackstopTier::SecondLoss {
         set_pool_balance(e, pool, balance);
         return;
     }

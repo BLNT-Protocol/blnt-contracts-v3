@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use backstop::BackstopTier;
-use mock_pool_factory::MockPoolFactoryClient;
+use mock_pool_factory::{
+    BackstopAsset as MockBackstopAsset, BackstopTierConfig as MockBackstopTierConfig,
+    MockPoolFactoryClient,
+};
 use soroban_sdk::{testutils::Address as _, vec, Address, String};
 use test_suites::test_fixture::{TestFixture, TokenIndex, SCALAR_7};
 
@@ -27,8 +30,21 @@ fn exercise_reward_zone(wasm: bool) {
         let second = Address::generate(&e);
         let third = Address::generate(&e);
         let factory = MockPoolFactoryClient::new(&e, &fixture.pool_factory.address);
-        factory.set_pool(&second);
-        factory.set_pool(&third);
+        let config = fixture
+            .backstop_config
+            .iter()
+            .map(|tier| MockBackstopTierConfig {
+                asset: match tier.asset {
+                    pool_factory::BackstopAsset::BlndXlm => MockBackstopAsset::BlndXlm,
+                    pool_factory::BackstopAsset::BlndUsdc => MockBackstopAsset::BlndUsdc,
+                    pool_factory::BackstopAsset::Usdc => MockBackstopAsset::Usdc,
+                    pool_factory::BackstopAsset::Xlm => MockBackstopAsset::Xlm,
+                },
+                take_rate_weight: tier.take_rate_weight,
+            });
+        let config = soroban_sdk::Vec::from_iter(&e, config);
+        factory.set_pool_config(&second, &config);
+        factory.set_pool_config(&third, &config);
         (second, third)
     };
 
@@ -44,13 +60,13 @@ fn exercise_reward_zone(wasm: bool) {
     let usdc_deposit = ACTIVATION_THRESHOLD_USDC - lp_deposit;
     for pool in [&first, &second, &third] {
         fixture.backstop.deposit(
-            &backstop::BackstopTier::BlndUsdc,
+            &backstop::BackstopTier::SecondLoss,
             &depositor,
             pool,
             &lp_deposit,
         );
         fixture.backstop.deposit(
-            &backstop::BackstopTier::Usdc,
+            &backstop::BackstopTier::ThirdLoss,
             &depositor,
             pool,
             &usdc_deposit,
@@ -60,12 +76,24 @@ fn exercise_reward_zone(wasm: bool) {
     fixture.backstop.add_reward(&first, &None);
     fixture.backstop.distribute();
     fixture.jump(6);
-    let first_tokens_before = fixture.backstop.pool_data(&first).blnd_usdc.tokens;
+    let first_tokens_before = fixture
+        .backstop
+        .pool_data(&first)
+        .tiers
+        .get(1)
+        .unwrap()
+        .tokens;
     fixture
         .backstop
-        .deposit(&BackstopTier::BlndUsdc, &depositor, &first, &lp_deposit);
+        .deposit(&BackstopTier::SecondLoss, &depositor, &first, &lp_deposit);
     assert_eq!(
-        fixture.backstop.pool_data(&first).blnd_usdc.tokens,
+        fixture
+            .backstop
+            .pool_data(&first)
+            .tiers
+            .get(1)
+            .unwrap()
+            .tokens,
         first_tokens_before + lp_deposit
     );
     fixture.backstop.add_reward(&second, &None);
@@ -75,14 +103,14 @@ fn exercise_reward_zone(wasm: bool) {
 
     let third_data = fixture.backstop.pool_data(&third);
     assert!(third_data.active_value >= ACTIVATION_THRESHOLD_USDC);
-    assert!(third_data.blnd_usdc.tokens > 0);
+    assert!(third_data.tiers.get(1).unwrap().tokens > 0);
     fixture.jump(60 * 60 + 1);
     assert!(fixture.backstop.try_add_reward(&third, &None).is_err());
     fixture.backstop.distribute();
     fixture.backstop.add_reward(&third, &None);
 
     fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &depositor,
         &second,
         &lp_deposit,
@@ -92,7 +120,7 @@ fn exercise_reward_zone(wasm: bool) {
     assert_eq!(
         fixture
             .backstop
-            .user_balance(&BackstopTier::BlndUsdc, &second, &depositor)
+            .user_balance(&BackstopTier::SecondLoss, &second, &depositor)
             .shares,
         0
     );

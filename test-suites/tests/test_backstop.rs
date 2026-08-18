@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use backstop::{BackstopClient, BackstopContract, BackstopTier};
+use backstop::{BackstopContract, BackstopTier};
 use mock_pool_factory::{MockPoolFactory, PoolInitMeta};
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
@@ -37,7 +37,9 @@ fn test_backstop() {
 
     // Verify constructor bound the BLND:USDC tier token.
     assert_eq!(
-        fixture.backstop.backstop_token(&BackstopTier::BlndUsdc),
+        fixture
+            .backstop
+            .backstop_token(&BackstopTier::SecondLoss, &pool.address),
         bstop_token.address.clone()
     );
 
@@ -80,7 +82,7 @@ fn test_backstop() {
     fixture.backstop.distribute();
     let amount = 12_500 * SCALAR_7;
     let result = fixture.backstop.deposit(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool.address,
         &amount,
@@ -97,7 +99,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "deposit"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -133,7 +135,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "deposit"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -175,7 +177,7 @@ fn test_backstop() {
     );
     fixture
         .backstop
-        .donate(&BackstopTier::BlndUsdc, &frodo, &pool.address, &amount);
+        .donate(&BackstopTier::SecondLoss, &frodo, &pool.address, &amount);
     frodo_bstop_token_balance -= amount;
     bstop_bstop_token_balance += amount;
     assert_eq!(
@@ -188,7 +190,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "donate"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         frodo.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -208,7 +210,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "donate"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         frodo.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -227,7 +229,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "donate"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone(),
                     frodo.clone()
                 )
@@ -247,7 +249,7 @@ fn test_backstop() {
     // Sam queues 100% of position for withdrawal
     let amount = 12_500 * SCALAR_7; // shares
     let result = fixture.backstop.queue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool.address,
         &amount,
@@ -262,7 +264,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "queue_withdrawal"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -286,7 +288,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "queue_withdrawal"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -315,7 +317,7 @@ fn test_backstop() {
     // -> sam now makes up 11% of the unqueued shares in the backstop
     let amount = 6_250 * SCALAR_7; // shares
     fixture.backstop.dequeue_withdrawal(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool.address,
         &amount,
@@ -330,7 +332,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "dequeue_withdrawal"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env)
@@ -349,7 +351,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "dequeue_withdrawal"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -373,7 +375,7 @@ fn test_backstop() {
     let amount = 1_000 * SCALAR_7;
     fixture
         .backstop
-        .draw(&BackstopTier::BlndUsdc, &pool.address, &amount, &frodo);
+        .draw(&BackstopTier::SecondLoss, &pool.address, &amount, &frodo);
     frodo_bstop_token_balance += amount;
     bstop_bstop_token_balance -= amount;
     assert_eq!(
@@ -386,7 +388,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "draw"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env),
                         frodo.to_val()
@@ -405,7 +407,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "draw"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone()
                 )
                     .into_val(&fixture.env),
@@ -426,7 +428,7 @@ fn test_backstop() {
     // Sam withdraws the queue position
     let amount = 6_250 * SCALAR_7; // shares
     let result = fixture.backstop.withdraw(
-        &backstop::BackstopTier::BlndUsdc,
+        &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool.address,
         &amount,
@@ -444,7 +446,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "withdraw"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         sam.to_val(),
                         pool.address.to_val(),
                         amount.into_val(&fixture.env),
@@ -469,7 +471,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "withdraw"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     pool.address.clone(),
                     sam.clone()
                 )
@@ -491,10 +493,10 @@ fn test_backstop() {
     let sam_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
     let sam_shares = fixture
         .backstop
-        .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
+        .user_balance(&BackstopTier::SecondLoss, &pool.address, &sam)
         .shares;
     let lp_compounded = fixture.backstop.claim(
-        &BackstopTier::BlndUsdc,
+        &BackstopTier::SecondLoss,
         &sam,
         &vec![&fixture.env, pool.address.clone()],
         &0,
@@ -509,7 +511,7 @@ fn test_backstop() {
                     Symbol::new(&fixture.env, "claim"),
                     vec![
                         &fixture.env,
-                        BackstopTier::BlndUsdc.into_val(&fixture.env),
+                        BackstopTier::SecondLoss.into_val(&fixture.env),
                         sam.to_val(),
                         vec![&fixture.env, pool.address.clone()].to_val(),
                         0_i128.into_val(&fixture.env),
@@ -525,7 +527,7 @@ fn test_backstop() {
         bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
     let shares_minted = fixture
         .backstop
-        .user_balance(&BackstopTier::BlndUsdc, &pool.address, &sam)
+        .user_balance(&BackstopTier::SecondLoss, &pool.address, &sam)
         .shares
         - sam_shares;
     assert_eq!(
@@ -536,7 +538,7 @@ fn test_backstop() {
                 fixture.backstop.address.clone(),
                 (
                     Symbol::new(&fixture.env, "claim"),
-                    BackstopTier::BlndUsdc,
+                    BackstopTier::SecondLoss,
                     sam.clone(),
                     pool.address.clone()
                 )
@@ -643,12 +645,6 @@ fn test_backstop_constructor() {
             .unwrap();
         assert_eq!(contract_drop_list, drop_list);
     });
-
-    let backstop_client = BackstopClient::new(&e, &contract_id);
-    assert_eq!(
-        backstop_client.backstop_token(&BackstopTier::BlndUsdc),
-        backstop_token
-    );
 }
 
 #[test]

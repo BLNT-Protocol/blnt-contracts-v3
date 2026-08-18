@@ -29,24 +29,24 @@ Private storage-only types are excluded.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnd_usdc_token, blnd_xlm_token, emitter, blnd_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the three fixed backstop assets and both Comet LPs. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnd_usdc_token, blnd_xlm_token, emitter, blnd_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical assets and both emission-eligible Comet LPs. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `deposit(from, pool, amount) -> i128` | `deposit(tier, from, pool, amount) -> i128` | Extended | Selects one independently accounted tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `queue_withdrawal(from, pool, amount) -> Q4W` | `queue_withdrawal(tier, from, pool, amount) -> Q4W` | Extended | Queues shares in one tier under the aggregate queue bound. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `dequeue_withdrawal(from, pool, amount)` | `dequeue_withdrawal(tier, from, pool, amount)` | Extended | Restores queued shares in one tier. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `withdraw(from, pool, amount) -> i128` | `withdraw(tier, from, pool, amount, to) -> i128` | Extended | Selects the tier and makes the withdrawal recipient explicit. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `user_balance(pool, user) -> UserBalance` | `user_balance(tier, pool, user) -> UserBalance` | Extended | Returns one pool-user balance for one tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
-| `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with three tier summaries, aggregate active USDC value, and value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
-| `backstop_token() -> Address` | `backstop_token(tier) -> Address` | Extended | Resolves the immutable token for the selected tier. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
-| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; membership uses v3 activation value and BLND-bearing weight. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with an ordered one-to-three-tier vector, aggregate active USDC-equivalent value, and value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
+| `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; membership uses v3 activation value while allocation and full-zone replacement use eligible underlying BLND. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `distribute() -> i128` | Same | Extended | Keeps the v2 checkpoint surface while validating migration and allocating tier-aware emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-migration-lifecycle-and-backfill--extended) |
 | `gulp_emissions(pool) -> i128` | Same | Extended | Retains the 70/30 gulp while scheduling the eligible tier streams. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `add_reward(to_add, to_remove)` | Same | Extended | Admission and replacement use v3 activation and underlying-BLND rules. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation threshold and zero-BLND exception. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `add_reward(to_add, to_remove)` | Same | Extended | Admission uses v3 activation; full-zone replacement remains strictly underlying-BLND weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation valuation and otherwise preserves the v2 threshold and checkpoint rules. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLND-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `drop()` | Same | Extended | Keeps the v2 drop surface while verifying and funding the scheduled migration backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-migration-lifecycle-and-backfill--extended) |
-| — | `buy_and_burn() -> i128` | Added | Permissionlessly swaps one bounded pending-USDC haircut batch through the canonical BLND:USDC Comet and burns the exact BLND output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
+| — | `buy_and_burn(asset) -> i128` | Added | Permissionlessly swaps one bounded pending USDC or XLM haircut batch through its canonical BLND Comet and burns the exact BLND output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 | `draw(pool, amount, to)` | `draw(tier, pool, amount, to)` | Extended | A pool draws loss capital from the tier selected by the waterfall. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
-| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLND-tier payment or 99% of a plain-USDC payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
+| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLND-LP-tier payment or 99% of a plain-USDC/plain-XLM payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 
 ### Data types
 
@@ -54,9 +54,10 @@ Private storage-only types are excluded.
 | --- | --- | --- | --- |
 | `Q4W` | <code>{"amount":100000000, "exp":1800000000}</code> | Same | Shape is unchanged. V3 maintains an independent queue per tier under one aggregate pool-user entry bound. |
 | `UserBalance` | <code>{"shares":900000000, "q4w":[{"amount":100000000, "exp":1800000000}]}</code> | Same shape, returned for the selected `tier` | `shares` excludes queued shares in both versions. |
-| `BackstopTier` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, or `"Usdc"` | New public selector for a fixed v3 backstop asset. Enum declaration order is not the loss-waterfall order. |
-| `PoolTierData` | Not present | <code>{"tokens":500000000, "shares":500000000, "value":500000000}</code> | New nested summary; `value` is the tier's canonical seven-decimal USDC value. |
-| `PoolBackstopData` | <code>{"tokens":1000000000, "shares":1000000000, "q4w_pct":1000000, "blnd":8000000000, "usdc":200000000, "token_spot_price":10000000}</code> | <code>{"active_value":900000000, "blnd_usdc":{"tokens":300000000, "shares":300000000, "value":300000000}, "blnd_xlm":{"tokens":500000000, "shares":500000000, "value":500000000}, "q4w_pct":1000000, "usdc":{"tokens":200000000, "shares":200000000, "value":200000000}}</code> | Replaced view shape. V3 reports all tiers, aggregate active value, and value-weighted Q4W instead of one LP's underlying reserves and spot price. |
+| `BackstopTier` | Not present | One of `"FirstLoss"`, `"SecondLoss"`, or `"ThirdLoss"` | New public selector for a v3 loss-waterfall position. Enum declaration order is the loss-waterfall order. |
+| `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | The only canonical assets assignable to a v3 tier. |
+| `PoolTierData` | Not present | <code>{"asset":"BlndXlm", "blnd_emission_eligible":true, "take_rate_weight":4, "token":"C_BLND_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}</code> | New nested summary; `value` is the tier's verified seven-decimal USDC-equivalent value. |
+| `PoolBackstopData` | <code>{"tokens":1000000000, "shares":1000000000, "q4w_pct":1000000, "blnd":8000000000, "usdc":200000000, "token_spot_price":10000000}</code> | <code>{"active_value":900000000, "q4w_pct":1000000, "tiers":[{"asset":"BlndXlm", "blnd_emission_eligible":true, "take_rate_weight":4, "token":"C_BLND_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}, {"asset":"Xlm", "blnd_emission_eligible":false, "take_rate_weight":2, "token":"C_XLM", "tokens":400000000, "shares":400000000, "value":400000000}]}</code> | Replaced view shape. V3 reports configured tiers, aggregate active value, and value-weighted Q4W instead of one LP's underlying reserves and spot price. |
 
 ## Pool
 
@@ -94,7 +95,7 @@ not a signature change.
 | `new_auction(auction_type, user, bid, lot, percent) -> AuctionData` | Same | Extended | Keeps the generic v2 API while privately selecting and settling backstop tiers for types 1 and 2. An empty backstop-auction assertion means “accept the canonical set”; a nonempty assertion must match it and never chooses assets. Interest `lot` remains a required reserve input. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | `get_auction(auction_type, user) -> AuctionData` | Same | Unchanged | Returns the v2-compatible public auction projection; tier metadata is private. [V3 §5.1](V3_SYSTEM_SPEC.md#51-tier-auction-lifecycle) |
 | `del_auction(auction_type, user)` | Same | Extended | Retains v2 stale deletion and releases any private tier selection. [V3 §5.1](V3_SYSTEM_SPEC.md#51-tier-auction-lifecycle) |
-| `bad_debt(user)` | Same | Extended | Supplier default requires exhaustion of all three tiers. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
+| `bad_debt(user)` | Same | Extended | Supplier default requires exhaustion of every configured tier. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
 
 ### Data types
 
@@ -120,17 +121,20 @@ appear in these values.
 
 ### Entry points
 
-The pool-factory source and public ABI are unchanged between the frozen v2
-baseline and the v3 candidate.
+The v3 factory extends deployment with each pool's immutable backstop
+configuration and exposes that configuration to the backstop and clients.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
 | `__constructor(pool_init_meta)` | Same | Unchanged | Binds the immutable pool WASM hash, backstop, and BLND token through `PoolInitMeta`. |
-| `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral) -> Address` | Same | Unchanged | Deploys a pool with the v2-compatible constructor ABI. |
-| `is_pool(pool_id) -> bool` | Same | Unchanged | Preserves the factory-registration boundary used by the backstop. |
+| `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral) -> Address` | `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral, backstop_config) -> Address` | Extended | Deploys a pool and immutably records its ordered one-to-three-tier configuration. |
+| `is_pool(pool_address) -> bool` | Same | Unchanged | Preserves the factory-registration boundary used by the backstop. |
+| — | `backstop_config(pool_address) -> Vec<BackstopTierConfig>` | Extended | Returns a registered pool's immutable ordered backstop configuration. |
 
 ### Data types
 
 | Type | V2 example | V3 example | Comparison |
 | --- | --- | --- | --- |
 | `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
+| `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
+| `BackstopTierConfig` | Not present | <code>{"asset":"BlndXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Weights are integers from 1 through 10 and strictly decrease in entry order; no backstop oracle is configured. |
