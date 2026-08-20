@@ -175,6 +175,16 @@ vec_event!(
     [asset: Address, from: Address, contract: Address],
     [tokens_out: i128, d_tokens_minted: i128]
 );
+vec_event!(
+    ClawbackEvent,
+    "clawback",
+    [asset: Address, from: Address],
+    [
+        amount: i128,
+        supply_burned: i128,
+        collateral_burned: i128
+    ]
+);
 single_value_event!(
     GulpEvent,
     "gulp",
@@ -556,6 +566,28 @@ impl PoolEvents {
         .publish(e);
     }
 
+    /// Emitted when a reserve issuer claws back supplied assets.
+    ///
+    /// - topics - `["clawback", asset: Address, from: Address]`
+    /// - data - `[amount: i128, supply_burned: i128, collateral_burned: i128]`
+    pub fn clawback(
+        e: &Env,
+        asset: Address,
+        from: Address,
+        amount: i128,
+        supply_burned: i128,
+        collateral_burned: i128,
+    ) {
+        ClawbackEvent {
+            asset,
+            from,
+            amount,
+            supply_burned,
+            collateral_burned,
+        }
+        .publish(e);
+    }
+
     /// Emitted when a reserve gulps excess tokens
     ///
     /// - topics - `["gulp", asset: Address]`
@@ -685,6 +717,25 @@ mod tests {
             },
             (Symbol::new(&e, "delete_auction"), 0_u32, from).into_val(&e),
             ().into_val(&e),
+        );
+    }
+
+    #[test]
+    fn typed_clawback_event_has_documented_shape() {
+        let e = Env::default();
+        let asset = Address::generate(&e);
+        let from = Address::generate(&e);
+        assert_legacy_shape(
+            &e,
+            &ClawbackEvent {
+                asset: asset.clone(),
+                from: from.clone(),
+                amount: 100,
+                supply_burned: 60,
+                collateral_burned: 40,
+            },
+            (Symbol::new(&e, "clawback"), asset, from).into_val(&e),
+            (100_i128, 60_i128, 40_i128).into_val(&e),
         );
     }
 }

@@ -163,6 +163,16 @@ pub trait Pool {
         requests: Vec<Request>,
     ) -> Positions;
 
+    /// Claw back an exact amount of a user's supplied reserve.
+    ///
+    /// The reserve's Stellar Asset Contract requires its administrator's
+    /// authorization and rejects the operation unless this pool's balance
+    /// entry is clawbackable. Ordinary supply is removed before collateral.
+    /// The operation may leave the user unhealthy for the inherited
+    /// liquidation and bad-debt paths to resolve. If collateral is removed,
+    /// an active user-liquidation auction is atomically invalidated.
+    fn clawback(e: Env, asset: Address, from: Address, amount: i128);
+
     /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
     ///
     /// Backstop-triggered statuses are odd:
@@ -482,6 +492,23 @@ impl Pool for PoolContract {
         from.require_auth();
 
         pool::execute_submit_with_flash_loan(&e, &from, flash_loan, requests)
+    }
+
+    fn clawback(e: Env, asset: Address, from: Address, amount: i128) {
+        storage::extend_instance(&e);
+
+        let (supply_burned, collateral_burned, auction_invalidated) =
+            pool::execute_clawback(&e, &asset, &from, amount);
+
+        if auction_invalidated {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::UserLiquidation as u32,
+                from.clone(),
+            );
+        }
+
+        PoolEvents::clawback(&e, asset, from, amount, supply_burned, collateral_burned);
     }
 
     fn update_status(e: Env) -> u32 {

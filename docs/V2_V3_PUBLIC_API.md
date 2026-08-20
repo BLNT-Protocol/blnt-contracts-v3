@@ -63,9 +63,9 @@ Private storage-only types are excluded.
 
 ### Entry points
 
-All pool entry-point signatures remain v2-compatible. An **Extended** row
-therefore identifies changed caller-visible validation or tier-aware behavior,
-not a signature change.
+Except for the added reserve-clawback operation, pool entry-point signatures
+remain v2-compatible. An **Extended** row identifies changed caller-visible
+validation or tier-aware behavior, not a signature change.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
@@ -84,6 +84,7 @@ not a signature change.
 | `submit(from, spender, to, requests) -> Positions` | Same | Extended | Adds bounded requests, exact token deltas, and tier-aware auction settlement behind the v2 request ABI. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | `submit_with_allowance(from, spender, to, requests) -> Positions` | Same | Extended | Applies the same v3 safety checks to allowance-based submission. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | `flash_loan(from, flash_loan, requests) -> Positions` | Same | Extended | Applies the v3 request bound and exact-balance checks to flash-loan submission. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
+| — | `clawback(asset, from, amount)` | Added | Lets the reserve SAC administrator burn an exact clawbackable pool balance while removing the corresponding user's ordinary supply before collateral and invalidating an affected liquidation auction. [V3 §4.4](V3_SYSTEM_SPEC.md#44-reserve-clawback--added) |
 | `update_status() -> u32` | Same | Extended | Uses aggregate canonical USDC value and value-weighted Q4W. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `set_status(pool_status)` | Same | Extended | Retains v2 admin statuses but validates them against v3 valuation. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `gulp(asset) -> i128` | Same | Unchanged | Retains v2 reserve-credit reconciliation. |

@@ -245,6 +245,44 @@ leaves collateral and liabilities while reducing health.
 The handoff uses one liability-map load and store, remains bounded by 30
 reserves, and MUST fit Protocol-27 invocation limits.
 
+### 4.4 Reserve clawback — **Added**
+
+The pool exposes `clawback(asset, from, amount)` as a multi-reserve extension
+of the Stellar Asset Contract clawback operation. It accepts a configured
+reserve, a Blend position owner, and a strictly positive exact underlying
+amount. `from` identifies the internal Blend position; the pool contract is
+the token holder passed to the reserve SAC.
+
+The operation MUST:
+
+- Reject the pool itself as `from`.
+- Accrue the reserve and affected user emission state before changing shares.
+- Convert `amount` to bTokens by rounding upward, require the user to own that
+  many supply-plus-collateral bTokens, consume ordinary supply first, and then
+  consume collateral.
+- Require at least `amount` of liquid reserve tokens in the pool.
+- Invoke the reserve SAC's `clawback(pool, amount)`. That invocation MUST
+  require the current SAC administrator's authorization and MUST fail unless
+  the pool's SAC balance entry is clawbackable.
+- Verify an exact `amount` decrease in the pool's reserve-token balance and
+  emit the underlying amount and ordinary-supply and collateral bTokens
+  burned.
+- Preserve an active user-liquidation auction when only ordinary supply is
+  consumed. If any collateral is consumed, atomically delete the auction and
+  emit the inherited auction-deletion event before the clawback event so a
+  fresh liquidation can be created from the updated position.
+
+The operation is exact rather than best-effort: it does not cap to available
+user shares or pool liquidity. Any failure rolls back the SAC burn, share and
+reserve accounting, emissions, auction invalidation, and events atomically. It
+requires no position-owner authorization, applies no pool-status or
+reserve-enabled gate, and does not perform a post-clawback health check. A
+resulting unhealthy position uses the inherited user-liquidation, bad-debt
+handoff, waterfall, and supplier-loss paths; clawback itself neither creates
+liabilities nor starts an auction.
+This entry point cannot prevent the SAC administrator from invoking the SAC
+directly; a direct clawback bypasses Blend position accounting.
+
 ## 5. Loss waterfall — **Replaced**
 
 This replaces the single-token realization in `V2-AUCTION-003` and
