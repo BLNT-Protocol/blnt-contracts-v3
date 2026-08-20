@@ -31,6 +31,7 @@ Private storage-only types are excluded.
 | --- | --- | --- | --- |
 | `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnd_usdc_token, blnd_xlm_token, emitter, blnd_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical assets and both emission-eligible Comet LPs. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `deposit(from, pool, amount) -> i128` | `deposit(tier, from, pool, amount) -> i128` | Extended | Selects one independently accounted tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
+| — | `clawback(tier, pool, from, amount)` | Added | Lets a tier-token SAC administrator burn an exact clawbackable backstop balance while removing the user's active shares before queued shares. [V3 §3.4](V3_SYSTEM_SPEC.md#34-backstop-clawback--added) |
 | `queue_withdrawal(from, pool, amount) -> Q4W` | `queue_withdrawal(tier, from, pool, amount) -> Q4W` | Extended | Queues shares in one tier under the aggregate queue bound. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `dequeue_withdrawal(from, pool, amount)` | `dequeue_withdrawal(tier, from, pool, amount)` | Extended | Restores queued shares in one tier. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `withdraw(from, pool, amount) -> i128` | `withdraw(tier, from, pool, amount, to) -> i128` | Extended | Selects the tier and makes the withdrawal recipient explicit. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |

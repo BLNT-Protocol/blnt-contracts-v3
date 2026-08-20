@@ -30,6 +30,13 @@ pub trait Backstop {
         amount: i128,
     ) -> i128;
 
+    /// Claw back an exact underlying amount from a user's pool-tier position.
+    ///
+    /// The tier token's Stellar Asset Contract requires its administrator's
+    /// authorization and a clawbackable balance entry for this backstop.
+    /// Active shares are removed before newest-first queued shares.
+    fn clawback(e: Env, tier: BackstopTier, pool: Address, from: Address, amount: i128);
+
     /// Queue shares from `tier` for withdrawal.
     fn queue_withdrawal(
         e: Env,
@@ -228,6 +235,23 @@ impl Backstop for BackstopContract {
 
         BackstopEvents::tier_deposit(&e, tier, pool_address, from, amount, shares);
         shares
+    }
+
+    fn clawback(e: Env, tier: BackstopTier, pool: Address, from: Address, amount: i128) {
+        storage::extend_instance(&e);
+
+        let (active_shares_burned, q4w_shares_burned) =
+            backstop::execute_clawback(&e, tier, &pool, &from, amount);
+
+        BackstopEvents::tier_clawback(
+            &e,
+            tier,
+            pool,
+            from,
+            amount,
+            active_shares_burned,
+            q4w_shares_burned,
+        );
     }
 
     fn queue_withdrawal(

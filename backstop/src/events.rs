@@ -71,6 +71,16 @@ vec_event!(
     [tokens_in: i128, shares_minted: i128]
 );
 vec_event!(
+    TierClawbackEvent,
+    "clawback",
+    [tier: BackstopTier, pool_address: Address, from: Address],
+    [
+        amount: i128,
+        active_shares_burned: i128,
+        q4w_shares_burned: i128
+    ]
+);
+vec_event!(
     TierQueueWithdrawalEvent,
     "queue_withdrawal",
     [tier: BackstopTier, pool_address: Address, from: Address],
@@ -160,6 +170,27 @@ impl BackstopEvents {
             from,
             tokens_in,
             shares_minted,
+        }
+        .publish(e);
+    }
+
+    /// Emit an issuer-authorized tier clawback.
+    pub fn tier_clawback(
+        e: &Env,
+        tier: BackstopTier,
+        pool_address: Address,
+        from: Address,
+        amount: i128,
+        active_shares_burned: i128,
+        q4w_shares_burned: i128,
+    ) {
+        TierClawbackEvent {
+            tier,
+            pool_address,
+            from,
+            amount,
+            active_shares_burned,
+            q4w_shares_burned,
         }
         .publish(e);
     }
@@ -409,6 +440,26 @@ mod tests {
             )
                 .into_val(&e),
             (50_i128, 45_i128).into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &TierClawbackEvent {
+                tier: BackstopTier::ThirdLoss,
+                pool_address: pool.clone(),
+                from: user.clone(),
+                amount: 50,
+                active_shares_burned: 30,
+                q4w_shares_burned: 10,
+            },
+            (
+                Symbol::new(&e, "clawback"),
+                BackstopTier::ThirdLoss,
+                pool.clone(),
+                user.clone(),
+            )
+                .into_val(&e),
+            (50_i128, 30_i128, 10_i128).into_val(&e),
         );
 
         assert_legacy_shape(

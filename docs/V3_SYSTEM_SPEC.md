@@ -100,6 +100,34 @@ Prepared, partially filled, stale, and continued bad-debt auctions MUST retain
 the corresponding v2 withdrawal-blocking liability until settlement or
 supplier default clears it atomically.
 
+### 3.4 Backstop clawback — **Added**
+
+The backstop exposes `clawback(tier, pool, from, amount)` for an issuer to
+remove an exact underlying amount from one user's configured pool-tier
+position. The tier determines the token; the caller cannot supply a different
+asset address. The operation MUST:
+
+- Require a strictly positive amount and sufficient pool-tier tokens, user
+  shares, and physical backstop balance.
+- Convert the underlying amount to shares by rounding upward, consume active
+  shares first, and then consume newest queued-withdrawal entries without
+  applying their expiration gate.
+- Checkpoint the affected user's BLND-emission stream before changing an
+  emission-eligible tier, then refresh the pool's cached emission weight.
+  Issuer clawback MUST remain available during the migration lifecycle.
+- Invoke the tier token SAC's `clawback(backstop, amount)`, thereby requiring
+  its current administrator's authorization and a clawbackable balance entry.
+- Decrease the pool tier's tokens and total shares and its queued shares when
+  applicable, verify the exact token-balance decrease, and emit the underlying
+  amount plus active and queued shares burned.
+
+Any failure rolls back custody, shares, Q4W, emissions, and events atomically.
+Canonical Comet LP tokens are not SACs, and native XLM has no clawbackable
+issuer balance, so their tiers cannot use this operation. A prepared pool
+bad-debt auction may become unfillable after clawback; fills fail atomically and
+the inherited stale-delete and requote path applies. Direct SAC clawback remains
+possible and bypasses backstop accounting.
+
 ## 4. Pool activation — **Replaced**
 
 This replaces `V2-BACKSTOP-004`. For configured tiers (i=1\ldots n), in

@@ -2,6 +2,9 @@ mod deposit;
 pub(crate) use deposit::credit_tier_shares;
 pub use deposit::execute_deposit;
 
+mod clawback;
+pub use clawback::execute_clawback;
+
 mod fund_management;
 pub use fund_management::{execute_donate, execute_draw};
 
