@@ -56,7 +56,12 @@ pool.
 
 The candidate also immutably binds the canonical BLND:USDC and BLND:XLM 80:20
 Comets and canonical BLND, USDC, and XLM assets. No other backstop asset is
-accepted and no backstop tier has an oracle configuration.
+accepted and no backstop tier has an oracle configuration. Each canonical
+Comet MUST be initialized unfrozen and then bound to a classic-account
+controller whose signer weights are all zero and whose authorization
+thresholds are positive. Deployment verification MUST reject any other
+controller state. This makes the Comet's controller-only freeze and controller-
+replacement operations permanently unreachable.
 
 Every tier counts equally per verified USDC for activation, participates in
 take-rate allocation using its configured weight, and absorbs loss in
@@ -100,33 +105,23 @@ Prepared, partially filled, stale, and continued bad-debt auctions MUST retain
 the corresponding v2 withdrawal-blocking liability until settlement or
 supplier default clears it atomically.
 
-### 3.4 Backstop clawback — **Added**
+### 3.4 Non-clawbackable custody — **Safety requirement**
 
-The backstop exposes `clawback(tier, pool, from, amount)` for an issuer to
-remove an exact underlying amount from one user's configured pool-tier
-position. The tier determines the token; the caller cannot supply a different
-asset address. The operation MUST:
+The backstop exposes no issuer-clawback entry point. A deployment MUST prove
+that every relevant issuer-controlled contract balance was created
+non-clawbackable before accepting the deployment:
 
-- Require a strictly positive amount and sufficient pool-tier tokens, user
-  shares, and physical backstop balance.
-- Convert the underlying amount to shares by rounding upward, consume active
-  shares first, and then consume newest queued-withdrawal entries without
-  applying their expiration gate.
-- Checkpoint the affected user's BLND-emission stream before changing an
-  emission-eligible tier, then refresh the pool's cached emission weight.
-  Issuer clawback MUST remain available during the migration lifecycle.
-- Invoke the tier token SAC's `clawback(backstop, amount)`, thereby requiring
-  its current administrator's authorization and a clawbackable balance entry.
-- Decrease the pool tier's tokens and total shares and its queued shares when
-  applicable, verify the exact token-balance decrease, and emit the underlying
-  amount plus active and queued shares burned.
+- the shared backstop's plain-USDC balance;
+- each BLND and paired-asset SAC balance held by the canonical Comets; and
+- any issued-XLM backstop balance used by a non-production fixture.
 
-Any failure rolls back custody, shares, Q4W, emissions, and events atomically.
-Canonical Comet LP tokens are not SACs, and native XLM has no clawbackable
-issuer balance, so their tiers cannot use this operation. A prepared pool
-bad-debt auction may become unfillable after clawback; fills fail atomically and
-the inherited stale-delete and requote path applies. Direct SAC clawback remains
-possible and bypasses backstop accounting.
+Native XLM has no issuer clawback, and the canonical Comet LP contracts expose
+no issuer-clawback operation. Because a SAC does not expose its stored contract-
+balance clawback flag through a public method, deployment verification MUST
+read the exact persistent balance entry and fail closed unless it exists, is
+authorized, has positive custody, and records `clawback = false`. A failed
+check invalidates the deployment. This requirement does not prevent later SAC
+deauthorization, which remains subject to Section 4's accepted behavior.
 
 ## 4. Pool activation — **Replaced**
 
