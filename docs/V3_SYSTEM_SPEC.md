@@ -324,12 +324,13 @@ Reconciliation MUST:
   ceiling-rounded `b_rate` loss calculation, leaving every user's bToken
   balance and every borrower liability unchanged.
 - Cap the supplier attribution at the reserve's aggregate supplier claim and
-  saturate `b_rate` at zero. Any remaining deficit MUST reduce only that
-  reserve's unpaid `backstop_credit`. It MUST proportionally reduce the
-  reserve's pending tier allocations and carry, and MUST cancel an active
-  interest auction whose lot contains the affected reserve before committing
-  that reduction. Reconciliation MUST NOT create backstop liabilities, draw
-  deposited backstop capital, or change another reserve.
+  set `b_rate` exactly to zero when that claim is exhausted. Any remaining
+  deficit MUST reduce only that reserve's unpaid `backstop_credit`. It MUST
+  proportionally reduce the reserve's pending tier allocations and carry, and
+  MUST cancel an active interest auction whose lot contains the affected
+  reserve before committing that reduction. Reconciliation MUST NOT create
+  backstop liabilities, draw deposited backstop capital, or change another
+  reserve.
 - Emit the recognized deficit, supplier attribution, backstop-credit
   attribution, and applied `b_rate` reduction. Cancellation of an affected
   interest auction emits the inherited deletion event first. Repeated
@@ -345,14 +346,14 @@ backstop waterfall and, if necessary, the inherited supplier-default path.
 Reconciliation itself has no user parameter because a direct pool-custody
 clawback does not identify which supplier funded the removed tokens.
 
-The minimum operational `b_rate` is `0.1`, encoded as
-`100_000_000_000` at twelve-decimal precision. Below that rate the affected
-reserve MUST reject new supply, collateral supply, borrowing, and flash loans,
-while withdrawals at current value, repayment, liquidation, bad-debt
-resolution, interest realization, and reconciliation remain available. The
-reserve reopens automatically if existing bTokens remain and accrued borrower
-interest restores `b_rate >= 0.1`. Existing bTokens are not burned or reset
-merely because the rate reaches zero. Before an insolvent user's remaining
+There is no positive minimum operational `b_rate`. At zero the affected reserve
+MUST reject new supply, collateral supply, borrowing, and flash loans, while
+repayment, liquidation, bad-debt resolution, interest realization, and
+reconciliation remain available. Ordinary underlying withdrawals cannot
+convert a positive asset amount at a zero exchange rate. The reserve reopens
+automatically if existing bTokens remain and accrued borrower interest restores
+a positive `b_rate`. Existing bTokens are not burned or reset merely because
+the rate reaches zero. Before an insolvent user's remaining
 liabilities are handed to the backstop, collateral bTokens with zero current
 underlying value MUST be checkpointed, forfeited, and removed. No underlying
 assets are transferred. This prevents an empty-value entry from blocking the
@@ -363,11 +364,12 @@ later rate recovery.
 If forfeiture removes the final bToken, the inherited zero-supply behavior is
 terminal: `b_rate` remains zero, liability interest stops accruing, and the
 reserve cannot accept new risk. Existing liabilities remain repayable or
-liquidatable, and existing take-rate credit remains realizable. Removing an
+liquidatable, and existing take-rate credit remains realizable. Positive
+custody surplus with zero supply is added to `backstop_credit` by `gulp` rather
+than distributed across a nonexistent supplier denominator. Removing an
 individually zero-valued collateral position can reduce the aggregate supplier
 claim by at most one underlying base unit because of fixed-point rounding; any
-resulting positive custody dust remains available to the inherited `gulp`
-operation.
+resulting positive custody dust follows that `gulp` rule.
 
 ## 5. Loss waterfall — **Replaced**
 

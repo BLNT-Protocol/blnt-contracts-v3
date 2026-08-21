@@ -52,7 +52,11 @@ pub fn execute_gulp(e: &Env, asset: &Address) -> i128 {
         return 0;
     }
 
-    reserve.data.backstop_credit += token_balance_delta;
+    reserve.data.backstop_credit = reserve
+        .data
+        .backstop_credit
+        .checked_add(token_balance_delta)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
     reserve.store(e);
 
     return token_balance_delta;
@@ -82,7 +86,12 @@ pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i1
     let supplier_loss = core::cmp::min(loss, supplier_claim);
 
     let previous_b_rate = reserve.data.b_rate;
-    if supplier_loss > 0 {
+    if reserve.data.b_supply > 0 && supplier_loss == supplier_claim {
+        // Canonicalize complete economic exhaustion. Fixed-point floor and
+        // ceiling rounding can otherwise leave a positive b_rate even though
+        // the aggregate supplier claim has reached zero.
+        reserve.data.b_rate = 0;
+    } else if supplier_loss > 0 {
         if reserve.data.b_supply <= 0 {
             panic_with_error!(e, PoolError::BalanceError);
         }
@@ -135,7 +144,7 @@ pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i1
 
 #[cfg(test)]
 mod tests {
-    use crate::constants::SCALAR_7;
+    use crate::constants::{SCALAR_12, SCALAR_7};
     use crate::pool::{execute_gulp, Positions, Request, RequestType};
     use crate::storage::{self, PoolConfig};
     use crate::testutils;
@@ -196,6 +205,55 @@ mod tests {
                 new_reserve_data.backstop_credit,
                 additional_tokens + initial_backstop_credit
             );
+        });
+    }
+
+    #[test]
+    fn test_execute_gulp_credits_surplus_with_zero_supply() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set(LedgerInfo {
+            timestamp: 100,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+        let admin = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (underlying, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.b_rate = 0;
+        reserve_data.b_supply = 0;
+        reserve_data.d_supply = 50 * SCALAR_7;
+        reserve_data.backstop_credit = 50 * SCALAR_7;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &underlying, &reserve_config, &reserve_data);
+
+        let surplus = 10 * SCALAR_7;
+        token.mint(&pool, &surplus);
+        e.as_contract(&pool, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_2000000,
+                    status: 1,
+                    max_positions: 4,
+                },
+            );
+
+            assert_eq!(execute_gulp(&e, &underlying), surplus);
+            let after = storage::get_res_data(&e, &underlying);
+            assert_eq!(after.b_supply, 0);
+            assert_eq!(after.b_rate, 0);
+            assert_eq!(after.d_supply, 50 * SCALAR_7);
+            assert_eq!(after.backstop_credit, 60 * SCALAR_7);
         });
     }
 
@@ -551,6 +609,54 @@ mod tests {
         let reserve = client.get_reserve(&asset);
         assert_eq!(reserve.data.b_rate, 0);
         assert_eq!(reserve.data.backstop_credit, 30 * SCALAR_7);
+        assert_eq!(client.reconcile_loss(&asset), 0);
+    }
+
+    #[test]
+    fn reconcile_loss_canonicalizes_exhausted_supplier_rate_to_zero() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.ledger().set(LedgerInfo {
+            timestamp: 100,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+        let admin = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (asset, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.b_rate = SCALAR_12 + 1;
+        reserve_data.b_supply = SCALAR_7;
+        reserve_data.d_supply = 0;
+        reserve_data.backstop_credit = 0;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &asset, &reserve_config, &reserve_data);
+        e.as_contract(&pool, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_2000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+        });
+
+        token.burn(&pool, &SCALAR_7);
+        let client = PoolClient::new(&e, &pool);
+        assert_eq!(client.reconcile_loss(&asset), SCALAR_7);
+        let after = client.get_reserve(&asset).data;
+        assert_eq!(after.b_supply, SCALAR_7);
+        assert_eq!(after.b_rate, 0);
+        assert_eq!(after.backstop_credit, 0);
         assert_eq!(client.reconcile_loss(&asset), 0);
     }
 }

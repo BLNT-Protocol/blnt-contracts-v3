@@ -36,6 +36,55 @@ fn test_wasm_reconciles_direct_reserve_custody_loss() {
 }
 
 #[test]
+fn test_wasm_accepts_supply_at_any_positive_b_rate() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let before = pool_fixture.pool.get_reserve(&stable.address).data;
+    let supplier_claim = before
+        .b_supply
+        .fixed_mul_floor(before.b_rate, SCALAR_12)
+        .unwrap();
+    let target_claim = supplier_claim / 20;
+    let loss = supplier_claim - target_claim;
+
+    // Credit a direct recovery first so the pool has enough custody to incur
+    // a supplier loss that leaves a positive rate below the former 0.1 gate.
+    stable.mint(&pool_fixture.pool.address, &supplier_claim);
+    assert_eq!(pool_fixture.pool.gulp(&stable.address), supplier_claim);
+    stable.burn(&pool_fixture.pool.address, &loss);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), loss);
+
+    let impaired = pool_fixture.pool.get_reserve(&stable.address).data;
+    assert!(impaired.b_rate > 0);
+    assert!(impaired.b_rate < 100_000_000_000);
+
+    let supplier = Address::generate(&fixture.env);
+    let amount = 10i128.pow(6);
+    stable.mint(&supplier, &amount);
+    let positions = pool_fixture.pool.submit(
+        &supplier,
+        &supplier,
+        &supplier,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::Supply as u32,
+                address: stable.address.clone(),
+                amount,
+            },
+        ],
+    );
+    assert!(
+        positions
+            .supply
+            .get(pool_fixture.reserves[&TokenIndex::STABLE])
+            .unwrap()
+            > 0
+    );
+}
+
+#[test]
 fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];

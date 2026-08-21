@@ -101,12 +101,14 @@ first:
   plain-XLM bids apply the failure-isolated 1% buy-and-burn rule above.
 - A direct lending-reserve custody deficit is reconciled against that
   reserve's supplier rate and then its unpaid take-rate credit without
-  creating backstop debt or touching another reserve. New supply and
-  borrowing stop below a 0.1 bToken exchange rate and resume only if accrued
-  interest restores that rate while b_supply remains positive. Zero b_supply
-  is terminal and freezes liability interest without blocking repayment or
-  liquidation. Only bad debt left by an unhealthy borrower after ordinary
-  collateral liquidation reaches the configured waterfall.
+  creating backstop debt or touching another reserve. Complete supplier-value
+  exhaustion sets the bToken exchange rate exactly to zero. New supply and
+  borrowing stop only at zero and resume if accrued interest restores a
+  positive rate while b_supply remains positive. Zero b_supply is terminal,
+  freezes liability interest without blocking repayment or liquidation, and
+  directs positive custody surplus through `gulp` into backstop credit. Only
+  bad debt left after ordinary collateral liquidation reaches the configured
+  waterfall.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.
 

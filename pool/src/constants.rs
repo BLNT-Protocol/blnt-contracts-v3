@@ -3,10 +3,6 @@
 /// Fixed-point scalar for 12 decimal numbers
 pub const SCALAR_12: i128 = 1_000_000_000_000;
 
-/// Minimum bToken exchange rate at which a reserve may accept new risk.
-/// Represents 0.1 at 12-decimal fixed-point precision.
-pub const MIN_OPERATIONAL_B_RATE: i128 = 100_000_000_000;
-
 /// Fixed-point scalar for 7 decimal numbers
 pub const SCALAR_7: i128 = 1_0000000;
 
