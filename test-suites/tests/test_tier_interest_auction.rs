@@ -4,10 +4,13 @@
 use backstop::BackstopTier;
 use pool::{AuctionType, PoolClient, Request, RequestType, ReserveConfig};
 use pool_factory::{BackstopAsset as FactoryBackstopAsset, BackstopTierConfig};
+use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, testutils::Ledger, vec, Address, Env, String};
 use test_suites::{
+    assertions::event_from_end,
+    create_fixture_with_data,
     liquidity_pool::LPClient,
-    test_fixture::{TestFixture, TokenIndex, SCALAR_7},
+    test_fixture::{TestFixture, TokenIndex, SCALAR_12, SCALAR_7},
 };
 
 #[derive(Clone)]
@@ -53,6 +56,91 @@ fn fill_interest(e: &Env, pool: &PoolClient, backstop: &Address, filler: &Addres
             },
         ],
     );
+}
+
+#[test]
+fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm() {
+    use soroban_sdk::{IntoVal, Symbol};
+
+    let fixture = create_fixture_with_data(true);
+    let e = fixture.env.clone();
+    let pool = &fixture.pools[0].pool;
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let stable_address = stable.address.clone();
+    let added_credit = 10_000 * 10i128.pow(6);
+
+    stable.mint(&pool.address, &added_credit);
+    assert_eq!(pool.gulp(&stable_address), added_credit);
+    fixture
+        .oracle
+        .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
+
+    let empty = vec![&e];
+    let lot_assets = vec![&e, stable_address.clone()];
+    let auction = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &lot_assets,
+        &100,
+    );
+    assert!(auction.lot.get(stable_address.clone()).unwrap() >= 200 * 10i128.pow(6));
+
+    let before = pool.get_reserve(&stable_address).data;
+    let supplier_claim = before
+        .b_supply
+        .fixed_mul_floor(before.b_rate, SCALAR_12)
+        .unwrap();
+    let backstop_credit_loss = 100 * 10i128.pow(6);
+    let loss = supplier_claim + backstop_credit_loss;
+    assert!(stable.balance(&pool.address) >= loss);
+
+    stable.burn(&pool.address, &loss);
+    assert_eq!(pool.reconcile_loss(&stable_address), loss);
+    let reconcile_events = vec![&e, event_from_end(&e, 2), event_from_end(&e, 1)];
+
+    let after = pool.get_reserve(&stable_address).data;
+    assert_eq!(after.b_rate, 0);
+    assert_eq!(after.b_supply, before.b_supply);
+    assert_eq!(after.d_supply, before.d_supply);
+    assert_eq!(
+        after.backstop_credit,
+        before.backstop_credit - backstop_credit_loss
+    );
+    assert!(pool
+        .try_get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address
+        )
+        .is_err());
+    let pending = interest_reserve_state(&e, &pool.address, &stable_address);
+    assert_eq!(
+        pending.first_loss + pending.second_loss + pending.third_loss + pending.carry,
+        after.backstop_credit
+    );
+
+    assert_eq!(
+        reconcile_events,
+        vec![
+            &e,
+            (
+                pool.address.clone(),
+                (
+                    Symbol::new(&e, "delete_auction"),
+                    AuctionType::InterestAuction as u32,
+                    fixture.backstop.address.clone(),
+                )
+                    .into_val(&e),
+                ().into_val(&e),
+            ),
+            (
+                pool.address.clone(),
+                (Symbol::new(&e, "reconcile_loss"), stable_address.clone()).into_val(&e),
+                (loss, supplier_claim, backstop_credit_loss, before.b_rate,).into_val(&e),
+            ),
+        ]
+    );
+    assert_eq!(pool.reconcile_loss(&stable_address), 0);
 }
 
 fn exercise_tier_interest_auctions(wasm: bool) {

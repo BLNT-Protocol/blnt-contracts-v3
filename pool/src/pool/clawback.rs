@@ -3,7 +3,7 @@ use soroban_sdk::{panic_with_error, Address, Env};
 
 use crate::{storage, AuctionType, PoolError};
 
-use super::{Pool, User};
+use super::{gulp::require_reconciled, Pool, User};
 
 /// Claw back an exact underlying amount from a user's supplied reserve.
 ///
@@ -27,6 +27,7 @@ pub fn execute_clawback(
 
     let mut pool = Pool::load(e);
     let mut reserve = pool.load_reserve(e, asset, true);
+    require_reconciled(e, &reserve);
     let mut user = User::load(e, from);
     let reserve_index = reserve.config.index;
     let b_tokens = reserve.to_b_token_up(e, amount);

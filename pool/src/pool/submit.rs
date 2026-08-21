@@ -6,6 +6,7 @@ use crate::{events::PoolEvents, storage, AuctionType, PoolError};
 
 use super::{
     actions::{build_actions_from_request, Actions, Request},
+    gulp::reserve_balance_delta,
     health_factor::PositionData,
     pool::Pool,
     FlashLoan, Positions, RequestType, User,
@@ -51,6 +52,7 @@ pub fn execute_submit(
         actions.check_health,
         &actions.check_max_util,
     );
+    require_reconciled_reserves(e, &pool, &actions, None);
 
     if use_allowance {
         handle_transfer_with_allowance(e, &actions, spender, to);
@@ -119,6 +121,7 @@ pub fn execute_submit_with_flash_loan(
         true,
         &actions.check_max_util,
     );
+    require_reconciled_reserves(e, &pool, &actions, Some(&flash_loan));
 
     // we deal with the flashloan transfer before the others to allow the flash
     // loan to yield the repaid or supplied amount in the transfers.
@@ -147,6 +150,35 @@ pub fn execute_submit_with_flash_loan(
     from_state.store(e);
 
     from_state.positions
+}
+
+/// Require every reserve touched by the submission to remain fully backed
+/// after its scheduled transfers. This compares post-action accounting with
+/// the projected final custody balance so supplies and repayments in the same
+/// batch do not conceal a pre-existing loss. A flash-loan transfer is included
+/// separately because it occurs before the ordinary transfer batch.
+fn require_reconciled_reserves(
+    e: &Env,
+    pool: &Pool,
+    actions: &Actions,
+    flash_loan: Option<&FlashLoan>,
+) {
+    for (asset, reserve) in pool.reserves.iter() {
+        let tokens_in = actions.spender_transfer.get(asset.clone()).unwrap_or(0);
+        let tokens_out = actions.pool_transfer.get(asset.clone()).unwrap_or(0);
+        let flash_out = match flash_loan {
+            Some(flash_loan) if flash_loan.asset == asset => flash_loan.amount,
+            _ => 0,
+        };
+        let projected_delta = reserve_balance_delta(e, &reserve)
+            .checked_add(tokens_in)
+            .and_then(|value| value.checked_sub(tokens_out))
+            .and_then(|value| value.checked_sub(flash_out))
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        if projected_delta < 0 {
+            panic_with_error!(e, PoolError::UnreconciledReserveLoss);
+        }
+    }
 }
 
 /// Validate submit results in a valid state for the pool and user.

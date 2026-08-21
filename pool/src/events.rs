@@ -192,6 +192,17 @@ single_value_event!(
     token_delta: i128
 );
 vec_event!(
+    ReconcileLossEvent,
+    "reconcile_loss",
+    [asset: Address],
+    [
+        loss: i128,
+        supplier_loss: i128,
+        backstop_credit_loss: i128,
+        b_rate_loss: i128
+    ]
+);
+vec_event!(
     NewAuctionEvent,
     "new_auction",
     [auction_type: u32, user: Address],
@@ -600,6 +611,29 @@ impl PoolEvents {
         GulpEvent { asset, token_delta }.publish(e);
     }
 
+    /// Emitted when a reserve custody deficit is reconciled.
+    ///
+    /// - topics - `["reconcile_loss", asset: Address]`
+    /// - data - `[loss: i128, supplier_loss: i128,
+    ///   backstop_credit_loss: i128, b_rate_loss: i128]`
+    pub fn reconcile_loss(
+        e: &Env,
+        asset: Address,
+        loss: i128,
+        supplier_loss: i128,
+        backstop_credit_loss: i128,
+        b_rate_loss: i128,
+    ) {
+        ReconcileLossEvent {
+            asset,
+            loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+        }
+        .publish(e);
+    }
+
     /// Emitted when a new auction is created
     ///
     /// - topics - `["new_auction", auction_type: u32, user: Address]`
@@ -736,6 +770,24 @@ mod tests {
             },
             (Symbol::new(&e, "clawback"), asset, from).into_val(&e),
             (100_i128, 60_i128, 40_i128).into_val(&e),
+        );
+    }
+
+    #[test]
+    fn typed_reconcile_loss_event_has_documented_shape() {
+        let e = Env::default();
+        let asset = Address::generate(&e);
+        assert_legacy_shape(
+            &e,
+            &ReconcileLossEvent {
+                asset: asset.clone(),
+                loss: 100,
+                supplier_loss: 80,
+                backstop_credit_loss: 20,
+                b_rate_loss: 25,
+            },
+            (Symbol::new(&e, "reconcile_loss"), asset).into_val(&e),
+            (100_i128, 80_i128, 20_i128, 25_i128).into_val(&e),
         );
     }
 }

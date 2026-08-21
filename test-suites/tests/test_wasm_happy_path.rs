@@ -16,6 +16,26 @@ use test_suites::{
 };
 
 #[test]
+fn test_wasm_reconciles_direct_reserve_custody_loss() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let accrued = pool_fixture.pool.get_reserve(&stable.address).data;
+    let loss = 100_000_i128;
+    let expected_b_rate_loss = loss.fixed_div_ceil(accrued.b_supply, SCALAR_12).unwrap();
+
+    stable.burn(&pool_fixture.pool.address, &loss);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), loss);
+
+    let reconciled = pool_fixture.pool.get_reserve(&stable.address).data;
+    assert_eq!(reconciled.b_rate, accrued.b_rate - expected_b_rate_loss);
+    assert_eq!(reconciled.b_supply, accrued.b_supply);
+    assert_eq!(reconciled.d_supply, accrued.d_supply);
+    assert_eq!(reconciled.backstop_credit, accrued.backstop_credit);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), 0);
+}
+
+#[test]
 fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];

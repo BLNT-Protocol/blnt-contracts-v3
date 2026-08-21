@@ -47,6 +47,9 @@ impl Reserve {
             return reserve;
         }
 
+        // With no bTokens there is no exchange-rate denominator or supplier
+        // entitled to new interest. Keep the terminal reserve repayable while
+        // leaving both rates unchanged and preventing a division by zero.
         if reserve.data.b_supply == 0 {
             reserve.data.last_time = e.ledger().timestamp();
             return reserve;
@@ -144,14 +147,13 @@ impl Reserve {
     /// ### Arguments
     /// * `action_type` - The type of action being performed
     pub fn require_action_allowed(&self, e: &Env, action_type: u32) {
-        // disable borrowing or auction cancellation for any non-active pool and disable supplying for any frozen pool
-        if !self.config.enabled {
-            if action_type == RequestType::Supply as u32
-                || action_type == RequestType::SupplyCollateral as u32
-                || action_type == RequestType::Borrow as u32
-            {
-                panic_with_error!(e, PoolError::ReserveDisabled);
-            }
+        let adds_risk = action_type == RequestType::Supply as u32
+            || action_type == RequestType::SupplyCollateral as u32
+            || action_type == RequestType::Borrow as u32;
+        if adds_risk
+            && (!self.config.enabled || self.data.b_rate < crate::constants::MIN_OPERATIONAL_B_RATE)
+        {
+            panic_with_error!(e, PoolError::ReserveDisabled);
         }
     }
 
@@ -392,6 +394,54 @@ mod tests {
             assert_eq!(reserve.data.b_supply, 0);
             assert_eq!(reserve.data.backstop_credit, 0);
             assert_eq!(reserve.data.last_time, 617280);
+        });
+    }
+
+    #[test]
+    fn test_load_reserve_zero_supply_freezes_outstanding_liability_interest() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set(LedgerInfo {
+            timestamp: 1_000,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+        let oracle = Address::generate(&e);
+        let (underlying, _) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.b_rate = 0;
+        reserve_data.b_supply = 0;
+        reserve_data.d_rate = SCALAR_12;
+        reserve_data.d_supply = 50 * SCALAR_7;
+        reserve_data.backstop_credit = 60 * SCALAR_7;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &underlying, &reserve_config, &reserve_data);
+
+        let pool_config = PoolConfig {
+            oracle,
+            min_collateral: SCALAR_7,
+            bstop_rate: 0_2000000,
+            status: 0,
+            max_positions: 4,
+        };
+        e.as_contract(&pool, || {
+            storage::set_pool_config(&e, &pool_config);
+            let reserve = Reserve::load(&e, &pool_config, &underlying);
+
+            assert_eq!(reserve.data.b_rate, 0);
+            assert_eq!(reserve.data.b_supply, 0);
+            assert_eq!(reserve.data.d_rate, SCALAR_12);
+            assert_eq!(reserve.data.d_supply, 50 * SCALAR_7);
+            assert_eq!(reserve.data.backstop_credit, 60 * SCALAR_7);
+            assert_eq!(reserve.data.last_time, 1_000);
         });
     }
 
@@ -842,6 +892,65 @@ mod tests {
         reserve.require_action_allowed(&e, RequestType::Withdraw as u32);
         reserve.require_action_allowed(&e, RequestType::WithdrawCollateral as u32);
         reserve.require_action_allowed(&e, RequestType::Repay as u32);
+    }
+
+    #[test]
+    fn test_require_action_allowed_accepts_minimum_operational_b_rate() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_rate = crate::constants::MIN_OPERATIONAL_B_RATE;
+
+        reserve.require_action_allowed(&e, RequestType::Supply as u32);
+        reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
+        reserve.require_action_allowed(&e, RequestType::Borrow as u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1223)")]
+    fn test_require_action_allowed_rejects_supply_below_minimum_b_rate() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_rate = crate::constants::MIN_OPERATIONAL_B_RATE - 1;
+
+        reserve.require_action_allowed(&e, RequestType::Supply as u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1223)")]
+    fn test_require_action_allowed_rejects_borrow_below_minimum_b_rate() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_rate = crate::constants::MIN_OPERATIONAL_B_RATE - 1;
+
+        reserve.require_action_allowed(&e, RequestType::Borrow as u32);
+    }
+
+    #[test]
+    fn test_require_action_allowed_allows_risk_reduction_below_minimum_b_rate() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_rate = 0;
+
+        reserve.require_action_allowed(&e, RequestType::Withdraw as u32);
+        reserve.require_action_allowed(&e, RequestType::WithdrawCollateral as u32);
+        reserve.require_action_allowed(&e, RequestType::Repay as u32);
+    }
+
+    #[test]
+    fn test_accrued_interest_reopens_reserve_at_minimum_b_rate() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_supply = 100 * SCALAR_7;
+        reserve.data.b_rate = 90_000_000_000;
+        reserve.data.backstop_credit = 0;
+
+        reserve.accrue(&e, 0_2000000, 2 * SCALAR_7);
+
+        assert_eq!(reserve.data.backstop_credit, 4_000_000);
+        assert_eq!(reserve.data.b_rate, 106_000_000_000);
+        reserve.require_action_allowed(&e, RequestType::Supply as u32);
+        reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
+        reserve.require_action_allowed(&e, RequestType::Borrow as u32);
     }
 
     #[test]

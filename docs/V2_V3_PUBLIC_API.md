@@ -63,9 +63,10 @@ Private storage-only types are excluded.
 
 ### Entry points
 
-Except for the added reserve-clawback operation, pool entry-point signatures
-remain v2-compatible. An **Extended** row identifies changed caller-visible
-validation or tier-aware behavior, not a signature change.
+Except for the added reserve-clawback and reserve-loss-reconciliation
+operations, pool entry-point signatures remain v2-compatible. An **Extended**
+row identifies changed caller-visible validation or tier-aware behavior, not a
+signature change.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
@@ -85,6 +86,7 @@ validation or tier-aware behavior, not a signature change.
 | `submit_with_allowance(from, spender, to, requests) -> Positions` | Same | Extended | Applies the same v3 safety checks to allowance-based submission. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | `flash_loan(from, flash_loan, requests) -> Positions` | Same | Extended | Applies the v3 request bound and exact-balance checks to flash-loan submission. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | — | `clawback(asset, from, amount)` | Added | Lets the reserve SAC administrator burn an exact clawbackable pool balance while removing the corresponding user's ordinary supply before collateral and invalidating an affected liquidation auction. [V3 §4.4](V3_SYSTEM_SPEC.md#44-reserve-clawback--added) |
+| — | `reconcile_loss(asset) -> i128` | Added | Recognizes a direct reserve-custody deficit against the affected reserve's supplier rate and then unpaid take-rate credit without creating backstop debt; ordinary liquidation handles users made unhealthy by the haircut. [V3 §4.5](V3_SYSTEM_SPEC.md#45-reserve-loss-reconciliation--safety-extension) |
 | `update_status() -> u32` | Same | Extended | Uses aggregate canonical USDC value and value-weighted Q4W. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `set_status(pool_status)` | Same | Extended | Retains v2 admin statuses but validates them against v3 valuation. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `gulp(asset) -> i128` | Same | Unchanged | Retains v2 reserve-credit reconciliation. |

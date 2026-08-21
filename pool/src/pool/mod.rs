@@ -36,4 +36,4 @@ mod status;
 pub use status::{execute_set_pool_status, execute_update_pool_status};
 
 mod gulp;
-pub use gulp::execute_gulp;
+pub use gulp::{execute_gulp, execute_reconcile_loss};

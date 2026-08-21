@@ -290,6 +290,47 @@ fn set_interest_reserve_state(e: &Env, asset: &Address, state: &InterestReserveS
     );
 }
 
+/// Reduce one reserve's unpaid take-rate accounting after a direct custody
+/// loss. Stored tier amounts and carry are reduced proportionally with the
+/// total credit. Any active interest auction containing the reserve is
+/// canceled because its underlying-token lot was quoted before the loss.
+///
+/// Returns true when an active interest auction was canceled.
+pub(crate) fn reconcile_interest_credit(
+    e: &Env,
+    asset: &Address,
+    previous_credit: i128,
+    new_credit: i128,
+) -> bool {
+    if previous_credit <= 0 || new_credit < 0 || new_credit >= previous_credit {
+        panic_with_error!(e, PoolError::BalanceError);
+    }
+
+    let auction_canceled = if has_tier_auction(e, AuctionType::InterestAuction) {
+        let auction = get_tier_auction(e, AuctionType::InterestAuction);
+        if auction.auction.lot.contains_key(asset.clone()) {
+            remove_tier_auction(e, AuctionType::InterestAuction);
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    let mut state = get_interest_reserve_state(e, asset);
+    if state.total(e) > previous_credit {
+        panic_with_error!(e, PoolError::BalanceError);
+    }
+    state.first_loss = proportional_floor(e, state.first_loss, new_credit, previous_credit);
+    state.second_loss = proportional_floor(e, state.second_loss, new_credit, previous_credit);
+    state.third_loss = proportional_floor(e, state.third_loss, new_credit, previous_credit);
+    state.carry = proportional_floor(e, state.carry, new_credit, previous_credit);
+    set_interest_reserve_state(e, asset, &state);
+
+    auction_canceled
+}
+
 fn consume_pending_interest_lot(
     e: &Env,
     tier: super::BackstopTier,
@@ -656,6 +697,50 @@ mod tests {
             assert!(
                 !has_tier_auction(&e, AuctionType::BadDebtAuction),
                 "interest and bad-debt auction keys must remain independent"
+            );
+        });
+    }
+
+    #[test]
+    fn reconcile_interest_credit_scales_state_and_cancels_affected_auction() {
+        let e = Env::default();
+        let contract = create_pool(&e);
+        let asset = Address::generate(&e);
+        let bid_token = Address::generate(&e);
+        e.as_contract(&contract, || {
+            set_interest_reserve_state(
+                &e,
+                &asset,
+                &InterestReserveState {
+                    carry: 10,
+                    first_loss: 20,
+                    second_loss: 30,
+                    third_loss: 40,
+                },
+            );
+            set_tier_auction(
+                &e,
+                AuctionType::InterestAuction,
+                &TierAuctionData {
+                    auction: AuctionData {
+                        bid: soroban_sdk::map![&e, (bid_token, 120)],
+                        lot: soroban_sdk::map![&e, (asset.clone(), 100)],
+                        block: 1,
+                    },
+                    tier: super::super::BackstopTier::FirstLoss,
+                },
+            );
+
+            assert!(reconcile_interest_credit(&e, &asset, 100, 50));
+            assert!(!has_tier_auction(&e, AuctionType::InterestAuction));
+            assert_eq!(
+                get_interest_reserve_state(&e, &asset),
+                InterestReserveState {
+                    carry: 5,
+                    first_loss: 10,
+                    second_loss: 15,
+                    third_loss: 20,
+                }
             );
         });
     }

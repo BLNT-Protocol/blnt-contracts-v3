@@ -306,6 +306,69 @@ liabilities nor starts an auction.
 This entry point cannot prevent the SAC administrator from invoking the SAC
 directly; a direct clawback bypasses Blend position accounting.
 
+### 4.5 Reserve-loss reconciliation — **Safety extension**
+
+The pool exposes permissionless `reconcile_loss(asset) -> i128` for a
+configured reserve whose actual token custody has fallen below its accrued
+accounting balance, including after a reserve SAC administrator claws back
+tokens directly from the pool. It returns the recognized underlying deficit,
+or zero when custody has no deficit.
+
+Reconciliation MUST:
+
+- Accrue the reserve before comparing its actual token balance with
+  `total_supply + backstop_credit - total_liabilities`.
+- Ignore a zero or positive balance delta; positive deltas remain available to
+  the inherited `gulp` operation.
+- Apply the deficit directly to that reserve's suppliers using the inherited
+  ceiling-rounded `b_rate` loss calculation, leaving every user's bToken
+  balance and every borrower liability unchanged.
+- Cap the supplier attribution at the reserve's aggregate supplier claim and
+  saturate `b_rate` at zero. Any remaining deficit MUST reduce only that
+  reserve's unpaid `backstop_credit`. It MUST proportionally reduce the
+  reserve's pending tier allocations and carry, and MUST cancel an active
+  interest auction whose lot contains the affected reserve before committing
+  that reduction. Reconciliation MUST NOT create backstop liabilities, draw
+  deposited backstop capital, or change another reserve.
+- Emit the recognized deficit, supplier attribution, backstop-credit
+  attribution, and applied `b_rate` reduction. Cancellation of an affected
+  interest auction emits the inherited deletion event first. Repeated
+  reconciliation without another custody loss MUST return zero and make no
+  further accounting reduction.
+
+Any reserve mutation that could let an existing or new position escape or
+absorb an unreconciled deficit MUST fail until `reconcile_loss` succeeds. A
+supplier-rate reduction can make borrowers using that reserve as collateral
+unhealthy; those users then use the ordinary liquidation path. Only residual
+borrower bad debt after collateral liquidation reaches the configured
+backstop waterfall and, if necessary, the inherited supplier-default path.
+Reconciliation itself has no user parameter because a direct pool-custody
+clawback does not identify which supplier funded the removed tokens.
+
+The minimum operational `b_rate` is `0.1`, encoded as
+`100_000_000_000` at twelve-decimal precision. Below that rate the affected
+reserve MUST reject new supply, collateral supply, borrowing, and flash loans,
+while withdrawals at current value, repayment, liquidation, bad-debt
+resolution, interest realization, and reconciliation remain available. The
+reserve reopens automatically if existing bTokens remain and accrued borrower
+interest restores `b_rate >= 0.1`. Existing bTokens are not burned or reset
+merely because the rate reaches zero. Before an insolvent user's remaining
+liabilities are handed to the backstop, collateral bTokens with zero current
+underlying value MUST be checkpointed, forfeited, and removed. No underlying
+assets are transferred. This prevents an empty-value entry from blocking the
+handoff or later recovering value for a borrower whose debt was socialized.
+Supply shares held by users without bad debt remain unaffected and retain any
+later rate recovery.
+
+If forfeiture removes the final bToken, the inherited zero-supply behavior is
+terminal: `b_rate` remains zero, liability interest stops accruing, and the
+reserve cannot accept new risk. Existing liabilities remain repayable or
+liquidatable, and existing take-rate credit remains realizable. Removing an
+individually zero-valued collateral position can reduce the aggregate supplier
+claim by at most one underlying base unit because of fixed-point rounding; any
+resulting positive custody dust remains available to the inherited `gulp`
+operation.
+
 ## 5. Loss waterfall — **Replaced**
 
 This replaces the single-token realization in `V2-AUCTION-003` and

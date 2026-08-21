@@ -173,6 +173,15 @@ pub trait Pool {
     /// an active user-liquidation auction is atomically invalidated.
     fn clawback(e: Env, asset: Address, from: Address, amount: i128);
 
+    /// Recognize a direct reserve-custody deficit against the affected
+    /// reserve's supplier rate and then its unpaid take-rate credit. The
+    /// operation is permissionless, leaves user bToken balances and borrower
+    /// liabilities unchanged, and creates no backstop debt.
+    ///
+    /// Returns the underlying deficit recognized, or zero when the reserve has
+    /// no custody deficit.
+    fn reconcile_loss(e: Env, asset: Address) -> i128;
+
     /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
     ///
     /// Backstop-triggered statuses are odd:
@@ -509,6 +518,29 @@ impl Pool for PoolContract {
         }
 
         PoolEvents::clawback(&e, asset, from, amount, supply_burned, collateral_burned);
+    }
+
+    fn reconcile_loss(e: Env, asset: Address) -> i128 {
+        storage::extend_instance(&e);
+        let (loss, supplier_loss, backstop_credit_loss, b_rate_loss, auction_canceled) =
+            pool::execute_reconcile_loss(&e, &asset);
+
+        if auction_canceled {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::InterestAuction as u32,
+                storage::get_backstop(&e),
+            );
+        }
+        PoolEvents::reconcile_loss(
+            &e,
+            asset,
+            loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+        );
+        loss
     }
 
     fn update_status(e: Env) -> u32 {

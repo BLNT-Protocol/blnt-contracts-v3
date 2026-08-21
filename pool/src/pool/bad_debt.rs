@@ -51,6 +51,9 @@ pub fn check_and_handle_user_bad_debt(
     user: &Address,
     user_state: &mut User,
 ) -> bool {
+    if user_state.has_liabilities() {
+        remove_zero_value_collateral(e, pool, user, user_state);
+    }
     if user_state.has_liabilities() && !user_state.has_collateral() {
         // no more collateral left to liquidate for this user
         // pass the rest of the debt to the backstop as bad debt
@@ -70,6 +73,24 @@ pub fn check_and_handle_user_bad_debt(
         return true;
     }
     return false;
+}
+
+/// Forfeit and remove collateral shares whose live reserve exchange rate gives
+/// them zero underlying value. This prevents a nonempty, economically empty
+/// collateral map from blocking the ordinary bad-debt handoff or recovering
+/// value for a borrower whose debt was socialized. Supply-only holders keep
+/// their recovery claim if later borrower interest raises the reserve's b_rate.
+fn remove_zero_value_collateral(e: &Env, pool: &mut Pool, user: &Address, user_state: &mut User) {
+    let reserve_list = storage::get_res_list(e);
+    for (reserve_index, b_tokens) in user_state.positions.collateral.iter() {
+        let asset = reserve_list.get_unchecked(reserve_index);
+        let mut reserve = pool.load_reserve(e, &asset, true);
+        if reserve.to_asset_from_b_token(e, b_tokens) == 0 {
+            user_state.remove_collateral(e, &mut reserve, b_tokens);
+            pool.cache_reserve(reserve);
+            PoolEvents::withdraw_collateral(e, asset, user.clone(), 0, b_tokens);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -675,8 +696,91 @@ mod tests {
             assert_eq!(user.positions.collateral, positions.collateral);
             assert_eq!(user.positions.supply, positions.supply);
 
-            // assert no pool reserves were loaded
+            // Positive-value collateral remains unchanged and does not need
+            // to be cached for storage.
             assert_eq!(pool.reserves.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_check_and_handle_user_bad_debt_removes_zero_value_collateral() {
+        let e = Env::default();
+        e.cost_estimate().budget().reset_unlimited();
+        e.mock_all_auths();
+        e.ledger().set(LedgerInfo {
+            timestamp: 100,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3110400,
+        });
+
+        let pool = create_pool(&e);
+        let admin = Address::generate(&e);
+        let supplier = Address::generate(&e);
+        let depositor = Address::generate(&e);
+        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &admin);
+        let (usdc, usdc_client) = create_token_contract(&e, &admin);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (backstop_address, backstop_client) =
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+        blnd_client.mint(&depositor, &500_001_0000000);
+        blnd_client.approve(&depositor, &lp_token, &i128::MAX, &99999);
+        usdc_client.mint(&depositor, &12_501_0000000);
+        usdc_client.approve(&depositor, &lp_token, &i128::MAX, &99999);
+        lp_token_client.join_pool(
+            &1_500_0000000,
+            &vec![&e, 500_001_0000000, 12_501_0000000],
+            &depositor,
+        );
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &depositor,
+            &pool,
+            &1_500_0000000,
+        );
+
+        let (asset, _) = create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.b_supply = 100_0000000;
+        reserve_data.d_supply = 50_0000000;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &asset, &reserve_config, &reserve_data);
+
+        let positions = Positions {
+            liabilities: map![&e, (0, 50_0000000)],
+            collateral: map![&e, (0, 100_0000000)],
+            supply: map![&e],
+        };
+        e.as_contract(&pool, || {
+            reserve_data.b_rate = 0;
+            storage::set_res_data(&e, &asset, &reserve_data);
+            storage::set_user_positions(&e, &supplier, &positions);
+            storage::set_user_positions(&e, &backstop_address, &Positions::env_default(&e));
+
+            let mut pool_state = Pool::load(&e);
+            let mut user = User::load(&e, &supplier);
+            assert!(check_and_handle_user_bad_debt(
+                &e,
+                &mut pool_state,
+                &supplier,
+                &mut user,
+            ));
+            user.store(&e);
+            pool_state.store_cached_reserves(&e);
+
+            assert!(user.positions.collateral.is_empty());
+            assert!(user.positions.liabilities.is_empty());
+            assert_eq!(storage::get_res_data(&e, &asset).b_supply, 0);
+            assert_eq!(
+                storage::get_user_positions(&e, &backstop_address)
+                    .liabilities
+                    .get(0),
+                Some(50_0000000),
+            );
         });
     }
 

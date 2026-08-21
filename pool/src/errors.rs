@@ -56,4 +56,7 @@ pub enum PoolError {
     // Tier-specific interest auction errors
     InvalidInterestAuction = 1227,
     NoInterestAuctionCapacity = 1228,
+
+    // Reserve custody errors
+    UnreconciledReserveLoss = 1229,
 }

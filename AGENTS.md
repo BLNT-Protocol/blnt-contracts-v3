@@ -99,6 +99,14 @@ first:
   has no oracle input.
 - Exact canonical BLND LP interest-auction bids donate 100%. Plain-USDC and
   plain-XLM bids apply the failure-isolated 1% buy-and-burn rule above.
+- A direct lending-reserve custody deficit is reconciled against that
+  reserve's supplier rate and then its unpaid take-rate credit without
+  creating backstop debt or touching another reserve. New supply and
+  borrowing stop below a 0.1 bToken exchange rate and resume only if accrued
+  interest restores that rate while b_supply remains positive. Zero b_supply
+  is terminal and freezes liability interest without blocking repayment or
+  liquidation. Only bad debt left by an unhealthy borrower after ordinary
+  collateral liquidation reaches the configured waterfall.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.
 
