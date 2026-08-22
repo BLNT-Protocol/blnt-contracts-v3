@@ -6,6 +6,7 @@ use crate::{
     storage::{self, ReserveConfig},
     PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
+use sep_41_token::StellarAssetClient;
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Env, String, Vec,
 };
@@ -505,6 +506,7 @@ impl Pool for PoolContract {
 
     fn clawback(e: Env, asset: Address, from: Address, amount: i128) {
         storage::extend_instance(&e);
+        StellarAssetClient::new(&e, &asset).admin().require_auth();
 
         let (supply_burned, collateral_burned, auction_invalidated) =
             pool::execute_clawback(&e, &asset, &from, amount);

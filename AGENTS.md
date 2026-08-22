@@ -102,12 +102,13 @@ first:
 - A direct lending-reserve custody deficit is reconciled against that
   reserve's supplier rate and then its unpaid take-rate credit without
   creating backstop debt or touching another reserve. Complete supplier-value
-  exhaustion sets the bToken exchange rate exactly to zero. New supply and
-  borrowing stop only at zero and resume if accrued interest restores a
-  positive rate while b_supply remains positive. Zero b_supply alone is a
-  normal empty-reserve state and permits the first supply while b_rate remains
-  positive; inherited liquidity and health checks continue to govern other
-  actions. When both are zero, new risk remains disabled but existing
+  exhaustion sets the bToken exchange rate exactly to zero. New supply,
+  collateral supply, borrowing, and flash loans stop below a 0.1 b_rate and
+  resume once accrued interest restores at least that rate. Zero b_supply
+  alone is a normal empty-reserve state and permits the first supply while
+  b_rate remains at least 0.1; inherited liquidity and health checks continue
+  to govern other actions. When both rate and supply are zero, new risk remains
+  disabled but existing
   liabilities continue accruing on the ordinary 100%-utilization curve; all
   resulting interest and positive custody surplus are credited to the backstop
   because no supplier denominator remains. Repayment and liquidation remain

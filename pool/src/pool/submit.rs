@@ -2623,7 +2623,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1223)")]
-    fn test_submit_with_flash_loan_checks_reserve_status() {
+    fn test_submit_with_flash_loan_checks_operational_b_rate() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -2650,8 +2650,8 @@ mod tests {
         let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
         reserve_config.max_util = 9500000;
         reserve_data.b_supply = 100_0000000;
-        reserve_data.d_supply = 50_0000000;
-        reserve_config.enabled = false;
+        reserve_data.d_supply = 4_0000000;
+        reserve_data.b_rate = crate::constants::MIN_OPERATIONAL_B_RATE / 2;
         testutils::create_reserve(&e, &pool, &underlying_0, &reserve_config, &reserve_data);
 
         let (underlying_1, underlying_1_client) = testutils::create_token_contract(&e, &bombadil);
@@ -2684,8 +2684,8 @@ mod tests {
             underlying_1_client.mint(&samwise, &25_0000000);
             underlying_1_client.approve(&samwise, &pool, &100_0000000, &10000);
 
-            // pool has 100 supplied and 50 borrowed for asset_0
-            // -> max util is 95%
+            // The impaired reserve remains internally solvent so setup reaches
+            // the operational b_rate gate before the flash loan is transferred.
             let flash_loan: FlashLoan = FlashLoan {
                 contract: flash_loan_receiver,
                 asset: underlying_0,

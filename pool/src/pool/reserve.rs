@@ -3,7 +3,7 @@ use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 
 use crate::{
-    constants::{SCALAR_12, SCALAR_7},
+    constants::{MIN_OPERATIONAL_B_RATE, SCALAR_12, SCALAR_7},
     errors::PoolError,
     pool::actions::RequestType,
     storage::{self, PoolConfig, ReserveConfig, ReserveData},
@@ -153,7 +153,7 @@ impl Reserve {
         let adds_risk = action_type == RequestType::Supply as u32
             || action_type == RequestType::SupplyCollateral as u32
             || action_type == RequestType::Borrow as u32;
-        if adds_risk && (!self.config.enabled || self.data.b_rate <= 0) {
+        if adds_risk && (!self.config.enabled || self.data.b_rate < MIN_OPERATIONAL_B_RATE) {
             panic_with_error!(e, PoolError::ReserveDisabled);
         }
     }
@@ -901,11 +901,11 @@ mod tests {
     }
 
     #[test]
-    fn test_require_action_allowed_accepts_zero_supply_with_positive_b_rate() {
+    fn test_require_action_allowed_accepts_zero_supply_at_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
         reserve.data.b_supply = 0;
-        reserve.data.b_rate = 1;
+        reserve.data.b_rate = MIN_OPERATIONAL_B_RATE;
 
         reserve.require_action_allowed(&e, RequestType::Supply as u32);
         reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
@@ -914,29 +914,39 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1223)")]
-    fn test_require_action_allowed_rejects_supply_at_zero_b_rate() {
+    fn test_require_action_allowed_rejects_supply_below_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
-        reserve.data.b_rate = 0;
+        reserve.data.b_rate = MIN_OPERATIONAL_B_RATE - 1;
 
         reserve.require_action_allowed(&e, RequestType::Supply as u32);
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1223)")]
-    fn test_require_action_allowed_rejects_borrow_at_zero_b_rate() {
+    fn test_require_action_allowed_rejects_collateral_supply_below_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
-        reserve.data.b_rate = 0;
+        reserve.data.b_rate = MIN_OPERATIONAL_B_RATE - 1;
+
+        reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1223)")]
+    fn test_require_action_allowed_rejects_borrow_below_operational_floor() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_rate = MIN_OPERATIONAL_B_RATE - 1;
 
         reserve.require_action_allowed(&e, RequestType::Borrow as u32);
     }
 
     #[test]
-    fn test_require_action_allowed_allows_risk_reduction_at_zero_b_rate() {
+    fn test_require_action_allowed_allows_risk_reduction_below_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
-        reserve.data.b_rate = 0;
+        reserve.data.b_rate = MIN_OPERATIONAL_B_RATE - 1;
 
         reserve.require_action_allowed(&e, RequestType::Withdraw as u32);
         reserve.require_action_allowed(&e, RequestType::WithdrawCollateral as u32);
@@ -944,17 +954,17 @@ mod tests {
     }
 
     #[test]
-    fn test_accrued_interest_reopens_zero_rate_reserve_with_existing_supply() {
+    fn test_accrued_interest_reopens_reserve_at_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
         reserve.data.b_supply = 100 * SCALAR_7;
         reserve.data.b_rate = 0;
         reserve.data.backstop_credit = 0;
 
-        reserve.accrue(&e, 0_2000000, 2 * SCALAR_7);
+        reserve.accrue(&e, 0_2000000, 12_5000000);
 
-        assert_eq!(reserve.data.backstop_credit, 4_000_000);
-        assert_eq!(reserve.data.b_rate, 16_000_000_000);
+        assert_eq!(reserve.data.backstop_credit, 2_5000000);
+        assert_eq!(reserve.data.b_rate, MIN_OPERATIONAL_B_RATE);
         reserve.require_action_allowed(&e, RequestType::Supply as u32);
         reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
         reserve.require_action_allowed(&e, RequestType::Borrow as u32);

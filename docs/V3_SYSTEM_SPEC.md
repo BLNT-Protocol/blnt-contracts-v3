@@ -284,9 +284,9 @@ The operation MUST:
   many supply-plus-collateral bTokens, consume ordinary supply first, and then
   consume collateral.
 - Require at least `amount` of liquid reserve tokens in the pool.
-- Invoke the reserve SAC's `clawback(pool, amount)`. That invocation MUST
-  require the current SAC administrator's authorization and MUST fail unless
-  the pool's SAC balance entry is clawbackable.
+- Require the current reserve SAC administrator at the pool entrypoint, then
+  invoke the SAC's `clawback(pool, amount)`. The operation MUST fail unless the
+  pool's SAC balance entry is clawbackable.
 - Verify an exact `amount` decrease in the pool's reserve-token balance and
   emit the underlying amount and ordinary-supply and collateral bTokens
   burned.
@@ -346,14 +346,17 @@ backstop waterfall and, if necessary, the inherited supplier-default path.
 Reconciliation itself has no user parameter because a direct pool-custody
 clawback does not identify which supplier funded the removed tokens.
 
-There is no positive minimum operational `b_rate`. At zero the affected reserve
-MUST reject new supply, collateral supply, borrowing, and flash loans, while
-repayment, liquidation, bad-debt resolution, interest realization, and
-reconciliation remain available. Ordinary underlying withdrawals cannot
-convert a positive asset amount at a zero exchange rate. The reserve reopens
-automatically if existing bTokens remain and accrued borrower interest restores
-a positive `b_rate`. Existing bTokens are not burned or reset merely because
-the rate reaches zero. Before an insolvent user's remaining
+As a v3 safety fix, the minimum operational `b_rate` is 0.1 at the inherited
+12-decimal rate scale. Below that threshold the affected reserve MUST reject
+new supply, collateral supply, borrowing, and flash loans, while repayment,
+withdrawal, liquidation, bad-debt resolution, interest realization, and
+reconciliation remain available under their inherited checks. Equality is
+operational. While bTokens remain, the reserve reopens automatically if
+accrued borrower interest restores `b_rate` to at least 0.1. Ordinary
+underlying withdrawals cannot
+convert a positive asset amount at a zero exchange rate. Existing bTokens are
+not burned or reset merely because the rate falls below the operational
+threshold or reaches zero. Before an insolvent user's remaining
 liabilities are handed to the backstop, collateral bTokens with zero current
 underlying value MUST be checkpointed, forfeited, and removed. No underlying
 assets are transferred. This prevents an empty-value entry from blocking the
@@ -371,8 +374,8 @@ surplus with zero supply is also added to `backstop_credit` by `gulp`. Removing
 an individually zero-valued collateral position can reduce the aggregate
 supplier claim by at most one underlying base unit because of fixed-point
 rounding; any resulting positive custody dust follows that `gulp` rule.
-An ordinary empty reserve with `b_supply == 0` and positive `b_rate` is not
-impaired and MAY accept new supply under the inherited rules.
+An ordinary empty reserve with `b_supply == 0` and `b_rate` at or above 0.1 is
+not impaired and MAY accept new supply under the inherited rules.
 
 ## 5. Loss waterfall — **Replaced**
 

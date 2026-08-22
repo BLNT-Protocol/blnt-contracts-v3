@@ -36,7 +36,8 @@ fn test_wasm_reconciles_direct_reserve_custody_loss() {
 }
 
 #[test]
-fn test_wasm_accepts_supply_at_any_positive_b_rate() {
+#[should_panic(expected = "Error(Contract, #1223)")]
+fn test_wasm_rejects_supply_below_operational_b_rate() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];
     let stable = &fixture.tokens[TokenIndex::STABLE];
@@ -49,7 +50,7 @@ fn test_wasm_accepts_supply_at_any_positive_b_rate() {
     let loss = supplier_claim - target_claim;
 
     // Credit a direct recovery first so the pool has enough custody to incur
-    // a supplier loss that leaves a positive rate below the former 0.1 gate.
+    // a supplier loss that leaves a positive rate below the 0.1 floor.
     stable.mint(&pool_fixture.pool.address, &supplier_claim);
     assert_eq!(pool_fixture.pool.gulp(&stable.address), supplier_claim);
     stable.burn(&pool_fixture.pool.address, &loss);
@@ -62,7 +63,7 @@ fn test_wasm_accepts_supply_at_any_positive_b_rate() {
     let supplier = Address::generate(&fixture.env);
     let amount = 10i128.pow(6);
     stable.mint(&supplier, &amount);
-    let positions = pool_fixture.pool.submit(
+    pool_fixture.pool.submit(
         &supplier,
         &supplier,
         &supplier,
@@ -74,13 +75,6 @@ fn test_wasm_accepts_supply_at_any_positive_b_rate() {
                 amount,
             },
         ],
-    );
-    assert!(
-        positions
-            .supply
-            .get(pool_fixture.reserves[&TokenIndex::STABLE])
-            .unwrap()
-            > 0
     );
 }
 
