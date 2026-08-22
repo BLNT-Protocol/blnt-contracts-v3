@@ -104,11 +104,15 @@ first:
   creating backstop debt or touching another reserve. Complete supplier-value
   exhaustion sets the bToken exchange rate exactly to zero. New supply and
   borrowing stop only at zero and resume if accrued interest restores a
-  positive rate while b_supply remains positive. Zero b_supply is terminal,
-  freezes liability interest without blocking repayment or liquidation, and
-  directs positive custody surplus through `gulp` into backstop credit. Only
-  bad debt left after ordinary collateral liquidation reaches the configured
-  waterfall.
+  positive rate while b_supply remains positive. Zero b_supply alone is a
+  normal empty-reserve state and permits the first supply while b_rate remains
+  positive; inherited liquidity and health checks continue to govern other
+  actions. When both are zero, new risk remains disabled but existing
+  liabilities continue accruing on the ordinary 100%-utilization curve; all
+  resulting interest and positive custody surplus are credited to the backstop
+  because no supplier denominator remains. Repayment and liquidation remain
+  available. Only bad debt left after ordinary collateral liquidation reaches
+  the configured waterfall.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.
 

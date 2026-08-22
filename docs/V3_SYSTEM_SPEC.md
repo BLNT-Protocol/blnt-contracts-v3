@@ -361,15 +361,18 @@ handoff or later recovering value for a borrower whose debt was socialized.
 Supply shares held by users without bad debt remain unaffected and retain any
 later rate recovery.
 
-If forfeiture removes the final bToken, the inherited zero-supply behavior is
-terminal: `b_rate` remains zero, liability interest stops accruing, and the
-reserve cannot accept new risk. Existing liabilities remain repayable or
-liquidatable, and existing take-rate credit remains realizable. Positive
-custody surplus with zero supply is added to `backstop_credit` by `gulp` rather
-than distributed across a nonexistent supplier denominator. Removing an
-individually zero-valued collateral position can reduce the aggregate supplier
-claim by at most one underlying base unit because of fixed-point rounding; any
-resulting positive custody dust follows that `gulp` rule.
+If forfeiture removes the final bToken, `b_rate` remains zero and the reserve
+cannot accept new risk. Existing liabilities remain repayable or liquidatable
+and MUST continue accruing under the ordinary interest curve at 100%
+utilization. Because no supplier denominator remains, the entire resulting
+interest accrual MUST increase `backstop_credit`, independently of the ordinary
+take-rate split. Existing take-rate credit remains realizable. Positive custody
+surplus with zero supply is also added to `backstop_credit` by `gulp`. Removing
+an individually zero-valued collateral position can reduce the aggregate
+supplier claim by at most one underlying base unit because of fixed-point
+rounding; any resulting positive custody dust follows that `gulp` rule.
+An ordinary empty reserve with `b_supply == 0` and positive `b_rate` is not
+impaired and MAY accept new supply under the inherited rules.
 
 ## 5. Loss waterfall — **Replaced**
 

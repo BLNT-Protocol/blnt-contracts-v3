@@ -47,14 +47,6 @@ impl Reserve {
             return reserve;
         }
 
-        // With no bTokens there is no exchange-rate denominator or supplier
-        // entitled to new interest. Keep the terminal reserve repayable while
-        // leaving both rates unchanged and preventing a division by zero.
-        if reserve.data.b_supply == 0 {
-            reserve.data.last_time = e.ledger().timestamp();
-            return reserve;
-        }
-
         let cur_util = reserve.utilization(e);
         if cur_util == 0 {
             // if there are no assets borrowed, we don't need to update the reserve
@@ -86,7 +78,9 @@ impl Reserve {
         storage::set_res_data(e, &self.asset, &self.data);
     }
 
-    /// Accrue tokens to the reserve supply. This issues any `backstop_credit` required and updates the reserve's bRate to account for the additional tokens.
+    /// Accrue interest to suppliers and the backstop. With no bTokens, the
+    /// entire accrual is credited to the backstop because there is no supplier
+    /// exchange-rate denominator.
     ///
     /// ### Arguments
     /// * bstop_rate - The backstop take rate for the pool
@@ -95,6 +89,15 @@ impl Reserve {
         let pre_update_supply = self.total_supply(e);
 
         if accrued > 0 {
+            if self.data.b_supply == 0 {
+                self.data.backstop_credit = self
+                    .data
+                    .backstop_credit
+                    .checked_add(accrued)
+                    .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+                return;
+            }
+
             // credit the backstop underlying from the accrued interest based on the backstop rate
             // update the accrued interest to reflect the amount the pool accrued
             let mut new_backstop_credit: i128 = 0;
@@ -396,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn test_load_reserve_zero_supply_freezes_outstanding_liability_interest() {
+    fn test_load_reserve_zero_supply_accrues_outstanding_liability_interest_to_backstop() {
         let e = Env::default();
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
@@ -433,12 +436,17 @@ mod tests {
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
             let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let accrued_interest = reserve.total_liabilities(&e) - 50 * SCALAR_7;
 
             assert_eq!(reserve.data.b_rate, 0);
             assert_eq!(reserve.data.b_supply, 0);
-            assert_eq!(reserve.data.d_rate, SCALAR_12);
+            assert!(reserve.data.d_rate > SCALAR_12);
             assert_eq!(reserve.data.d_supply, 50 * SCALAR_7);
-            assert_eq!(reserve.data.backstop_credit, 60 * SCALAR_7);
+            assert!(accrued_interest > 0);
+            assert_eq!(
+                reserve.data.backstop_credit,
+                60 * SCALAR_7 + accrued_interest
+            );
             assert_eq!(reserve.data.last_time, 1_000);
         });
     }
@@ -893,9 +901,10 @@ mod tests {
     }
 
     #[test]
-    fn test_require_action_allowed_accepts_positive_b_rate() {
+    fn test_require_action_allowed_accepts_zero_supply_with_positive_b_rate() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
+        reserve.data.b_supply = 0;
         reserve.data.b_rate = 1;
 
         reserve.require_action_allowed(&e, RequestType::Supply as u32);

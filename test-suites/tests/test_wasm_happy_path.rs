@@ -85,6 +85,40 @@ fn test_wasm_accepts_supply_at_any_positive_b_rate() {
 }
 
 #[test]
+fn test_wasm_zero_supply_debt_interest_accrues_to_backstop() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let debt = 50 * SCALAR_7;
+    let initial_credit = 60 * SCALAR_7;
+    let now = fixture.env.ledger().timestamp();
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        let key = PoolDataKey::ResData(stable.address.clone());
+        let mut reserve: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
+        reserve.b_rate = 0;
+        reserve.b_supply = 0;
+        reserve.d_rate = SCALAR_12;
+        reserve.d_supply = debt;
+        reserve.backstop_credit = initial_credit;
+        reserve.ir_mod = SCALAR_7;
+        reserve.last_time = now;
+        fixture.env.storage().persistent().set(&key, &reserve);
+    });
+
+    fixture.jump(24 * 60 * 60);
+    let accrued = pool_fixture.pool.get_reserve(&stable.address).data;
+    let liabilities = debt.fixed_mul_ceil(accrued.d_rate, SCALAR_12).unwrap();
+    let interest = liabilities - debt;
+
+    assert_eq!(accrued.b_rate, 0);
+    assert_eq!(accrued.b_supply, 0);
+    assert!(accrued.d_rate > SCALAR_12);
+    assert!(interest > 0);
+    assert_eq!(accrued.backstop_credit, initial_credit + interest);
+}
+
+#[test]
 fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];
