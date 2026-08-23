@@ -47,6 +47,7 @@ enum DataKey {
     Admin,
     Metadata,
     Allowance(AllowanceKey),
+    Authorized(Address),
     Balance(Address),
 }
 
@@ -156,6 +157,22 @@ impl MockToken {
         get_balance(&env, &id)
     }
 
+    pub fn authorized(env: Env, id: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Authorized(id))
+            .unwrap_or(true)
+    }
+
+    pub fn set_authorized(env: Env, id: Address, authorize: bool) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Authorized(id), &authorize);
+    }
+
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         require_nonnegative(&env, amount);
@@ -234,7 +251,14 @@ fn set_balance(env: &Env, address: &Address, balance: i128) {
         .set(&DataKey::Balance(address.clone()), &balance);
 }
 
+fn require_authorized(env: &Env, address: &Address) {
+    if !MockToken::authorized(env.clone(), address.clone()) {
+        panic_with_error!(env, TokenError::UnauthorizedError);
+    }
+}
+
 fn receive_balance(env: &Env, address: &Address, amount: i128) {
+    require_authorized(env, address);
     let balance = get_balance(env, address)
         .checked_add(amount)
         .unwrap_or_else(|| panic_with_error!(env, TokenError::OverflowError));
@@ -242,6 +266,7 @@ fn receive_balance(env: &Env, address: &Address, amount: i128) {
 }
 
 fn spend_balance(env: &Env, address: &Address, amount: i128) {
+    require_authorized(env, address);
     let balance = get_balance(env, address);
     if balance < amount {
         panic_with_error!(env, TokenError::BalanceError);

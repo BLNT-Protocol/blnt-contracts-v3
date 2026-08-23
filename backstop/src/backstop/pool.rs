@@ -1,4 +1,4 @@
-use sep_41_token::TokenClient;
+use sep_41_token::{StellarAssetClient, TokenClient};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env, I256};
 
@@ -15,7 +15,7 @@ const MAX_TAKE_RATE_WEIGHT: u32 = 10;
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolBackstopData {
-    /// Aggregate USDC value excluding queued withdrawals.
+    /// Aggregate transferable USDC value excluding queued withdrawals.
     pub active_value: i128,
     /// Queued value divided by total active-plus-queued value, rounded up.
     pub q4w_pct: i128,
@@ -33,6 +33,7 @@ pub struct PoolTierData {
     pub token: Address,
     pub tokens: i128,
     pub shares: i128,
+    /// Transferable USDC-equivalent value; zero while plain USDC is deauthorized.
     pub value: i128,
 }
 
@@ -353,10 +354,17 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         let mut active = soroban_sdk::Vec::new(e);
         let mut queued = soroban_sdk::Vec::new(e);
         let mut total = soroban_sdk::Vec::new(e);
-        for partition in amounts.iter() {
-            active.push_back(partition.0);
-            queued.push_back(partition.1);
-            total.push_back(partition.2);
+        for (index, partition) in amounts.iter().enumerate() {
+            let config = config.get(index as u32).unwrap();
+            if configured_tier_is_transferable(e, &config) {
+                active.push_back(partition.0);
+                queued.push_back(partition.1);
+                total.push_back(partition.2);
+            } else {
+                active.push_back(0);
+                queued.push_back(0);
+                total.push_back(0);
+            }
         }
         return PoolValuation {
             active_values: ActivationValues { tiers: active },
@@ -405,17 +413,24 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     let mut queued = soroban_sdk::Vec::new(e);
     let mut total = soroban_sdk::Vec::new(e);
     for index in 0..config.len() {
+        let tier_config = config.get(index).unwrap();
         let quotes = quote_configured_tier(
             e,
-            &config.get(index).unwrap(),
+            &tier_config,
             amounts.get(index).unwrap(),
             anchor.as_ref(),
             anchor_value,
             target.as_ref(),
         );
-        active.push_back(quotes.active.usdc_value);
-        queued.push_back(quotes.queued.usdc_value);
-        total.push_back(quotes.total.usdc_value);
+        if configured_tier_is_transferable(e, &tier_config) {
+            active.push_back(quotes.active.usdc_value);
+            queued.push_back(quotes.queued.usdc_value);
+            total.push_back(quotes.total.usdc_value);
+        } else {
+            active.push_back(0);
+            queued.push_back(0);
+            total.push_back(0);
+        }
     }
     PoolValuation {
         active_values: ActivationValues { tiers: active },
@@ -466,6 +481,14 @@ fn quote_configured_tier(
             target.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
         ),
     }
+}
+
+fn configured_tier_is_transferable(e: &Env, config: &BackstopTierConfig) -> bool {
+    if from_factory_asset(config.asset) != BackstopAsset::Usdc {
+        return true;
+    }
+    let usdc = storage::get_usdc_token(e);
+    StellarAssetClient::new(e, &usdc).authorized(&e.current_contract_address())
 }
 
 fn xlm_pool_tier_valuation(
@@ -1263,7 +1286,7 @@ mod tier_tests {
 #[cfg(test)]
 mod valuation_tests {
     use mock_pool_factory::{BackstopAsset as FactoryBackstopAsset, BackstopTierConfig};
-    use sep_41_token::testutils::MockTokenClient;
+    use sep_41_token::{testutils::MockTokenClient, StellarAssetClient};
     use soroban_sdk::{testutils::Address as _, vec, Address};
 
     use crate::{
@@ -1479,6 +1502,62 @@ mod valuation_tests {
         });
         assert_eq!(quote.eligible_value, ACTIVATION_THRESHOLD_USDC);
         assert!(quote.meets_threshold);
+    }
+
+    #[test]
+    fn deauthorized_usdc_has_zero_value_until_reauthorized() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        usdc_client.mint(&user, &ACTIVATION_THRESHOLD_USDC);
+        let client = BackstopClient::new(&e, &backstop);
+        client.deposit(
+            &BackstopTier::FirstLoss,
+            &user,
+            &pool,
+            &ACTIVATION_THRESHOLD_USDC,
+        );
+
+        assert_eq!(
+            client.pool_data(&pool).active_value,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &false);
+
+        let deauthorized = client.pool_data(&pool);
+        assert_eq!(deauthorized.active_value, 0);
+        assert_eq!(deauthorized.q4w_pct, 0);
+        assert_eq!(
+            deauthorized.tiers.first().unwrap().tokens,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        assert_eq!(
+            deauthorized.tiers.first().unwrap().shares,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        assert_eq!(deauthorized.tiers.first().unwrap().value, 0);
+
+        StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &true);
+        assert_eq!(
+            client.pool_data(&pool).active_value,
+            ACTIVATION_THRESHOLD_USDC
+        );
     }
 
     #[test]

@@ -63,9 +63,11 @@ thresholds are positive. Deployment verification MUST reject any other
 controller state. This makes the Comet's controller-only freeze and controller-
 replacement operations permanently unreachable.
 
-Every tier counts equally per verified USDC for activation, participates in
-take-rate allocation using its configured weight, and absorbs loss in
-configured order without a protocol-level haircut or concentration limit.
+Every transferable tier counts equally per verified USDC for activation,
+participates in take-rate allocation using its configured weight, and absorbs
+loss in configured order without a protocol-level haircut or concentration
+limit. A deauthorized plain-USDC tier has zero transferable value under
+Section 4 until the issuer reauthorizes the backstop balance.
 Only exact canonical BLND:USDC and BLND:XLM Comet tiers are BLND-emission
 eligible. A pool with neither receives no BLND emissions. Plain-USDC and
 plain-XLM interest proceeds have the buy-and-burn haircut in Section 5.3.
@@ -100,6 +102,7 @@ Capital state has these canonical policy effects:
 | Queued shares | Excluded | Available | Included | Excluded |
 | Pool-selected bad-debt lot | Included until drawn | Selected for that auction | Included | Inherits active-share state until drawn |
 | Raw direct transfer | Excluded | Excluded | Excluded | Excluded |
+| Deauthorized plain-USDC shares | Excluded until reauthorized | Skipped | Excluded | Ineligible |
 
 Prepared, partially filled, stale, and continued bad-debt auctions MUST retain
 the corresponding v2 withdrawal-blocking liability until settlement or
@@ -132,8 +135,9 @@ seven-decimal USDC units:
 E_p=\sum_{i=1}^{n}V_{p,i},\qquad 1\le n\le3.
 \]
 
-Each \(V_{p,i}\) is eligible pool-attributed value. Every verified USDC has
-equal weight, so any combination—including one asset alone—may qualify.
+Each \(V_{p,i}\) is eligible, transferable pool-attributed value. Every
+verified transferable USDC has equal weight, so any combination—including one
+asset alone—may qualify.
 
 \[
 T_{\mathrm{activation}} = 12{,}500\ \mathrm{USDC}
@@ -167,8 +171,11 @@ V_x(A_x)=\left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
 
 For either Comet, underlying BLND is
 \(B(A)=\lfloor AR_b/S\rfloor\). Every quote rechecks positive LP supply and
-reserves and the immutable weights. Canonical USDC is valued one-for-one. The
-same two Comets imply the USDC-equivalent value of plain-XLM amount \(A\):
+reserves and the immutable weights. Canonical USDC is valued one-for-one only
+while the USDC SAC reports the backstop contract as authorized. A deauthorized
+plain-USDC tier has zero value without changing its token, share, queue, or
+pending-interest accounting. The same two Comets imply the USDC-equivalent
+value of plain-XLM amount \(A\):
 
 \[
 V_{XLM}(A)=\left\lfloor
@@ -185,11 +192,13 @@ snapshot. A verified zero is the only skippable result; unavailable,
 incompatible, negative, inconsistent, or overflowing inputs fail atomically.
 
 Canonical LP values deliberately reflect current Comet composition rather
-than an external fair-market price. Swaps, one-sided liquidity changes,
-donations, and issuer deauthorization effects can change them; BLND:USDC
-remains the USDC and BLND-price anchor. The protocol does not automatically
-pause activation, emissions, take-rate allocation, or auctions based on issuer
-authorization state.
+than an external fair-market price. Swaps, one-sided liquidity changes, and
+donations can change them; BLND:USDC remains the USDC and BLND-price anchor.
+Plain-USDC authorization is read directly from its SAC on every valuation. A
+deauthorized balance therefore contributes zero to activation, pool status,
+reward-zone qualification, take-rate allocation, auction sizing, and supplier-
+loss eligibility. Reauthorization restores its value prospectively; it does
+not reallocate take rate or losses processed while the tier was unavailable.
 
 The consumers are activation, status, reward-zone membership, take-rate
 allocation, auction sizing, and supplier-loss eligibility. Emission weight
@@ -393,14 +402,18 @@ lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
 Each tier uses Section 4 valuation and `V2-AUCTION-004`'s inclusive 200-USDC
 interest minimum. Interest fills donate to the selected tier; bad-debt fills
 draw from it. Stale deletion releases the selection without changing
-liabilities, pending credit, balances, or tier assets.
+liabilities, pending credit, balances, or tier assets. If a selected
+plain-USDC tier becomes deauthorized, the same deletion entry point may release
+it immediately so the next permissionless creation can continue with a
+transferable tier.
 
 ### 5.2 Bad-debt waterfall
 
-One auction sells the first configured tier with positive eligible assets and
-value under Section 4. The configured `FirstLoss`, `SecondLoss`, and optional
-`ThirdLoss` order is immutable. Supplier loss begins only after every
-configured tier has no usable value.
+One auction sells the first configured tier with positive transferable assets
+and value under Section 4. A deauthorized plain-USDC tier is skipped. The
+configured `FirstLoss`, `SecondLoss`, and optional `ThirdLoss` order is
+otherwise immutable. Supplier loss begins only after every configured tier has
+no usable transferable value.
 
 The auction targets 120% of reserve-oracle-valued debt. Only the pool may authorize a
 lot, which is the smaller of available tier tokens and the target amount. A
@@ -450,9 +463,9 @@ D_i=\left\lfloor
 \qquad C'=D+C-\sum_iD_i.
 \]
 
-A zero-value tier is omitted. Each pool and reserve stores one pending amount
-per configured tier and its Section 1.1 carry. Section 3.3 determines eligible
-value, including capital selected for bad debt until drawn.
+A zero-value or deauthorized tier is omitted. Each pool and reserve stores one
+pending amount per configured tier and its Section 1.1 carry. Section 3.3
+determines eligible value, including capital selected for bad debt until drawn.
 
 Persistent per-reserve tier amounts and carry are a direct-ledger client
 boundary; reads do not renew TTL and report only live RPC entries. The pool
@@ -472,15 +485,17 @@ A mismatch fails atomically and does not redirect the auction.
 | --- | --- |
 | Checkpoint | Accrue and persist the supplied reserves. Omitted reserves remain pending or uncheckpointed. |
 | Allocate | Use one canonical `pool_data` snapshot and the formula above to move new credit into persistent tier amounts. |
-| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first tier meeting the inclusive 200-USDC minimum. |
+| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first transferable tier meeting the inclusive 200-USDC minimum. Previously allocated amounts for a deauthorized tier remain pending until reauthorization. |
 | Create | Store the selected persistent amounts in a next-ledger auction, privately bind its tier, and advance the cursor. No second interest auction may start before fill or stale deletion. |
 | Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically transfer and account for the realized bid under the selected tier's rules below. |
 | Recover | Stale deletion releases the selection; unfilled amounts remain in their original pending and credit accumulators. |
 
 Public lookup and deletion remain `get_auction(2, backstop)` and
-`del_auction(2, backstop)`, and fill validates the private tier. Selected
-amounts remain pending so expiry cannot lose or reweight them; ordinary share
-operations remain available. A partial fill releases its base-lot discount,
+`del_auction(2, backstop)`, and fill validates the private tier. If the selected
+plain-USDC tier becomes deauthorized, `del_auction` may cancel the auction
+immediately rather than waiting for ordinary staleness. Selected amounts remain
+pending so expiry cannot lose or reweight them; ordinary share operations
+remain available. A partial fill releases its base-lot discount,
 and only reserve assets actually transferred reduce pending amounts and
 accrued credit. BLND:XLM and BLND:USDC bids are donated in full. Donation mints
 no shares or user claim but appreciates active and queued shares and assumes

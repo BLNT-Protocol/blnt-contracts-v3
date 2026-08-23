@@ -77,8 +77,10 @@ first:
   Interest requires at least 200 USDC; bad debt uses every positively valued
   tier before suppliers.
 - A single inclusive 12,500-USDC activation threshold.
-- Take-rate allocation uses each pool's immutable tier weights and verified
-  USDC values.
+- Activation, pool status, reward-zone admission, take-rate allocation, and
+  the loss waterfall use the same authorization-aware transferable values.
+  Deauthorized plain USDC has zero value until reauthorized, while its shares,
+  queues, and pending interest remain accounted for.
 - Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
   and reserve an exact cumulative 1% for bounded swaps through the matching
   canonical BLND Comet followed by an exact BLND burn. Buyback failure must

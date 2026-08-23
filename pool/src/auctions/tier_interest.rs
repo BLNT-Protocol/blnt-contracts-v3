@@ -77,6 +77,9 @@ pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -
         let reserve = pool.load_reserve(e, &asset, false);
         let price = pool.load_price(e, &asset);
         for index in 0..pool_data.tiers.len() {
+            if pool_data.tiers.get(index).unwrap().value == 0 {
+                continue;
+            }
             let value = value_reserve_amount(
                 e,
                 price,
@@ -640,6 +643,26 @@ mod tests {
             10
         );
         assert_eq!(allocation.carry, 1);
+    }
+
+    #[test]
+    fn take_rate_allocation_renormalizes_around_zero_value_tier() {
+        let e = Env::default();
+        let allocation = allocate_take_rate(
+            &e,
+            60,
+            &vec![
+                &e,
+                tier_data(&e, 1, 4),
+                tier_data(&e, 0, 3),
+                tier_data(&e, 1, 2),
+            ],
+        );
+
+        assert_eq!(allocation.first_loss, 40);
+        assert_eq!(allocation.second_loss, 0);
+        assert_eq!(allocation.third_loss, 20);
+        assert_eq!(allocation.carry, 0);
     }
 
     #[test]

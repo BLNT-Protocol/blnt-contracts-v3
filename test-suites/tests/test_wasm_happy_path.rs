@@ -2,18 +2,100 @@
 
 use backstop::{BackstopDataKey, BackstopTier as BackstopContractTier, PoolBalance};
 use pool::{PoolDataKey, Positions, Request, RequestType, ReserveData};
+use pool_factory::{BackstopAsset, BackstopTierConfig};
 use sep_40_oracle::testutils::Asset;
+use sep_41_token::StellarAssetClient;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
     map,
     testutils::{Address as _, Ledger},
-    vec, Address, Symbol,
+    vec, Address, String, Symbol,
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
     create_fixture_with_data,
-    test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
+    pool::default_reserve_metadata,
+    test_fixture::{TestFixture, TokenIndex, SCALAR_12, SCALAR_7},
 };
+
+#[test]
+fn test_wasm_deauthorized_usdc_loses_value_and_releases_selected_auction() {
+    let mut fixture = TestFixture::create(true);
+    fixture.backstop_config = vec![
+        &fixture.env,
+        BackstopTierConfig {
+            asset: BackstopAsset::Usdc,
+            take_rate_weight: 1,
+        },
+    ];
+    fixture.create_pool(
+        String::from_str(&fixture.env, "USDC authorization"),
+        0_1000000,
+        6,
+        0,
+    );
+    let mut stable_config = default_reserve_metadata();
+    stable_config.decimals = 6;
+    fixture.create_pool_reserve(0, TokenIndex::STABLE, &stable_config);
+
+    let depositor = fixture.users[0].clone();
+    let pool = &fixture.pools[0].pool;
+    let usdc = &fixture.tokens[TokenIndex::USDC];
+    let amount = 12_500 * SCALAR_7;
+    usdc.mint(&depositor, &amount);
+    fixture.backstop.deposit(
+        &BackstopContractTier::FirstLoss,
+        &depositor,
+        &pool.address,
+        &amount,
+    );
+    assert_eq!(
+        fixture.backstop.pool_data(&pool.address).active_value,
+        amount
+    );
+    pool.set_status(&3);
+    assert_eq!(pool.update_status(), 1);
+
+    let positions = Positions {
+        liabilities: map![&fixture.env, (0, 50 * 10i128.pow(6))],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+    });
+    let auction = pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    assert!(auction.lot.get(usdc.address.clone()).unwrap() > 0);
+
+    StellarAssetClient::new(&fixture.env, &usdc.address)
+        .set_authorized(&fixture.backstop.address, &false);
+    assert_eq!(fixture.backstop.pool_data(&pool.address).active_value, 0);
+    assert_eq!(pool.update_status(), 3);
+    assert!(fixture
+        .backstop
+        .try_add_reward(&pool.address, &None)
+        .is_err());
+    pool.del_auction(&1, &fixture.backstop.address);
+    assert!(pool.try_get_auction(&1, &fixture.backstop.address).is_err());
+
+    StellarAssetClient::new(&fixture.env, &usdc.address)
+        .set_authorized(&fixture.backstop.address, &true);
+    assert_eq!(
+        fixture.backstop.pool_data(&pool.address).active_value,
+        amount
+    );
+    assert_eq!(pool.update_status(), 1);
+    fixture.backstop.add_reward(&pool.address, &None);
+}
 
 #[test]
 fn test_wasm_reconciles_direct_reserve_custody_loss() {

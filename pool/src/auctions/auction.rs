@@ -1,5 +1,5 @@
 use crate::{
-    dependencies::BackstopContractTier,
+    dependencies::{BackstopClient, BackstopContractAsset, BackstopContractTier},
     errors::PoolError,
     pool::{Pool, User},
     storage,
@@ -392,10 +392,27 @@ pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
         .block
         .checked_add(AUCTION_STALE_LEDGERS)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
-    if e.ledger().sequence() < stale_at {
+    if e.ledger().sequence() < stale_at
+        && !selected_usdc_tier_has_no_transferable_value(e, &auction)
+    {
         panic_with_error!(e, PoolError::BadRequest);
     }
     remove_tier_auction(e, auction_type);
+}
+
+fn selected_usdc_tier_has_no_transferable_value(e: &Env, auction: &TierAuctionData) -> bool {
+    let backstop = storage::get_backstop(e);
+    let pool_data = BackstopClient::new(e, &backstop).pool_data(&e.current_contract_address());
+    let index = match auction.tier {
+        BackstopTier::FirstLoss => 0,
+        BackstopTier::SecondLoss => 1,
+        BackstopTier::ThirdLoss => 2,
+    };
+    let tier = pool_data
+        .tiers
+        .get(index)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::InvalidLot));
+    matches!(tier.asset, BackstopContractAsset::Usdc) && tier.tokens > 0 && tier.value == 0
 }
 
 pub(crate) fn remove_tier_auction(e: &Env, auction_type: AuctionType) {
@@ -423,12 +440,72 @@ mod tests {
 
     use super::*;
     use sep_40_oracle::testutils::Asset;
+    use sep_41_token::StellarAssetClient;
     use soroban_sdk::{
         map,
         testutils::{Address as _, Ledger, LedgerInfo},
         unwrap::UnwrapOptimized,
         vec, Symbol,
     };
+
+    #[test]
+    fn deauthorized_usdc_tier_auctions_can_be_deleted_before_stale() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 12_345,
+            protocol_version: 27,
+            sequence_number: 50,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let depositor = Address::generate(&e);
+        let pool_address = create_pool(&e);
+        let (blnd, _) = testutils::create_blnd_token(&e, &pool_address, &admin);
+        let (usdc, usdc_client) = testutils::create_token_contract(&e, &admin);
+        let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (backstop, backstop_client) =
+            testutils::create_backstop(&e, &pool_address, &blnd_usdc, &usdc, &blnd);
+        usdc_client.mint(&depositor, &(300 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::ThirdLoss,
+            &depositor,
+            &pool_address,
+            &(300 * SCALAR_7),
+        );
+
+        e.as_contract(&pool_address, || {
+            for auction_type in [AuctionType::BadDebtAuction, AuctionType::InterestAuction] {
+                set_tier_auction(
+                    &e,
+                    auction_type,
+                    &TierAuctionData {
+                        auction: AuctionData {
+                            bid: map![&e],
+                            lot: map![&e, (usdc.clone(), 100 * SCALAR_7)],
+                            block: 51,
+                        },
+                        tier: BackstopTier::ThirdLoss,
+                    },
+                );
+            }
+        });
+
+        StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &false);
+        let pool = crate::PoolClient::new(&e, &pool_address);
+        for auction_type in [AuctionType::BadDebtAuction, AuctionType::InterestAuction] {
+            pool.del_auction(&(auction_type.clone() as u32), &backstop);
+            assert!(pool
+                .try_get_auction(&(auction_type as u32), &backstop)
+                .is_err());
+        }
+    }
 
     #[test]
     fn test_create_bad_debt_auction() {
