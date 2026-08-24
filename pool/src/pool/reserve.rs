@@ -170,15 +170,6 @@ impl Reserve {
         }
     }
 
-    /// Require an underlying-token transfer involving the pool to be
-    /// executable. Internal bToken and dToken position transfers do not use
-    /// this guard.
-    pub fn require_authorized(&self, e: &Env) {
-        if !self.is_authorized(e) {
-            panic_with_error!(e, PoolError::ReserveDeauthorized);
-        }
-    }
-
     /// Fetch the total liabilities for the reserve in underlying tokens
     pub fn total_liabilities(&self, e: &Env) -> i128 {
         self.to_asset_from_d_token(e, self.data.d_supply)

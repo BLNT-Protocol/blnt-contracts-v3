@@ -266,9 +266,12 @@ authorization extension retains the inherited v2 behavior.
 
 While quarantined:
 
-- Supply, collateral supply, withdrawal, collateral withdrawal, borrowing,
-  repayment, and flash loans in the reserve MUST fail with a pool-specific
-  deauthorization error before custody or accounting changes.
+- Any supply, collateral supply, withdrawal, collateral withdrawal, borrowing,
+  repayment, or flash-loan operation that requires a nonzero reserve-token
+  transfer MUST fail atomically through the token contract, leaving no custody
+  or accounting changes. An allowance-based submission MAY execute an
+  accounting-only batch whose incoming and outgoing reserve transfers net to
+  zero; ordinary utilization, health, and reconciliation checks still apply.
 - Existing liabilities retain their complete oracle value and continue
   accruing ordinary interest. Existing supplier claims and the take-rate share
   continue accruing, although neither is transferable until reauthorization.

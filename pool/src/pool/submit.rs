@@ -88,7 +88,6 @@ pub fn execute_submit_with_flash_loan(
     {
         pool.require_action_allowed(e, RequestType::Borrow as u32);
         let mut reserve = pool.load_reserve(e, &flash_loan.asset, true);
-        reserve.require_authorized(e);
         let d_tokens_minted = reserve.to_d_token_up(e, flash_loan.amount);
         from_state.add_liabilities(e, &mut reserve, d_tokens_minted);
         reserve.require_action_allowed(e, RequestType::Borrow as u32);
@@ -314,7 +313,8 @@ mod tests {
         let pool_address = testutils::create_pool(&e);
         let (oracle, _) = testutils::create_mock_oracle(&e);
         let (asset, token) = testutils::create_token_contract(&e, &admin);
-        let (reserve_config, reserve_data) = testutils::default_reserve_meta();
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.last_time = 600;
         testutils::create_reserve(&e, &pool_address, &asset, &reserve_config, &reserve_data);
         e.as_contract(&pool_address, || {
             storage::set_pool_config(
@@ -366,6 +366,31 @@ mod tests {
                 &vec![&e],
             )
             .is_err());
+
+        // The allowance path may execute accounting-only changes when the
+        // incoming and outgoing amounts net to zero. No token transfer is
+        // attempted, so deauthorization does not block this risk-neutral
+        // round trip.
+        let zero_net_result = client.try_submit_with_allowance(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &e,
+                Request {
+                    request_type: RequestType::Supply as u32,
+                    address: asset.clone(),
+                    amount: SCALAR_7,
+                },
+                Request {
+                    request_type: RequestType::Withdraw as u32,
+                    address: asset.clone(),
+                    amount: SCALAR_7,
+                },
+            ],
+        );
+        assert!(matches!(zero_net_result, Ok(Ok(_))));
+        assert!(client.get_positions(&user).supply.is_empty());
 
         token.set_authorized(&pool_address, &true);
         token.mint(&user, &SCALAR_7);

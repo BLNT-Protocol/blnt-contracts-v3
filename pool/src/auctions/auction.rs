@@ -482,6 +482,8 @@ mod tests {
         let pool_address = create_pool(&e);
         let (blnd, _) = testutils::create_blnd_token(&e, &pool_address, &admin);
         let (usdc, usdc_client) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, reserve_data) = testutils::default_reserve_meta();
+        testutils::create_reserve(&e, &pool_address, &usdc, &reserve_config, &reserve_data);
         let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
         let (backstop, backstop_client) =
             testutils::create_backstop(&e, &pool_address, &blnd_usdc, &usdc, &blnd);

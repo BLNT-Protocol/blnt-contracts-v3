@@ -164,7 +164,6 @@ pub(crate) fn fill_interest_auction(
     let fill = scale_interest_auction(e, &auction, percent);
     for (asset, amount) in fill.lot.iter() {
         let mut reserve = pool.load_reserve(e, &asset, true);
-        reserve.require_authorized(e);
         let token = TokenClient::new(e, &asset);
         let pool_before = token.balance(&pool_address);
         let filler_before = token.balance(&filler_state.address);

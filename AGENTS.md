@@ -117,9 +117,10 @@ first:
   available. Only bad debt left after ordinary collateral liquidation reaches
   the configured waterfall.
 - A deauthorized lending reserve is quarantined without being written off:
-  transfer-dependent requests fail, collateral has zero effective health
-  value, liabilities and interest continue, internal liquidation positions
-  remain transferable, and unauctionable take-rate credit stays pending until
+  nonzero custody transfers fail atomically, allowance-based zero-net internal
+  adjustments remain possible, collateral has zero effective health value,
+  liabilities and interest continue, internal liquidation positions remain
+  transferable, and unauctionable take-rate credit stays pending until
   reauthorization. Authorization revocation alone is not a custody deficit.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.

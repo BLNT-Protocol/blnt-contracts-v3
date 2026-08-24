@@ -59,5 +59,4 @@ pub enum PoolError {
 
     // Reserve custody errors
     UnreconciledReserveLoss = 1229,
-    ReserveDeauthorized = 1230,
 }

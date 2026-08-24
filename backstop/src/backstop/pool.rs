@@ -356,7 +356,7 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         let mut total = soroban_sdk::Vec::new(e);
         for (index, partition) in amounts.iter().enumerate() {
             let config = config.get(index as u32).unwrap();
-            if configured_tier_is_transferable(e, &config) {
+            if partition.2 == 0 || configured_tier_is_transferable(e, &config) {
                 active.push_back(partition.0);
                 queued.push_back(partition.1);
                 total.push_back(partition.2);
@@ -414,15 +414,16 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     let mut total = soroban_sdk::Vec::new(e);
     for index in 0..config.len() {
         let tier_config = config.get(index).unwrap();
+        let tier_amounts = amounts.get(index).unwrap();
         let quotes = quote_configured_tier(
             e,
             &tier_config,
-            amounts.get(index).unwrap(),
+            tier_amounts,
             anchor.as_ref(),
             anchor_value,
             target.as_ref(),
         );
-        if configured_tier_is_transferable(e, &tier_config) {
+        if tier_amounts.2 == 0 || configured_tier_is_transferable(e, &tier_config) {
             active.push_back(quotes.active.usdc_value);
             queued.push_back(quotes.queued.usdc_value);
             total.push_back(quotes.total.usdc_value);
