@@ -140,4 +140,4 @@ configuration and exposes that configuration to the backstop and clients.
 | --- | --- | --- | --- |
 | `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
 | `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
-| `BackstopTierConfig` | Not present | <code>{"asset":"BlndXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Weights are integers from 1 through 10 and strictly decrease in entry order; no backstop oracle is configured. |
+| `BackstopTierConfig` | Not present | <code>{"asset":"BlndXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |

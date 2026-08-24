@@ -9,7 +9,7 @@ use crate::{
     storage,
 };
 
-const MAX_TAKE_RATE_WEIGHT: u32 = 10;
+const MAX_TAKE_RATE_WEIGHT: u32 = 100;
 
 /// One pool's complete configured backstop accounting and valuation.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -649,17 +649,10 @@ fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTier
     if config.is_empty() || config.len() > 3 {
         panic_with_error!(e, BackstopError::InvalidBackstopValuation);
     }
-    let mut previous_weight = None;
     for (index, tier) in config.iter().enumerate() {
         if tier.take_rate_weight == 0 || tier.take_rate_weight > MAX_TAKE_RATE_WEIGHT {
             panic_with_error!(e, BackstopError::InvalidBackstopValuation);
         }
-        if let Some(weight) = previous_weight {
-            if weight <= tier.take_rate_weight {
-                panic_with_error!(e, BackstopError::InvalidBackstopValuation);
-            }
-        }
-        previous_weight = Some(tier.take_rate_weight);
         let asset = from_factory_asset(tier.asset);
         if TokenClient::new(e, &asset_token(e, asset)).decimals() != TOKEN_DECIMALS {
             panic_with_error!(e, BackstopError::InvalidBackstopValuation);
@@ -1302,12 +1295,25 @@ mod valuation_tests {
     use super::*;
 
     #[test]
-    fn rejects_out_of_range_or_non_descending_tier_weights() {
+    fn enforces_weight_range_and_accepts_independent_tier_weights() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         let backstop = create_backstop(&e);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         let client = BackstopClient::new(&e, &backstop);
+
+        let zero = Address::generate(&e);
+        factory.set_pool_config(
+            &zero,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 0,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&zero).is_err());
 
         let excessive = Address::generate(&e);
         factory.set_pool_config(
@@ -1316,7 +1322,7 @@ mod valuation_tests {
                 &e,
                 BackstopTierConfig {
                     asset: FactoryBackstopAsset::Usdc,
-                    take_rate_weight: 11,
+                    take_rate_weight: 101,
                 },
             ],
         );
@@ -1337,7 +1343,7 @@ mod valuation_tests {
                 },
             ],
         );
-        assert!(client.try_pool_data(&equal).is_err());
+        assert!(client.try_pool_data(&equal).is_ok());
 
         let ascending = Address::generate(&e);
         factory.set_pool_config(
@@ -1354,7 +1360,7 @@ mod valuation_tests {
                 },
             ],
         );
-        assert!(client.try_pool_data(&ascending).is_err());
+        assert!(client.try_pool_data(&ascending).is_ok());
     }
 
     fn values(e: &Env, blnd_usdc: i128, blnd_xlm: i128, usdc: i128) -> ActivationValues {
@@ -1579,7 +1585,7 @@ mod valuation_tests {
                 &e,
                 BackstopTierConfig {
                     asset: FactoryBackstopAsset::Xlm,
-                    take_rate_weight: 10,
+                    take_rate_weight: 100,
                 },
             ],
         );
@@ -1595,7 +1601,7 @@ mod valuation_tests {
         let tier = data.tiers.first().unwrap();
         assert_eq!(tier.asset, BackstopAsset::Xlm);
         assert_eq!(tier.token, xlm);
-        assert_eq!(tier.take_rate_weight, 10);
+        assert_eq!(tier.take_rate_weight, 100);
         assert!(!tier.blnd_emission_eligible);
         assert_eq!(tier.value, ACTIVATION_THRESHOLD_USDC);
         assert_eq!(data.active_value, ACTIVATION_THRESHOLD_USDC);

@@ -10,7 +10,7 @@ use soroban_sdk::{
 
 const SCALAR_7: u32 = 1_0000000;
 const MAX_BACKSTOP_TIERS: u32 = 3;
-const MAX_TAKE_RATE_WEIGHT: u32 = 10;
+const MAX_TAKE_RATE_WEIGHT: u32 = 100;
 
 #[contract]
 pub struct PoolFactoryContract;
@@ -139,17 +139,10 @@ pub(crate) fn validate_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>
     if config.is_empty() || config.len() > MAX_BACKSTOP_TIERS {
         panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
     }
-    let mut previous_weight = None;
     for (index, tier) in config.iter().enumerate() {
         if tier.take_rate_weight == 0 || tier.take_rate_weight > MAX_TAKE_RATE_WEIGHT {
             panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
         }
-        if let Some(weight) = previous_weight {
-            if weight <= tier.take_rate_weight {
-                panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
-            }
-        }
-        previous_weight = Some(tier.take_rate_weight);
         for later in config.iter().skip(index + 1) {
             if tier.asset == later.asset {
                 panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);

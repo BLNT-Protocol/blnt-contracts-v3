@@ -33,7 +33,7 @@ pub enum BackstopAsset {
 pub struct BackstopTierConfig {
     /// Canonical asset deposited into this waterfall position.
     pub asset: BackstopAsset,
-    /// Relative take-rate allocation weight from 1 through 10.
+    /// Relative take-rate allocation weight from 1 through 100.
     pub take_rate_weight: u32,
 }
 

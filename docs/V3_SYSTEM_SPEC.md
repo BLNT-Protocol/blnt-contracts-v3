@@ -49,10 +49,9 @@ At deployment, each pool operator supplies an ordered list of one to three
 `BackstopTierConfig` values. Entry order maps to `FirstLoss`, `SecondLoss`, and
 `ThirdLoss`; omitted trailing positions do not exist. Each entry selects one
 unique asset from canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM and one
-integer take-rate weight from 1 through 10. Weights MUST strictly decrease in
-loss-waterfall order. The factory stores this immutable configuration with the
-pool registration, and the backstop verifies and caches it before accepting the
-pool.
+integer take-rate weight from 1 through 100. Weights are independent of loss-
+waterfall order. The factory stores this immutable configuration with the pool
+registration, and the backstop verifies and caches it before accepting the pool.
 
 The candidate also immutably binds the canonical BLND:USDC and BLND:XLM 80:20
 Comets and canonical BLND, USDC, and XLM assets. No other backstop asset is

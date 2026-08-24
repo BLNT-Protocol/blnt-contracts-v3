@@ -166,7 +166,7 @@ fn test_pool_factory_accepts_maximum_backstop_weight() {
             &e,
             BackstopTierConfig {
                 asset: BackstopAsset::BlndXlm,
-                take_rate_weight: 10,
+                take_rate_weight: 100,
             },
         ],
     );
@@ -253,15 +253,14 @@ fn test_pool_factory_rejects_excessive_backstop_weight() {
             &e,
             BackstopTierConfig {
                 asset: BackstopAsset::Usdc,
-                take_rate_weight: 11,
+                take_rate_weight: 101,
             },
         ],
     );
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #1300)")]
-fn test_pool_factory_rejects_equal_backstop_weights() {
+fn test_pool_factory_accepts_equal_and_ascending_backstop_weights() {
     let e = Env::default();
     validate_backstop_config(
         &e,
@@ -275,25 +274,9 @@ fn test_pool_factory_rejects_equal_backstop_weights() {
                 asset: BackstopAsset::Usdc,
                 take_rate_weight: 4,
             },
-        ],
-    );
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #1300)")]
-fn test_pool_factory_rejects_ascending_backstop_weights() {
-    let e = Env::default();
-    validate_backstop_config(
-        &e,
-        &vec![
-            &e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
-                take_rate_weight: 3,
-            },
-            BackstopTierConfig {
-                asset: BackstopAsset::Usdc,
-                take_rate_weight: 4,
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 100,
             },
         ],
     );
