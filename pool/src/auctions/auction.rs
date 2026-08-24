@@ -392,12 +392,25 @@ pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
         .block
         .checked_add(AUCTION_STALE_LEDGERS)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let reserve_deauthorized = auction_type == AuctionType::InterestAuction
+        && interest_lot_contains_deauthorized_reserve(e, &auction);
     if e.ledger().sequence() < stale_at
         && !selected_usdc_tier_has_no_transferable_value(e, &auction)
+        && !reserve_deauthorized
     {
         panic_with_error!(e, PoolError::BadRequest);
     }
     remove_tier_auction(e, auction_type);
+}
+
+fn interest_lot_contains_deauthorized_reserve(e: &Env, auction: &TierAuctionData) -> bool {
+    let mut pool = Pool::load(e);
+    for asset in auction.auction.lot.keys() {
+        if !pool.load_reserve(e, &asset, false).is_authorized(e) {
+            return true;
+        }
+    }
+    false
 }
 
 fn selected_usdc_tier_has_no_transferable_value(e: &Env, auction: &TierAuctionData) -> bool {

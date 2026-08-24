@@ -75,6 +75,9 @@ pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
         let reserve = pool.load_reserve(e, &asset, false);
+        if !reserve.is_authorized(e) {
+            continue;
+        }
         let price = pool.load_price(e, &asset);
         for index in 0..pool_data.tiers.len() {
             if pool_data.tiers.get(index).unwrap().value == 0 {
@@ -99,9 +102,12 @@ pub(crate) fn create_interest_auction_data(e: &Env, lot_assets: &Vec<Address>) -
     let mut lot = Map::new(e);
     for asset in lot_assets {
         let state = states.get(asset.clone()).unwrap();
-        let amount = state.tier_amount(tier);
-        if amount > 0 {
-            lot.set(asset.clone(), amount);
+        let reserve = pool.load_reserve(e, &asset, false);
+        if reserve.is_authorized(e) {
+            let amount = state.tier_amount(tier);
+            if amount > 0 {
+                lot.set(asset.clone(), amount);
+            }
         }
         set_interest_reserve_state(e, &asset, &state);
     }
@@ -157,6 +163,8 @@ pub(crate) fn fill_interest_auction(
     let auction = get_interest_auction(e);
     let fill = scale_interest_auction(e, &auction, percent);
     for (asset, amount) in fill.lot.iter() {
+        let mut reserve = pool.load_reserve(e, &asset, true);
+        reserve.require_authorized(e);
         let token = TokenClient::new(e, &asset);
         let pool_before = token.balance(&pool_address);
         let filler_before = token.balance(&filler_state.address);
@@ -166,7 +174,6 @@ pub(crate) fn fill_interest_auction(
         {
             panic_with_error!(e, PoolError::BalanceError);
         }
-        let mut reserve = pool.load_reserve(e, &asset, true);
         reserve.data.backstop_credit = checked_sub(e, reserve.data.backstop_credit, amount);
         pool.cache_reserve(reserve);
     }

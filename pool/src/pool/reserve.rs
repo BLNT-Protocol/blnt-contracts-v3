@@ -1,4 +1,5 @@
 use cast::i128;
+use sep_41_token::StellarAssetClient;
 use soroban_fixed_point_math::SorobanFixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 
@@ -158,6 +159,26 @@ impl Reserve {
         }
     }
 
+    /// Return whether the reserve's Stellar Asset Contract currently permits
+    /// the pool to use its balance. Generic SEP-41 tokens do not expose the
+    /// SAC-only `authorized` extension and retain the inherited behavior.
+    pub fn is_authorized(&self, e: &Env) -> bool {
+        match StellarAssetClient::new(e, &self.asset).try_authorized(&e.current_contract_address())
+        {
+            Ok(Ok(authorized)) => authorized,
+            _ => true,
+        }
+    }
+
+    /// Require an underlying-token transfer involving the pool to be
+    /// executable. Internal bToken and dToken position transfers do not use
+    /// this guard.
+    pub fn require_authorized(&self, e: &Env) {
+        if !self.is_authorized(e) {
+            panic_with_error!(e, PoolError::ReserveDeauthorized);
+        }
+    }
+
     /// Fetch the total liabilities for the reserve in underlying tokens
     pub fn total_liabilities(&self, e: &Env) -> i128 {
         self.to_asset_from_d_token(e, self.data.d_supply)
@@ -244,6 +265,28 @@ mod tests {
     use super::*;
     use crate::testutils;
     use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
+    use soroban_sdk::{contract, contractimpl};
+
+    #[contract]
+    struct GenericToken;
+
+    #[contractimpl]
+    impl GenericToken {
+        pub fn balance(_e: Env, _address: Address) -> i128 {
+            0
+        }
+    }
+
+    #[test]
+    fn generic_sep_41_token_without_sac_authorization_extension_is_allowed() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+        let token = e.register(GenericToken, ());
+        let mut reserve = testutils::default_reserve(&e);
+        reserve.asset = token;
+
+        e.as_contract(&pool, || assert!(reserve.is_authorized(&e)));
+    }
 
     #[test]
     fn test_load_reserve() {

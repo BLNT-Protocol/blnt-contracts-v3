@@ -88,6 +88,7 @@ pub fn execute_submit_with_flash_loan(
     {
         pool.require_action_allowed(e, RequestType::Borrow as u32);
         let mut reserve = pool.load_reserve(e, &flash_loan.asset, true);
+        reserve.require_authorized(e);
         let d_tokens_minted = reserve.to_d_token_up(e, flash_loan.amount);
         from_state.add_liabilities(e, &mut reserve, d_tokens_minted);
         reserve.require_action_allowed(e, RequestType::Borrow as u32);
@@ -279,6 +280,7 @@ fn handle_transfers(e: &Env, actions: &Actions, spender: &Address, to: &Address)
 #[cfg(test)]
 mod tests {
     use crate::{
+        constants::SCALAR_7,
         storage::{self, PoolConfig},
         testutils, AuctionData, RequestType,
     };
@@ -290,6 +292,99 @@ mod tests {
         testutils::{Address as _, Ledger, LedgerInfo},
         vec, Symbol,
     };
+
+    #[test]
+    fn deauthorized_reserve_blocks_transfer_dependent_requests() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 600,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool_address = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (asset, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, reserve_data) = testutils::default_reserve_meta();
+        testutils::create_reserve(&e, &pool_address, &asset, &reserve_config, &reserve_data);
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+        });
+        token.set_authorized(&pool_address, &false);
+
+        let client = crate::PoolClient::new(&e, &pool_address);
+        for request_type in [
+            RequestType::Supply,
+            RequestType::Withdraw,
+            RequestType::SupplyCollateral,
+            RequestType::WithdrawCollateral,
+            RequestType::Borrow,
+            RequestType::Repay,
+        ] {
+            assert!(client
+                .try_submit(
+                    &user,
+                    &user,
+                    &user,
+                    &vec![
+                        &e,
+                        Request {
+                            request_type: request_type as u32,
+                            address: asset.clone(),
+                            amount: SCALAR_7,
+                        },
+                    ],
+                )
+                .is_err());
+        }
+        assert!(client
+            .try_flash_loan(
+                &user,
+                &FlashLoan {
+                    contract: Address::generate(&e),
+                    asset: asset.clone(),
+                    amount: SCALAR_7,
+                },
+                &vec![&e],
+            )
+            .is_err());
+
+        token.set_authorized(&pool_address, &true);
+        token.mint(&user, &SCALAR_7);
+        assert!(client
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &e,
+                    Request {
+                        request_type: RequestType::Supply as u32,
+                        address: asset,
+                        amount: SCALAR_7,
+                    },
+                ],
+            )
+            .is_ok());
+    }
 
     #[test]
     fn test_submit() {

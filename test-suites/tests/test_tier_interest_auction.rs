@@ -58,6 +58,117 @@ fn fill_interest(e: &Env, pool: &PoolClient, backstop: &Address, filler: &Addres
     );
 }
 
+fn exercise_deauthorized_reserve_interest(wasm: bool) {
+    let fixture = create_fixture_with_data(wasm);
+    let e = fixture.env.clone();
+    let pool = &fixture.pools[0].pool;
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let stable_address = stable.address.clone();
+    let added_credit = 10_000 * 10i128.pow(6);
+
+    stable.mint(&pool.address, &added_credit);
+    assert_eq!(pool.gulp(&stable_address), added_credit);
+    fixture
+        .oracle
+        .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
+
+    let empty = vec![&e];
+    let lot_assets = vec![&e, stable_address.clone()];
+    let credit = pool.get_reserve(&stable_address).data.backstop_credit;
+    stable.set_authorized(&pool.address, &false);
+
+    let weth = &fixture.tokens[TokenIndex::WETH];
+    let weth_address = weth.address.clone();
+    let weth_credit = 10 * 10i128.pow(9);
+    weth.mint(&pool.address, &weth_credit);
+    assert_eq!(pool.gulp(&weth_address), weth_credit);
+    let mixed_auction = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &vec![&e, stable_address.clone(), weth_address.clone()],
+        &100,
+    );
+    assert!(!mixed_auction.lot.contains_key(stable_address.clone()));
+    assert!(mixed_auction.lot.contains_key(weth_address));
+    e.ledger().set_sequence_number(mixed_auction.block + 500);
+    pool.del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
+
+    assert!(pool
+        .try_new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+            &empty,
+            &lot_assets,
+            &100,
+        )
+        .is_err());
+    assert_eq!(
+        pool.get_reserve(&stable_address).data.backstop_credit,
+        credit
+    );
+
+    stable.set_authorized(&pool.address, &true);
+    let auction = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &empty,
+        &lot_assets,
+        &100,
+    );
+    assert!(auction.lot.contains_key(stable_address.clone()));
+
+    stable.set_authorized(&pool.address, &false);
+    assert!(pool
+        .try_submit(
+            &fixture.users[0],
+            &fixture.users[0],
+            &fixture.users[0],
+            &vec![
+                &e,
+                Request {
+                    request_type: RequestType::FillInterestAuction as u32,
+                    address: fixture.backstop.address.clone(),
+                    amount: 100,
+                },
+            ],
+        )
+        .is_err());
+    pool.del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
+    assert_eq!(
+        pool.get_reserve(&stable_address).data.backstop_credit,
+        credit
+    );
+
+    stable.set_authorized(&pool.address, &true);
+    assert!(pool
+        .new_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+            &empty,
+            &lot_assets,
+            &100,
+        )
+        .lot
+        .contains_key(stable_address));
+}
+
+#[test]
+fn deauthorized_reserve_credit_stays_pending_and_active_auction_can_be_deleted() {
+    exercise_deauthorized_reserve_interest(false);
+}
+
+#[test]
+fn deauthorized_reserve_credit_stays_pending_and_active_auction_can_be_deleted_optimized_wasm() {
+    exercise_deauthorized_reserve_interest(true);
+}
+
 #[test]
 fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm() {
     use soroban_sdk::{IntoVal, Symbol};

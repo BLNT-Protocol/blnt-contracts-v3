@@ -256,7 +256,42 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
   Assertions are order-independent and MUST NOT influence selection, amounts,
   or pricing. A mismatch fails atomically.
 
-### 4.3 User-liquidation handoff — **Safety extension**
+### 4.3 Reserve authorization quarantine — **Safety extension**
+
+For every configured Stellar Asset Contract reserve, the pool MUST read the
+token's current authorization for the pool contract. A false authorization
+quarantines only that reserve; the pool and its other reserves remain
+operational. A generic SEP-41 reserve that does not expose the SAC-only
+authorization extension retains the inherited v2 behavior.
+
+While quarantined:
+
+- Supply, collateral supply, withdrawal, collateral withdrawal, borrowing,
+  repayment, and flash loans in the reserve MUST fail with a pool-specific
+  deauthorization error before custody or accounting changes.
+- Existing liabilities retain their complete oracle value and continue
+  accruing ordinary interest. Existing supplier claims and the take-rate share
+  continue accruing, although neither is transferable until reauthorization.
+- The reserve contributes zero effective collateral to position health and
+  borrowing capacity. Its nominal bToken value remains available to
+  liquidation sizing, and its bTokens and dTokens remain transferable through
+  the inherited internal user-liquidation fill.
+- Deauthorized reserve credit MUST be omitted from new interest-auction lots
+  without being reduced, reweighted, or written off. An active interest
+  auction containing that reserve may be deleted immediately through the
+  inherited permissionless deletion entry point; its unfilled credit remains
+  pending.
+- Existing liabilities remain eligible for ordinary user-liquidation,
+  bad-debt handoff, tier auctions, and supplier default. Deauthorization alone
+  MUST NOT forgive a liability, manufacture bad debt, or invoke
+  `reconcile_loss` because custody remains present.
+
+Reauthorization restores ordinary transfer and collateral behavior
+prospectively and makes all retained reserve credit available to a later
+interest auction. No administrator checkpoint, reserve rewrite, or pool-wide
+status transition is required.
+
+### 4.4 User-liquidation handoff — **Safety extension**
 
 `V2-AUCTION-002` applies. Its completed-liquidation handoff additionally MUST:
 
@@ -277,7 +312,7 @@ leaves collateral and liabilities while reducing health.
 The handoff uses one liability-map load and store, remains bounded by 30
 reserves, and MUST fit Protocol-27 invocation limits.
 
-### 4.4 Reserve clawback — **Added**
+### 4.5 Reserve clawback — **Added**
 
 The pool exposes `clawback(asset, from, amount)` as a multi-reserve extension
 of the Stellar Asset Contract clawback operation. It accepts a configured
@@ -315,7 +350,7 @@ liabilities nor starts an auction.
 This entry point cannot prevent the SAC administrator from invoking the SAC
 directly; a direct clawback bypasses Blend position accounting.
 
-### 4.5 Reserve-loss reconciliation — **Safety extension**
+### 4.6 Reserve-loss reconciliation — **Safety extension**
 
 The pool exposes permissionless `reconcile_loss(asset) -> i128` for a
 configured reserve whose actual token custody has fallen below its accrued

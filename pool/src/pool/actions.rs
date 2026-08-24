@@ -297,6 +297,7 @@ fn apply_supply(
     request: &Request,
 ) -> i128 {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     reserve.require_action_allowed(e, request.request_type);
     let b_tokens_minted = reserve.to_b_token_down(e, request.amount);
     user.add_supply(e, &mut reserve, b_tokens_minted);
@@ -321,6 +322,7 @@ fn apply_withdraw(
     request: &Request,
 ) -> (i128, i128) {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     let cur_b_tokens = user.get_supply(reserve.config.index);
     let mut to_burn = reserve.to_b_token_up(e, request.amount);
     let mut tokens_out = request.amount;
@@ -348,6 +350,7 @@ fn apply_supply_collateral(
     request: &Request,
 ) -> i128 {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     reserve.require_action_allowed(e, request.request_type);
     let b_tokens_minted = reserve.to_b_token_down(e, request.amount);
     user.add_collateral(e, &mut reserve, b_tokens_minted);
@@ -372,6 +375,7 @@ fn apply_withdraw_collateral(
     request: &Request,
 ) -> (i128, i128) {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     let cur_b_tokens = user.get_collateral(reserve.config.index);
     let mut to_burn = reserve.to_b_token_up(e, request.amount);
     let mut tokens_out = request.amount;
@@ -400,6 +404,7 @@ fn apply_borrow(
     request: &Request,
 ) -> i128 {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     reserve.require_action_allowed(e, request.request_type);
     let d_tokens_minted = reserve.to_d_token_up(e, request.amount);
     user.add_liabilities(e, &mut reserve, d_tokens_minted);
@@ -424,6 +429,7 @@ fn apply_repay(
     request: &Request,
 ) -> (i128, i128) {
     let mut reserve = pool.load_reserve(e, &request.address, true);
+    reserve.require_authorized(e);
     let cur_d_tokens = user.get_liabilities(reserve.config.index);
     let d_tokens_burnt = reserve.to_d_token_down(e, request.amount);
     let repayment_amount = request.amount;
