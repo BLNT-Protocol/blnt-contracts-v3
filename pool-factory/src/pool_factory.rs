@@ -1,7 +1,7 @@
 use crate::{
     errors::PoolFactoryError,
     events::PoolFactoryEvents,
-    storage::{self, BackstopTierConfig, PoolInitMeta},
+    storage::{self, BackstopTierConfig, PoolBackstopConfig, PoolInitMeta},
 };
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal,
@@ -37,6 +37,7 @@ pub trait PoolFactory {
         max_positions: u32,
         min_collateral: i128,
         backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address;
 
     /// Checks if contract address was deployed by the factory
@@ -48,7 +49,7 @@ pub trait PoolFactory {
     fn is_pool(e: Env, pool_address: Address) -> bool;
 
     /// Return a deployed pool's immutable ordered backstop configuration.
-    fn backstop_config(e: Env, pool_address: Address) -> Vec<BackstopTierConfig>;
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig;
 }
 
 #[contractimpl]
@@ -74,6 +75,7 @@ impl PoolFactory for PoolFactoryContract {
         max_positions: u32,
         min_collateral: i128,
         backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address {
         admin.require_auth();
         storage::extend_instance(&e);
@@ -115,10 +117,11 @@ impl PoolFactory for PoolFactoryContract {
                 min_collateral,
                 pool_init_meta.backstop,
                 pool_init_meta.blnd_id,
+                access_controller.clone(),
             ),
         );
 
-        storage::set_deployed(&e, &pool_address, &backstop_config);
+        storage::set_deployed(&e, &pool_address, &backstop_config, &access_controller);
 
         PoolFactoryEvents::deploy(&e, pool_address.clone());
         pool_address
@@ -129,7 +132,7 @@ impl PoolFactory for PoolFactoryContract {
         storage::is_deployed(&e, &pool_address)
     }
 
-    fn backstop_config(e: Env, pool_address: Address) -> Vec<BackstopTierConfig> {
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig {
         storage::extend_instance(&e);
         storage::get_backstop_config(&e, &pool_address)
     }

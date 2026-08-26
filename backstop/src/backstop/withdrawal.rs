@@ -117,6 +117,46 @@ pub fn execute_withdraw(
     to_return
 }
 
+/// Queue all active shares for an unauthorized backstop depositor.
+pub fn execute_force_queue_withdrawal(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> Q4W {
+    let shares = storage::get_user_balance_for_tier(e, tier, pool, user).shares;
+    if shares <= 0 {
+        panic_with_error!(e, BackstopError::BadRequest);
+    }
+    execute_queue_withdrawal(e, tier, user, pool, shares)
+}
+
+/// Withdraw all currently matured queued shares for an unauthorized user.
+pub fn execute_force_withdrawal(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool: &Address,
+) -> (i128, i128) {
+    let balance = storage::get_user_balance_for_tier(e, tier, pool, user);
+    let now = e.ledger().timestamp();
+    let mut matured_shares = 0i128;
+    for entry in balance.q4w.iter() {
+        if entry.exp <= now {
+            matured_shares = matured_shares
+                .checked_add(entry.amount)
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        } else {
+            break;
+        }
+    }
+    if matured_shares == 0 {
+        panic_with_error!(e, BackstopError::NotExpired);
+    }
+    let tokens = execute_withdraw(e, tier, user, pool, matured_shares, user);
+    (matured_shares, tokens)
+}
+
 fn require_q4w_entry_capacity(e: &Env, from: &Address, pool: &Address) {
     let mut entries = 0;
     let config = pool_backstop_config(e, pool);

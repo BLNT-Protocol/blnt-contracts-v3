@@ -81,7 +81,7 @@ pub fn pool_backstop_config(e: &Env, pool: &Address) -> soroban_sdk::Vec<Backsto
     if !factory.is_pool(pool) {
         panic_with_error!(e, BackstopError::NotPool);
     }
-    let config = factory.backstop_config(pool);
+    let config = factory.backstop_config(pool).tiers;
     validate_pool_backstop_config(e, &config);
     storage::set_pool_backstop_config(e, pool, &config);
     config

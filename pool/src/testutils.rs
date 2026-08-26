@@ -10,7 +10,10 @@ use mock_emitter::MockEmitter;
 use sep_40_oracle::testutils::{MockPriceOracle, MockPriceOracleClient};
 use sep_41_token::testutils::{MockToken, MockTokenClient};
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, IntoVal, String};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, testutils::Address as _, vec, Address, BytesN, Env,
+    IntoVal, String,
+};
 
 use backstop::{BackstopClient, BackstopContract, EmitterClient};
 use mock_pool_factory::{
@@ -25,6 +28,13 @@ use moderc3156_example::{
 /// This sets random data in the constructor, so unit tests that
 /// rely on any constructor data need to reset it.
 pub(crate) fn create_pool(e: &Env) -> Address {
+    create_pool_with_access_controller(e, None)
+}
+
+pub(crate) fn create_pool_with_access_controller(
+    e: &Env,
+    access_controller: Option<Address>,
+) -> Address {
     e.register(
         PoolContract {},
         (
@@ -36,8 +46,49 @@ pub(crate) fn create_pool(e: &Env) -> Address {
             1_0000000i128,
             Address::generate(e),
             Address::generate(e),
+            access_controller,
         ),
     )
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum MockAccessControllerKey {
+    Permissions(Address, Address),
+    Fail,
+}
+
+#[contract]
+pub(crate) struct MockAccessController;
+
+#[contractimpl]
+impl MockAccessController {
+    pub fn permissions(e: Env, pool: Address, user: Address) -> u32 {
+        if e.storage()
+            .instance()
+            .get(&MockAccessControllerKey::Fail)
+            .unwrap_or(false)
+        {
+            panic!("controller unavailable");
+        }
+        e.storage()
+            .persistent()
+            .get(&MockAccessControllerKey::Permissions(pool, user))
+            .unwrap_or(0)
+    }
+
+    pub fn set_permissions(e: Env, pool: Address, user: Address, permissions: u32) {
+        e.storage().persistent().set(
+            &MockAccessControllerKey::Permissions(pool, user),
+            &permissions,
+        );
+    }
+
+    pub fn set_fail(e: Env, fail: bool) {
+        e.storage()
+            .instance()
+            .set(&MockAccessControllerKey::Fail, &fail);
+    }
 }
 
 //************************************************

@@ -18,6 +18,9 @@ pub use health_factor::PositionData;
 
 mod interest;
 
+mod permissioned;
+pub use permissioned::execute_force_withdrawal;
+
 mod submit;
 
 pub use submit::{execute_submit, execute_submit_with_flash_loan};

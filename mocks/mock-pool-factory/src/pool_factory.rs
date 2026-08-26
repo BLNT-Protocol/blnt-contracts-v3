@@ -1,5 +1,5 @@
 use crate::{
-    storage::{self, BackstopTierConfig, PoolInitMeta},
+    storage::{self, BackstopTierConfig, PoolBackstopConfig, PoolInitMeta},
     PoolFactoryError,
 };
 use soroban_sdk::{
@@ -37,6 +37,7 @@ pub trait MockPoolFactoryTrait {
         max_positions: u32,
         min_collateral: i128,
         backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address;
 
     /// Checks if contract address was deployed by the factory
@@ -47,7 +48,7 @@ pub trait MockPoolFactoryTrait {
     /// * 'pool_address' - The contract address to be checked
     fn is_pool(e: Env, pool_address: Address) -> bool;
 
-    fn backstop_config(e: Env, pool_address: Address) -> Vec<BackstopTierConfig>;
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig;
 
     /// Mock Only: Set a pool_address as having been deployed by the pool factory
     ///
@@ -56,6 +57,12 @@ pub trait MockPoolFactoryTrait {
     fn set_pool(e: Env, pool_address: Address);
 
     fn set_pool_config(e: Env, pool_address: Address, config: Vec<BackstopTierConfig>);
+
+    fn set_pool_access_controller(
+        e: Env,
+        pool_address: Address,
+        access_controller: Option<Address>,
+    );
 
     fn set_default_backstop_config(e: Env, config: Vec<BackstopTierConfig>);
 }
@@ -83,6 +90,7 @@ impl MockPoolFactoryTrait for MockPoolFactory {
         max_positions: u32,
         min_collateral: i128,
         backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address {
         storage::extend_instance(&e);
         admin.require_auth();
@@ -106,10 +114,11 @@ impl MockPoolFactoryTrait for MockPoolFactory {
                 min_collateral,
                 pool_init_meta.backstop,
                 pool_init_meta.blnd_id,
+                access_controller.clone(),
             ),
         );
 
-        storage::set_deployed(&e, &pool_address, &backstop_config);
+        storage::set_deployed(&e, &pool_address, &backstop_config, &access_controller);
 
         MockPoolFactoryDeployEvent {
             pool_address: pool_address.clone(),
@@ -122,16 +131,30 @@ impl MockPoolFactoryTrait for MockPoolFactory {
         storage::is_deployed(&e, &pool_address)
     }
 
-    fn backstop_config(e: Env, pool_address: Address) -> Vec<BackstopTierConfig> {
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig {
         storage::get_backstop_config(&e, &pool_address)
     }
 
     fn set_pool(e: Env, pool_address: Address) {
-        storage::set_deployed(&e, &pool_address, &storage::get_default_backstop_config(&e));
+        storage::set_deployed(
+            &e,
+            &pool_address,
+            &storage::get_default_backstop_config(&e),
+            &None,
+        );
     }
 
     fn set_pool_config(e: Env, pool_address: Address, config: Vec<BackstopTierConfig>) {
-        storage::set_deployed(&e, &pool_address, &config);
+        let access_controller = storage::get_backstop_config(&e, &pool_address).access_controller;
+        storage::set_deployed(&e, &pool_address, &config, &access_controller);
+    }
+
+    fn set_pool_access_controller(
+        e: Env,
+        pool_address: Address,
+        access_controller: Option<Address>,
+    ) {
+        storage::set_access_controller(&e, &pool_address, &access_controller);
     }
 
     fn set_default_backstop_config(e: Env, config: Vec<BackstopTierConfig>) {

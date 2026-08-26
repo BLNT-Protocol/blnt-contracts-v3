@@ -1,3 +1,6 @@
+mod access_controller;
+pub use access_controller::AccessControllerClient;
+
 mod pool_factory;
 pub use pool_factory::{
     BackstopAsset as FactoryBackstopAsset, BackstopTierConfig, PoolFactoryClient,

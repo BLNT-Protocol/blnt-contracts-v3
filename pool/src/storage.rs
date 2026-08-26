@@ -133,6 +133,7 @@ const PROPOSED_ADMIN_KEY: &str = "PropAdmin";
 const NAME_KEY: &str = "Name";
 const BACKSTOP_KEY: &str = "Backstop";
 const BLND_TOKEN_KEY: &str = "BLNDTkn";
+const ACCESS_CONTROLLER_KEY: &str = "AccessCtrl";
 const POOL_CONFIG_KEY: &str = "Config";
 const RES_LIST_KEY: &str = "ResList";
 const POOL_EMIS_KEY: &str = "PoolEmis";
@@ -170,6 +171,8 @@ pub enum PoolDataKey {
     UserEmis(UserReserveKey),
     // The auction's data
     Auction(AuctionKey),
+    // Marks a user-liquidation auction created by permission revocation.
+    BorrowExit(Address),
 }
 
 /********** Storage **********/
@@ -312,6 +315,23 @@ pub fn set_backstop(e: &Env, backstop: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, BACKSTOP_KEY), backstop);
+}
+
+/********** Access Controller **********/
+
+/// Fetch the pool's immutable optional access-controller binding.
+pub fn get_access_controller(e: &Env) -> Option<Address> {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, ACCESS_CONTROLLER_KEY))
+        .unwrap_or(None)
+}
+
+/// Bind the pool's optional access controller during construction.
+pub fn set_access_controller(e: &Env, access_controller: &Option<Address>) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, ACCESS_CONTROLLER_KEY), access_controller);
 }
 
 /********** External Token Contracts **********/
@@ -856,6 +876,20 @@ pub fn set_auction(e: &Env, auction_type: &u32, user: &Address, auction_data: &A
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
+pub fn has_borrower_exit_auction(e: &Env, user: &Address) -> bool {
+    e.storage()
+        .temporary()
+        .has(&PoolDataKey::BorrowExit(user.clone()))
+}
+
+pub fn set_borrower_exit_auction(e: &Env, user: &Address) {
+    let key = PoolDataKey::BorrowExit(user.clone());
+    e.storage().temporary().set(&key, &true);
+    e.storage()
+        .temporary()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
 /// Remove an auction
 ///
 /// ### Arguments
@@ -867,6 +901,11 @@ pub fn del_auction(e: &Env, auction_type: &u32, user: &Address) {
         auct_type: *auction_type,
     });
     e.storage().temporary().remove(&key);
+    if *auction_type == 0 {
+        e.storage()
+            .temporary()
+            .remove(&PoolDataKey::BorrowExit(user.clone()));
+    }
 }
 
 #[cfg(test)]

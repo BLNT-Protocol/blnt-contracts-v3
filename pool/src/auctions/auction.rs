@@ -13,7 +13,9 @@ use super::{
     },
     bad_debt_auction::{create_bad_debt_auction_data, fill_bad_debt_auction, get_bad_debt_auction},
     math::{auction_modifiers, scale_bid_amount, scale_lot_amount},
-    user_liquidation_auction::{create_user_liq_auction_data, fill_user_liq_auction},
+    user_liquidation_auction::{
+        create_borrower_exit_auction_data, create_user_liq_auction_data, fill_user_liq_auction,
+    },
 };
 
 #[derive(Clone, PartialEq)]
@@ -115,6 +117,15 @@ pub fn create_auction(
     }
 }
 
+/// Create and store a protocol-selected borrower-exit auction under the
+/// inherited user-liquidation key.
+pub fn create_borrower_exit_auction(e: &Env, user: &Address) -> AuctionData {
+    let auction = create_borrower_exit_auction_data(e, user);
+    storage::set_auction(e, &(AuctionType::UserLiquidation as u32), user, &auction);
+    storage::set_borrower_exit_auction(e, user);
+    auction
+}
+
 /// Fetch an auction from its canonical v2-compatible public scope.
 pub fn get_auction(e: &Env, auction_type: u32, user: &Address) -> AuctionData {
     match AuctionType::from_u32(e, auction_type) {
@@ -164,6 +175,9 @@ pub fn delete_liquidation(e: &Env, user: &Address) {
     if !storage::has_auction(e, &(AuctionType::UserLiquidation as u32), user) {
         panic_with_error!(e, PoolError::BadRequest);
     }
+    if storage::has_borrower_exit_auction(e, user) {
+        panic_with_error!(e, PoolError::UnauthorizedError);
+    }
     storage::del_auction(e, &(AuctionType::UserLiquidation as u32), user);
 }
 
@@ -192,6 +206,7 @@ pub fn fill(
             if user.clone() == filler_state.address {
                 panic_with_error!(e, PoolError::InvalidLiquidation);
             }
+            let is_borrower_exit = storage::has_borrower_exit_auction(e, user);
             let auction_data = storage::get_auction(e, &auction_type, user);
             let (to_fill_auction, remaining_auction) =
                 scale_auction(e, &auction_data, percent_filled);
@@ -199,6 +214,13 @@ pub fn fill(
             fill_user_liq_auction(e, pool, &to_fill_auction, user, filler_state, is_full_fill);
             if let Some(auction_to_store) = remaining_auction {
                 storage::set_auction(e, &auction_type, user, &auction_to_store);
+                // Partial fills renew the remaining auction. Keep the
+                // borrower-exit marker on the identical lifetime so the
+                // target cannot self-delete a still-live forced exit after
+                // the original marker TTL expires.
+                if is_borrower_exit {
+                    storage::set_borrower_exit_auction(e, user);
+                }
             } else {
                 storage::del_auction(e, &auction_type, user);
             }

@@ -183,6 +183,11 @@ pub trait Pool {
     /// no custody deficit.
     fn reconcile_loss(e: Env, asset: Address) -> i128;
 
+    /// Burn all reserve-supply and collateral shares for one asset and return
+    /// their current underlying value to a user whose supply permission has
+    /// been revoked. The target must have no liabilities or active auction.
+    fn force_withdrawal(e: Env, user: Address, asset: Address) -> i128;
+
     /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
     ///
     /// Backstop-triggered statuses are odd:
@@ -311,6 +316,10 @@ pub trait Pool {
         percent: u32,
     ) -> AuctionData;
 
+    /// Create one protocol-selected auction to close every liability held by
+    /// a borrower whose borrowing permission has been revoked.
+    fn new_forced_exit_auction(e: Env, user: Address) -> AuctionData;
+
     /// Return an auction's v2-compatible base bid, lot, and starting ledger.
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData;
 
@@ -348,6 +357,7 @@ impl PoolContract {
     /// Pool Factory supplied:
     /// * `backstop_id` - The contract address of the pool's backstop module
     /// * `blnd_id` - The contract ID of the BLND token
+    /// * `access_controller` - Optional immutable pool access controller
     pub fn __constructor(
         e: Env,
         admin: Address,
@@ -358,6 +368,7 @@ impl PoolContract {
         min_collateral: i128,
         backstop_id: Address,
         blnd_id: Address,
+        access_controller: Option<Address>,
     ) {
         admin.require_auth();
 
@@ -371,6 +382,7 @@ impl PoolContract {
             &min_collateral,
             &backstop_id,
             &blnd_id,
+            &access_controller,
         );
     }
 }
@@ -545,6 +557,33 @@ impl Pool for PoolContract {
         loss
     }
 
+    fn force_withdrawal(e: Env, user: Address, asset: Address) -> i128 {
+        storage::extend_instance(&e);
+        crate::access::require_permission_absent(&e, &user, crate::access::RESERVE_SUPPLY_ALLOWED);
+
+        let (tokens, supply_burned, supply_tokens, collateral_burned) =
+            pool::execute_force_withdrawal(&e, &user, &asset);
+        if supply_burned > 0 {
+            PoolEvents::withdraw(
+                &e,
+                asset.clone(),
+                user.clone(),
+                supply_tokens,
+                supply_burned,
+            );
+        }
+        if collateral_burned > 0 {
+            PoolEvents::withdraw_collateral(
+                &e,
+                asset,
+                user,
+                tokens - supply_tokens,
+                collateral_burned,
+            );
+        }
+        tokens
+    }
+
     fn update_status(e: Env) -> u32 {
         storage::extend_instance(&e);
         let new_status = pool::execute_update_pool_status(&e);
@@ -626,6 +665,21 @@ impl Pool for PoolContract {
         let auction_data = auctions::create_auction(&e, auction_type, &user, &bid, &lot, percent);
 
         PoolEvents::new_auction(&e, auction_type, user, percent, auction_data.clone());
+        auction_data
+    }
+
+    fn new_forced_exit_auction(e: Env, user: Address) -> AuctionData {
+        storage::extend_instance(&e);
+        crate::access::require_permission_absent(&e, &user, crate::access::RESERVE_BORROW_ALLOWED);
+
+        let auction_data = auctions::create_borrower_exit_auction(&e, &user);
+        PoolEvents::new_auction(
+            &e,
+            auctions::AuctionType::UserLiquidation as u32,
+            user,
+            100,
+            auction_data.clone(),
+        );
         auction_data
     }
 

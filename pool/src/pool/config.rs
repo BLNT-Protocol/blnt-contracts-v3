@@ -23,6 +23,7 @@ pub fn execute_initialize(
     min_collateral: &i128,
     backstop_address: &Address,
     blnd_id: &Address,
+    access_controller: &Option<Address>,
 ) {
     let pool_config = PoolConfig {
         oracle: oracle.clone(),
@@ -38,6 +39,7 @@ pub fn execute_initialize(
     storage::set_backstop(e, backstop_address);
     storage::set_pool_config(e, &pool_config);
     storage::set_blnd_token(e, blnd_id);
+    storage::set_access_controller(e, access_controller);
 }
 
 /// Update the pool
@@ -246,6 +248,7 @@ mod tests {
                 &min_collateral,
                 &backstop_address,
                 &blnd_id,
+                &None,
             );
 
             assert_eq!(storage::get_admin(&e), admin);
@@ -287,6 +290,7 @@ mod tests {
                 &min_collateral,
                 &backstop_address,
                 &blnd_id,
+                &None,
             );
         });
     }
@@ -318,6 +322,7 @@ mod tests {
                 &min_collateral,
                 &backstop_address,
                 &blnd_id,
+                &None,
             );
         });
     }

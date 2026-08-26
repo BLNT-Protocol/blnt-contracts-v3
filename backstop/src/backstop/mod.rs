@@ -9,7 +9,10 @@ mod buyback;
 pub use buyback::execute_buy_and_burn;
 
 mod withdrawal;
-pub use withdrawal::{execute_dequeue_withdrawal, execute_queue_withdrawal, execute_withdraw};
+pub use withdrawal::{
+    execute_dequeue_withdrawal, execute_force_queue_withdrawal, execute_force_withdrawal,
+    execute_queue_withdrawal, execute_withdraw,
+};
 
 mod pool;
 #[cfg(any(test, feature = "testutils"))]

@@ -54,6 +54,7 @@ fn test_pool_factory() {
     let salt = BytesN::<32>::random(&e);
 
     let config = backstop_config(&e);
+    let access_controller = Address::generate(&e);
     let deployed_pool_address_1 = pool_factory_client.deploy(
         &bombadil,
         &name1,
@@ -63,8 +64,8 @@ fn test_pool_factory() {
         &max_positions,
         &min_collateral,
         &config,
+        &Some(access_controller.clone()),
     );
-
     let event = e.events().all().filter_by_contract(&pool_factory_address);
     assert_eq!(
         event,
@@ -77,6 +78,12 @@ fn test_pool_factory() {
             )
         ]
     );
+    assert_eq!(
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_1)
+            .access_controller,
+        Some(access_controller)
+    );
 
     let salt = BytesN::<32>::random(&e);
     let deployed_pool_address_2 = pool_factory_client.deploy(
@@ -88,6 +95,13 @@ fn test_pool_factory() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
+    );
+    assert_eq!(
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_2)
+            .access_controller,
+        None
     );
 
     e.as_contract(&deployed_pool_address_1, || {
@@ -131,7 +145,9 @@ fn test_pool_factory() {
     assert!(pool_factory_client.is_pool(&deployed_pool_address_2));
     assert!(!pool_factory_client.is_pool(&Address::generate(&e)));
     assert_eq!(
-        pool_factory_client.backstop_config(&deployed_pool_address_1),
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_1)
+            .tiers,
         config
     );
 }
@@ -319,6 +335,7 @@ fn test_pool_factory_invalid_pool_init_args_backstop_rate() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 }
 
@@ -359,6 +376,7 @@ fn test_pool_factory_invalid_pool_init_args_max_positions() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 }
 
@@ -399,6 +417,7 @@ fn test_pool_factory_invalid_pool_init_args_max_positions_large() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 }
 
@@ -439,6 +458,7 @@ fn test_pool_factory_invalid_pool_init_args_min_collateral() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 }
 
@@ -483,6 +503,7 @@ fn test_pool_factory_frontrun_protection() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 
     let deployed_pool_address_bombadil = pool_factory_client.deploy(
@@ -494,6 +515,7 @@ fn test_pool_factory_frontrun_protection() {
         &max_positions,
         &min_collateral,
         &backstop_config(&e),
+        &None,
     );
 
     assert!(deployed_pool_address_sauron != deployed_pool_address_bombadil);

@@ -35,6 +35,13 @@ pub struct BackstopTierConfig {
     pub take_rate_weight: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolBackstopConfig {
+    pub access_controller: Option<Address>,
+    pub tiers: Vec<BackstopTierConfig>,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct PoolInitMeta {
@@ -92,7 +99,12 @@ pub fn is_deployed(e: &Env, contract_id: &Address) -> bool {
 ///
 /// ### Arguments
 /// * `contract_id` - The contract_id that was deployed by the factory
-pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<BackstopTierConfig>) {
+pub fn set_deployed(
+    e: &Env,
+    contract_id: &Address,
+    backstop_config: &Vec<BackstopTierConfig>,
+    access_controller: &Option<Address>,
+) {
     let key = PoolFactoryDataKey::Contracts(contract_id.clone());
     e.storage()
         .persistent()
@@ -101,18 +113,34 @@ pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<Backst
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
     let config_key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
-    e.storage().persistent().set(&config_key, backstop_config);
+    e.storage().persistent().set(
+        &config_key,
+        &PoolBackstopConfig {
+            access_controller: access_controller.clone(),
+            tiers: backstop_config.clone(),
+        },
+    );
     e.storage()
         .persistent()
         .extend_ttl(&config_key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
-pub fn get_backstop_config(e: &Env, contract_id: &Address) -> Vec<BackstopTierConfig> {
+pub fn get_backstop_config(e: &Env, contract_id: &Address) -> PoolBackstopConfig {
     let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
     e.storage()
         .persistent()
         .get(&key)
-        .unwrap_or_else(|| Vec::new(e))
+        .unwrap_or_else(|| PoolBackstopConfig {
+            access_controller: None,
+            tiers: Vec::new(e),
+        })
+}
+
+pub fn set_access_controller(e: &Env, contract_id: &Address, access_controller: &Option<Address>) {
+    let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    let mut config = get_backstop_config(e, contract_id);
+    config.access_controller = access_controller.clone();
+    e.storage().persistent().set(&key, &config);
 }
 
 pub fn set_default_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>) {

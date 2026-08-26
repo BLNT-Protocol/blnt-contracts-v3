@@ -121,6 +121,11 @@ first:
   liabilities and interest continue, internal liquidation positions remain
   transferable, and unauctionable take-rate credit stays pending until
   reauthorization. Authorization revocation alone is not a custody deficit.
+- A pool may immutably bind one external access controller. Permissionless
+  pools bind none. Positive-permission checks and proof-of-revocation exits
+  fail closed on unavailable or malformed controller state, while ordinary
+  risk-reducing exits do not call the controller. The factory, pool, and shared
+  backstop must use the same pool-local binding.
 - No protocol-wide governance, multisig, administrator recovery, emergency
   override, privileged WASM replacement, or alternate upgrade path.
 

@@ -59,6 +59,46 @@ impl MockCometConfig {
     }
 }
 
+#[derive(Clone)]
+#[contracttype]
+enum MockAccessControllerKey {
+    Permissions(Address, Address),
+    Fail,
+}
+
+#[contract]
+pub(crate) struct MockAccessController;
+
+#[contractimpl]
+impl MockAccessController {
+    pub fn permissions(e: Env, pool: Address, user: Address) -> u32 {
+        if e.storage()
+            .instance()
+            .get(&MockAccessControllerKey::Fail)
+            .unwrap_or(false)
+        {
+            panic!("controller unavailable");
+        }
+        e.storage()
+            .persistent()
+            .get(&MockAccessControllerKey::Permissions(pool, user))
+            .unwrap_or(0)
+    }
+
+    pub fn set_permissions(e: Env, pool: Address, user: Address, permissions: u32) {
+        e.storage().persistent().set(
+            &MockAccessControllerKey::Permissions(pool, user),
+            &permissions,
+        );
+    }
+
+    pub fn set_fail(e: Env, fail: bool) {
+        e.storage()
+            .instance()
+            .set(&MockAccessControllerKey::Fail, &fail);
+    }
+}
+
 /// Create a backstop contract.
 ///
 /// Unit tests use an explicit one-to-one valuation override after the

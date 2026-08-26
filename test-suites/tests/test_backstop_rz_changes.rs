@@ -159,6 +159,7 @@ fn test_backstop_full_rz_under_limits() {
             &6,
             &0,
             &fixture.backstop_config,
+            &None,
         );
         fixture.backstop.deposit(
             &backstop::BackstopTier::SecondLoss,

@@ -218,6 +218,7 @@ impl TestFixture<'_> {
             &max_positions,
             &min_collateral,
             &self.backstop_config,
+            &None,
         );
         self.pools.push(PoolFixture {
             pool: PoolClient::new(&self.env, &pool_id),

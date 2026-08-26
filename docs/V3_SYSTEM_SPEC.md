@@ -423,6 +423,94 @@ rounding; any resulting positive custody dust follows that `gulp` rule.
 An ordinary empty reserve with `b_supply == 0` and `b_rate` at or above 0.1 is
 not impaired and MAY accept new supply under the inherited rules.
 
+### 4.7 Permissioned pools — **Added**
+
+At deployment a pool MAY immutably bind one external access-controller
+address. Omitting the address creates a permissionless pool and preserves the
+inherited action surface. The pool admin MUST NOT replace, remove, or add a
+controller after deployment. The factory MUST record the same binding used by
+the pool and return it with the pool's tier configuration so the shared
+backstop applies the identical policy.
+
+Blend standardizes only this controller entry point:
+
+```text
+permissions(pool, user) -> u32
+```
+
+Bits 0, 1, and 2 respectively mean `RESERVE_SUPPLY_ALLOWED`,
+`RESERVE_BORROW_ALLOWED`, and `BACKSTOP_DEPOSIT_ALLOWED`. Blend ignores higher
+bits. Controller construction, pool registration, permission administration,
+credential evaluation, code mutability, and every other controller entry
+point are implementation decisions outside the Blend ABI. The controller
+address and the trust implied by its implementation MUST be disclosed to pool
+users.
+
+For a permissioned pool, the position owner MUST have:
+
+| Operation | Required bits |
+| --- | --- |
+| Reserve supply | `RESERVE_SUPPLY_ALLOWED` |
+| Collateral supply | `RESERVE_SUPPLY_ALLOWED` and `RESERVE_BORROW_ALLOWED` |
+| Borrow or flash loan | `RESERVE_BORROW_ALLOWED` |
+| Backstop deposit or dequeue | `BACKSTOP_DEPOSIT_ALLOWED` |
+| Fill a user-liquidation or borrower-exit auction | `RESERVE_SUPPLY_ALLOWED` and `RESERVE_BORROW_ALLOWED` |
+
+The pool MUST evaluate the union required by the submitted request types, not
+their net token flow. `from`, rather than `spender` or `to`, is the position
+owner checked by the pool. The backstop checks the owner receiving active tier
+shares. Repayment, reserve withdrawal, collateral withdrawal, claims, queueing
+and matured withdrawal remain owner-authorized and do not require a positive
+permission bit. Backstop donation, interest-auction fill, bad-debt fill, and
+every permissionless accounting or recovery operation remain permissionless
+under their inherited authentication and token-transfer checks.
+
+A controller failure, malformed response, or unavailable state is not a
+permission revocation. It MUST fail every operation that requires either a
+positive permission or proof that a bit is absent. Ordinary repayment,
+withdrawal, claims, and Q4W MUST NOT call the controller, so controller failure
+cannot trap an owner in a risk-increasing position.
+
+Permission absence immediately authorizes only the corresponding bounded
+exit path; there is no additional offboarding flag or delay:
+
+- When `RESERVE_BORROW_ALLOWED` is absent, any caller MAY invoke
+  `new_forced_exit_auction(user)`. The target MUST have positive liabilities
+  and collateral and no active user auction. A collateral-free borrower uses
+  the inherited `bad_debt(user)` handoff instead. The pool selects all
+  liability assets and a proportional amount of every collateral asset; the
+  caller controls no
+  asset, amount, price, percentage, or recipient. The result uses the inherited
+  user-auction key, curve, lookup, stale deletion, proportional fill, position
+  transfer, and completed-fill bad-debt handoff. The target MUST NOT use the
+  ordinary healthy-position self-delete request to cancel a borrower-exit
+  auction; stale deletion remains permissionless. The base bid contains every
+  liability, while the base lot contains no more collateral than required by
+  the inherited liquidation incentive unless all collateral is required.
+- When `RESERVE_SUPPLY_ALLOWED` is absent and the target has no liabilities or
+  active user auction, any caller MAY invoke
+  `force_withdrawal(user, asset)`. It checkpoints the configured reserve
+  and user, burns all of the target's ordinary-supply and collateral bTokens
+  for that asset, and transfers the current underlying value only to the
+  target. Zero-value shares, unreconciled custody, insufficient liquidity, or
+  a failed token transfer MUST fail atomically. One asset is processed per
+  invocation.
+- When `BACKSTOP_DEPOSIT_ALLOWED` is absent, any caller MAY invoke
+  `force_queue_withdrawal(tier, user, pool)`. It checkpoints the tier
+  and user and queues all active shares under the inherited Q4W delay, entry
+  bound, emission exclusion, take-rate eligibility, and loss exposure. After
+  maturity, `force_withdrawal(tier, user, pool)` withdraws all currently
+  matured queued shares only to the target. A failed tier-token transfer leaves
+  the queue and accounting unchanged.
+
+Permission revocation MUST NOT bypass the reserve oracle, utilization,
+reconciliation, auction, bad-debt, Q4W, token authorization, or exact-balance
+rules. It grants neither the controller nor pool admin custody and cannot
+redirect user assets. Regranting a permission does not delete or invalidate an
+auction or Q4W entry already created under a valid prior controller response.
+The controller is pool-local policy, not protocol governance or an alternate
+protocol-upgrade path.
+
 ## 5. Loss waterfall — **Replaced**
 
 This replaces the single-token realization in `V2-AUCTION-003` and

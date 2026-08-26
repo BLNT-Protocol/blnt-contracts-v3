@@ -14,6 +14,7 @@ Classifications have these meanings:
 - **Unchanged:** The public signature and caller-facing role are inherited.
 - **Extended:** V3 retains the operation but adds a tier selector, changes its
   return shape, or adds caller-visible behavior required by the v3 spec.
+- **Added:** V3 introduces an operation with no v2 counterpart.
 - **Replaced:** V3 substitutes a different public operation. There are no such
   entry points in the current backstop, pool, or pool-factory API.
 
@@ -32,8 +33,10 @@ Private storage-only types are excluded.
 | `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnd_usdc_token, blnd_xlm_token, emitter, blnd_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical assets and both emission-eligible Comet LPs. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `deposit(from, pool, amount) -> i128` | `deposit(tier, from, pool, amount) -> i128` | Extended | Selects one independently accounted tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `queue_withdrawal(from, pool, amount) -> Q4W` | `queue_withdrawal(tier, from, pool, amount) -> Q4W` | Extended | Queues shares in one tier under the aggregate queue bound. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
+| — | `force_queue_withdrawal(tier, user, pool) -> Q4W` | Added | After backstop-deposit permission is revoked, queues all active shares in one tier only to the target's inherited Q4W. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `dequeue_withdrawal(from, pool, amount)` | `dequeue_withdrawal(tier, from, pool, amount)` | Extended | Restores queued shares in one tier. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | `withdraw(from, pool, amount) -> i128` | `withdraw(tier, from, pool, amount, to) -> i128` | Extended | Selects the tier and makes the withdrawal recipient explicit. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
+| — | `force_withdrawal(tier, user, pool) -> i128` | Added | After Q4W maturity, withdraws all matured shares in one tier only to the permission-revoked target. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `user_balance(pool, user) -> UserBalance` | `user_balance(tier, pool, user) -> UserBalance` | Extended | Returns one pool-user balance for one tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with an ordered one-to-three-tier vector, aggregate transferable active USDC-equivalent value, and transferable-value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
@@ -63,14 +66,14 @@ Private storage-only types are excluded.
 
 ### Entry points
 
-Except for the added reserve-clawback and reserve-loss-reconciliation
-operations, pool entry-point signatures remain v2-compatible. An **Extended**
-row identifies changed caller-visible validation or tier-aware behavior, not a
+Except for added v3 operations and the optional constructor controller, pool
+entry-point signatures remain v2-compatible. An **Extended** row identifies
+changed caller-visible validation or tier-aware behavior, not necessarily a
 signature change.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | Same | Unchanged | Pool construction retains the v2 ABI and role. |
+| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd, access_controller)` | Extended | Optionally binds one immutable external access controller; `None` preserves permissionless behavior. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `propose_admin(new_admin)` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
 | `accept_admin()` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
 | `update_pool(backstop_take_rate, max_positions, min_collateral)` | Same | Unchanged | Retains the v2 mutable pool parameters. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
@@ -87,6 +90,8 @@ signature change.
 | `flash_loan(from, flash_loan, requests) -> Positions` | Same | Extended | Applies the v3 request bound and exact-balance checks to flash-loan submission. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | — | `clawback(asset, from, amount)` | Added | Lets the reserve SAC administrator burn an exact clawbackable pool balance while removing the corresponding user's ordinary supply before collateral and invalidating an affected liquidation auction. [V3 §4.4](V3_SYSTEM_SPEC.md#44-reserve-clawback--added) |
 | — | `reconcile_loss(asset) -> i128` | Added | Recognizes a direct reserve-custody deficit against the affected reserve's supplier rate and then unpaid take-rate credit without creating backstop debt; ordinary liquidation handles users made unhealthy by the haircut. [V3 §4.5](V3_SYSTEM_SPEC.md#45-reserve-loss-reconciliation--safety-extension) |
+| — | `force_withdrawal(user, asset) -> i128` | Added | After supply permission is revoked for a debt-free user, burns all of that user's bTokens for one reserve and returns the exact underlying only to that user. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
+| — | `new_forced_exit_auction(user) -> AuctionData` | Added | After borrow permission is revoked, creates a caller-unparameterized auction for all target liabilities and proportionally required collateral. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `update_status() -> u32` | Same | Extended | Uses aggregate canonical USDC value and value-weighted Q4W. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `set_status(pool_status)` | Same | Extended | Retains v2 admin statuses but validates them against v3 valuation. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
 | `gulp(asset) -> i128` | Same | Unchanged | Retains v2 reserve-credit reconciliation. |
@@ -130,9 +135,9 @@ configuration and exposes that configuration to the backstop and clients.
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
 | `__constructor(pool_init_meta)` | Same | Unchanged | Binds the immutable pool WASM hash, backstop, and BLND token through `PoolInitMeta`. |
-| `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral) -> Address` | `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral, backstop_config) -> Address` | Extended | Deploys a pool and immutably records its ordered one-to-three-tier configuration. |
+| `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral) -> Address` | `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral, backstop_config, access_controller) -> Address` | Extended | Deploys a pool and records its immutable tier configuration and optional controller binding. |
 | `is_pool(pool_address) -> bool` | Same | Unchanged | Preserves the factory-registration boundary used by the backstop. |
-| — | `backstop_config(pool_address) -> Vec<BackstopTierConfig>` | Extended | Returns a registered pool's immutable ordered backstop configuration. |
+| — | `backstop_config(pool_address) -> PoolBackstopConfig` | Added | Returns the registered pool's immutable ordered tiers and optional controller binding in one response. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 
 ### Data types
 
@@ -141,3 +146,16 @@ configuration and exposes that configuration to the backstop and clients.
 | `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
 | `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
 | `BackstopTierConfig` | Not present | <code>{"asset":"BlndXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |
+| `PoolBackstopConfig` | Not present | <code>{"access_controller":null, "tiers":[{"asset":"BlndXlm", "take_rate_weight":4}]}</code> | Factory-attested configuration consumed by the shared backstop. |
+
+## Access controller
+
+V3 standardizes only the read interface used by a permissioned pool and its
+shared backstop. Controller deployment, administration, and permission logic
+are intentionally outside the Blend ABI.
+
+### Entry points
+
+| V2 entry point | V3 entry point | Classification | Reason |
+| --- | --- | --- | --- |
+| — | `permissions(pool, user) -> u32` | Added | Returns pool-local permission bits: bit 0 permits reserve supply, bit 1 permits borrowing, and bit 2 permits backstop deposits. Higher bits are ignored. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |

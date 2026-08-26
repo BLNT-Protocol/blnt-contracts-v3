@@ -2,7 +2,7 @@ use moderc3156::FlashLoanClient;
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env, Map, Vec};
 
-use crate::{events::PoolEvents, storage, AuctionType, PoolError};
+use crate::{access, events::PoolEvents, storage, AuctionType, PoolError};
 
 use super::{
     actions::{build_actions_from_request, Actions, Request},
@@ -37,6 +37,8 @@ pub fn execute_submit(
     {
         panic_with_error!(e, &PoolError::BadRequest);
     }
+    access::require_permissions(e, from, access::request_permissions(e, &requests));
+
     let mut pool = Pool::load(e);
     let mut from_state = User::load(e, from);
 
@@ -78,6 +80,9 @@ pub fn execute_submit_with_flash_loan(
     if from == &e.current_contract_address() {
         panic_with_error!(e, &PoolError::BadRequest);
     }
+    let required = access::request_permissions(e, &requests) | access::RESERVE_BORROW_ALLOWED;
+    access::require_permissions(e, from, required);
+
     let mut pool = Pool::load(e);
     let mut from_state = User::load(e, from);
 

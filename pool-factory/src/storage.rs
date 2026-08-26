@@ -37,6 +37,14 @@ pub struct BackstopTierConfig {
     pub take_rate_weight: u32,
 }
 
+/// Immutable pool configuration consumed by the shared backstop.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolBackstopConfig {
+    pub access_controller: Option<Address>,
+    pub tiers: Vec<BackstopTierConfig>,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct PoolInitMeta {
@@ -94,7 +102,12 @@ pub fn is_deployed(e: &Env, contract_id: &Address) -> bool {
 ///
 /// ### Arguments
 /// * `contract_id` - The contract_id that was deployed by the factory
-pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<BackstopTierConfig>) {
+pub fn set_deployed(
+    e: &Env,
+    contract_id: &Address,
+    backstop_config: &Vec<BackstopTierConfig>,
+    access_controller: &Option<Address>,
+) {
     let key = PoolFactoryDataKey::Contracts(contract_id.clone());
     e.storage()
         .persistent()
@@ -104,23 +117,28 @@ pub fn set_deployed(e: &Env, contract_id: &Address, backstop_config: &Vec<Backst
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 
     let config_key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
-    e.storage().persistent().set(&config_key, backstop_config);
+    e.storage().persistent().set(
+        &config_key,
+        &PoolBackstopConfig {
+            access_controller: access_controller.clone(),
+            tiers: backstop_config.clone(),
+        },
+    );
     e.storage()
         .persistent()
         .extend_ttl(&config_key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
 }
 
 /// Fetch one deployed pool's immutable backstop configuration.
-pub fn get_backstop_config(e: &Env, contract_id: &Address) -> Vec<BackstopTierConfig> {
+pub fn get_backstop_config(e: &Env, contract_id: &Address) -> PoolBackstopConfig {
     if !is_deployed(e, contract_id) {
-        return Vec::new(e);
+        return PoolBackstopConfig {
+            access_controller: None,
+            tiers: Vec::new(e),
+        };
     }
     let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
-    let config = e
-        .storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or_else(|| Vec::new(e));
+    let config = e.storage().persistent().get(&key).unwrap_optimized();
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);

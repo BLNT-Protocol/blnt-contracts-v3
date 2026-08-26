@@ -39,6 +39,15 @@ pub trait Backstop {
         amount: i128,
     ) -> Q4W;
 
+    /// Queue every active share held by a depositor whose pool-specific
+    /// backstop-deposit permission has been revoked.
+    fn force_queue_withdrawal(
+        e: Env,
+        tier: BackstopTier,
+        user: Address,
+        pool_address: Address,
+    ) -> Q4W;
+
     /// Restore queued shares from `tier`.
     fn dequeue_withdrawal(
         e: Env,
@@ -57,6 +66,10 @@ pub trait Backstop {
         amount: i128,
         to: Address,
     ) -> i128;
+
+    /// Withdraw every currently matured queued share only to an unauthorized
+    /// depositor's own address.
+    fn force_withdrawal(e: Env, tier: BackstopTier, user: Address, pool_address: Address) -> i128;
 
     /// Fetch one user's active shares and bounded withdrawal queue in a tier.
     fn user_balance(e: Env, tier: BackstopTier, pool: Address, user: Address) -> UserBalance;
@@ -224,6 +237,8 @@ impl Backstop for BackstopContract {
         storage::extend_instance(&e);
         from.require_auth();
 
+        crate::access::require_deposit_permission(&e, &pool_address, &from);
+
         let shares = backstop::execute_deposit(&e, tier, &from, &pool_address, amount);
 
         BackstopEvents::tier_deposit(&e, tier, pool_address, from, amount, shares);
@@ -246,6 +261,27 @@ impl Backstop for BackstopContract {
         entry
     }
 
+    fn force_queue_withdrawal(
+        e: Env,
+        tier: BackstopTier,
+        user: Address,
+        pool_address: Address,
+    ) -> Q4W {
+        storage::extend_instance(&e);
+        crate::access::require_deposit_permission_absent(&e, &pool_address, &user);
+
+        let entry = backstop::execute_force_queue_withdrawal(&e, tier, &user, &pool_address);
+        BackstopEvents::tier_queue_withdrawal(
+            &e,
+            tier,
+            pool_address,
+            user,
+            entry.amount,
+            entry.exp,
+        );
+        entry
+    }
+
     fn dequeue_withdrawal(
         e: Env,
         tier: BackstopTier,
@@ -255,6 +291,8 @@ impl Backstop for BackstopContract {
     ) {
         storage::extend_instance(&e);
         from.require_auth();
+
+        crate::access::require_deposit_permission(&e, &pool_address, &from);
 
         backstop::execute_dequeue_withdrawal(&e, tier, &from, &pool_address, amount);
 
@@ -275,6 +313,15 @@ impl Backstop for BackstopContract {
         let tokens = backstop::execute_withdraw(&e, tier, &from, &pool_address, amount, &to);
 
         BackstopEvents::tier_withdraw(&e, tier, pool_address, from, amount, tokens);
+        tokens
+    }
+
+    fn force_withdrawal(e: Env, tier: BackstopTier, user: Address, pool_address: Address) -> i128 {
+        storage::extend_instance(&e);
+        crate::access::require_deposit_permission_absent(&e, &pool_address, &user);
+
+        let (shares, tokens) = backstop::execute_force_withdrawal(&e, tier, &user, &pool_address);
+        BackstopEvents::tier_withdraw(&e, tier, pool_address, user, shares, tokens);
         tokens
     }
 
@@ -403,5 +450,86 @@ impl Backstop for BackstopContract {
 pub fn require_nonnegative(e: &Env, amount: i128) {
     if amount.is_negative() {
         panic_with_error!(e, BackstopError::NegativeAmountError);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, LedgerInfo},
+        Address, Env,
+    };
+
+    use crate::testutils::{
+        create_backstop, create_backstop_token, create_mock_pool, create_mock_pool_factory,
+        MockAccessController, MockAccessControllerClient,
+    };
+
+    use super::*;
+
+    #[test]
+    fn revoked_depositor_can_be_queued_and_withdrawn_only_to_self() {
+        let e = Env::default();
+        e.cost_estimate().budget().reset_unlimited();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.ledger().set(LedgerInfo {
+            timestamp: 10_000,
+            protocol_version: 27,
+            sequence_number: 200,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let backstop = create_backstop(&e);
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let (pool, _) = create_mock_pool(&e, &backstop);
+        let (_, token) = create_backstop_token(&e, &backstop, &admin);
+        token.mint(&user, &100_0000000);
+
+        let controller = e.register(MockAccessController, ());
+        let controller_client = MockAccessControllerClient::new(&e, &controller);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool(&pool);
+        factory.set_pool_access_controller(&pool, &Some(controller));
+        controller_client.set_permissions(&pool, &user, &crate::access::BACKSTOP_DEPOSIT_ALLOWED);
+
+        let client = BackstopClient::new(&e, &backstop);
+        assert_eq!(
+            client.deposit(&BackstopTier::SecondLoss, &user, &pool, &100_0000000,),
+            100_0000000
+        );
+        controller_client.set_permissions(&pool, &user, &0);
+        let q4w = client.force_queue_withdrawal(&BackstopTier::SecondLoss, &user, &pool);
+        assert_eq!(q4w.amount, 100_0000000);
+        assert_eq!(
+            client
+                .user_balance(&BackstopTier::SecondLoss, &pool, &user)
+                .shares,
+            0
+        );
+
+        e.ledger().set(LedgerInfo {
+            timestamp: q4w.exp,
+            protocol_version: 27,
+            sequence_number: 200 + 17 * 17_280,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+        assert_eq!(
+            client.force_withdrawal(&BackstopTier::SecondLoss, &user, &pool),
+            100_0000000
+        );
+        assert_eq!(token.balance(&user), 100_0000000);
+        assert!(client
+            .user_balance(&BackstopTier::SecondLoss, &pool, &user)
+            .q4w
+            .is_empty());
     }
 }

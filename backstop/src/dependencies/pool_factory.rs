@@ -18,9 +18,16 @@ pub struct BackstopTierConfig {
     pub take_rate_weight: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub struct PoolBackstopConfig {
+    pub access_controller: Option<Address>,
+    pub tiers: Vec<BackstopTierConfig>,
+}
+
 #[contractclient(name = "PoolFactoryClient")]
 #[allow(dead_code)]
 pub trait PoolFactory {
     fn is_pool(e: Env, pool: Address) -> bool;
-    fn backstop_config(e: Env, pool: Address) -> Vec<BackstopTierConfig>;
+    fn backstop_config(e: Env, pool: Address) -> PoolBackstopConfig;
 }

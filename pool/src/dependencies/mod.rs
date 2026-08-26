@@ -1,3 +1,6 @@
+mod access_controller;
+pub use access_controller::AccessControllerClient;
+
 mod backstop;
 pub(crate) use backstop::BackstopAsset as BackstopContractAsset;
 pub use backstop::Client as BackstopClient;
