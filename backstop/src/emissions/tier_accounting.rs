@@ -1,5 +1,5 @@
 use crate::{
-    backstop::{is_blnd_emission_tier, tier_for_token, BackstopTier},
+    backstop::{is_blnt_emission_tier, tier_for_token, BackstopTier},
     constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
     errors::BackstopError,
     migration,
@@ -10,16 +10,16 @@ use soroban_sdk::{panic_with_error, Address, Env, Vec};
 use super::{
     distributor,
     policy::{
-        comet_composition, pool_active_emission_assets, pool_spot_blnd_emission_weight,
-        proportional_floor, quote_ongoing_blnd_split, underlying_blnd_from_composition,
+        comet_composition, pool_active_emission_assets, pool_spot_blnt_emission_weight,
+        proportional_floor, quote_ongoing_blnt_split, underlying_blnt_from_composition,
     },
 };
 
 pub(crate) fn pool_weight(e: &Env, pool: &Address) -> i128 {
     if migration::is_active(e) {
-        pool_spot_blnd_emission_weight(e, pool)
+        pool_spot_blnt_emission_weight(e, pool)
     } else {
-        let token = storage::get_blnd_usdc_token(e);
+        let token = storage::get_blnt_usdc_token(e);
         tier_for_token(e, pool, &token)
             .map(|tier| pool_active_emission_assets(e, tier, pool))
             .unwrap_or(0)
@@ -27,7 +27,7 @@ pub(crate) fn pool_weight(e: &Env, pool: &Address) -> i128 {
 }
 
 /// Accrue migration backfill through the ordinary 70/30 emission pipeline.
-/// Before activation, active BLND:USDC LP tokens directly determine pool
+/// Before activation, active BLNT:USDC LP tokens directly determine pool
 /// weight, and only that tier receives pending backstop emissions.
 pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> i128 {
     if migration::is_active(e) {
@@ -40,8 +40,8 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> i128 {
     let elapsed = checkpoint
         .checked_sub(last_distribution)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidOngoingBalance));
-    let (weights, total_eligible_blnd) = collect_weights(e, false);
-    if total_eligible_blnd == 0 {
+    let (weights, total_eligible_blnt) = collect_weights(e, false);
+    if total_eligible_blnt == 0 {
         return advance_without_distribution(e, &mut state, checkpoint);
     }
     let accrued = emissions_for_seconds(e, elapsed);
@@ -57,7 +57,7 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> i128 {
         amount,
         checkpoint,
         weights,
-        total_eligible_blnd,
+        total_eligible_blnt,
     );
     migration::record_backfill_distribution(e, amount);
     result
@@ -65,60 +65,60 @@ pub(crate) fn checkpoint_backfill(e: &Env, checkpoint: u64) -> i128 {
 
 pub(crate) fn collect_weights(
     e: &Env,
-    use_underlying_blnd: bool,
+    use_underlying_blnt: bool,
 ) -> (Vec<(Address, PoolOngoingEmissions, i128, i128)>, i128) {
     let reward_zone = storage::get_reward_zone(e);
     if reward_zone.is_empty() {
         return (Vec::new(e), 0);
     }
-    let (blnd_usdc_supply, blnd_usdc_reserve) = if use_underlying_blnd {
-        comet_composition(e, &storage::get_blnd_usdc_token(e))
+    let (blnt_usdc_supply, blnt_usdc_reserve) = if use_underlying_blnt {
+        comet_composition(e, &storage::get_blnt_usdc_token(e))
     } else {
         (0, 0)
     };
-    let (blnd_xlm_supply, blnd_xlm_reserve) = if use_underlying_blnd {
-        comet_composition(e, &storage::get_blnd_xlm_token(e))
+    let (blnt_xlm_supply, blnt_xlm_reserve) = if use_underlying_blnt {
+        comet_composition(e, &storage::get_blnt_xlm_token(e))
     } else {
         (0, 0)
     };
     let mut weights = Vec::new(e);
-    let mut total_eligible_blnd = 0_i128;
-    let mut total_blnd_usdc = 0_i128;
-    let mut total_blnd_xlm = 0_i128;
+    let mut total_eligible_blnt = 0_i128;
+    let mut total_blnt_usdc = 0_i128;
+    let mut total_blnt_xlm = 0_i128;
     for pool in reward_zone.iter() {
         let pool_state = get_pool_ongoing_emissions(e, &pool);
-        let pool_blnd_usdc = if use_underlying_blnd {
-            total_blnd_usdc = checked_add(e, total_blnd_usdc, pool_state.active_blnd_usdc);
-            underlying_blnd_from_composition(
+        let pool_blnt_usdc = if use_underlying_blnt {
+            total_blnt_usdc = checked_add(e, total_blnt_usdc, pool_state.active_blnt_usdc);
+            underlying_blnt_from_composition(
                 e,
-                pool_state.active_blnd_usdc,
-                blnd_usdc_supply,
-                blnd_usdc_reserve,
+                pool_state.active_blnt_usdc,
+                blnt_usdc_supply,
+                blnt_usdc_reserve,
             )
         } else {
-            pool_state.active_blnd_usdc
+            pool_state.active_blnt_usdc
         };
-        let pool_blnd_xlm = if use_underlying_blnd {
-            total_blnd_xlm = checked_add(e, total_blnd_xlm, pool_state.active_blnd_xlm);
-            underlying_blnd_from_composition(
+        let pool_blnt_xlm = if use_underlying_blnt {
+            total_blnt_xlm = checked_add(e, total_blnt_xlm, pool_state.active_blnt_xlm);
+            underlying_blnt_from_composition(
                 e,
-                pool_state.active_blnd_xlm,
-                blnd_xlm_supply,
-                blnd_xlm_reserve,
+                pool_state.active_blnt_xlm,
+                blnt_xlm_supply,
+                blnt_xlm_reserve,
             )
         } else {
             0
         };
-        let pool_weight = checked_add(e, pool_blnd_usdc, pool_blnd_xlm);
-        total_eligible_blnd = checked_add(e, total_eligible_blnd, pool_weight);
-        weights.push_back((pool, pool_state, pool_blnd_usdc, pool_blnd_xlm));
+        let pool_weight = checked_add(e, pool_blnt_usdc, pool_blnt_xlm);
+        total_eligible_blnt = checked_add(e, total_eligible_blnt, pool_weight);
+        weights.push_back((pool, pool_state, pool_blnt_usdc, pool_blnt_xlm));
     }
-    if use_underlying_blnd
-        && (total_blnd_usdc > blnd_usdc_supply || total_blnd_xlm > blnd_xlm_supply)
+    if use_underlying_blnt
+        && (total_blnt_usdc > blnt_usdc_supply || total_blnt_xlm > blnt_xlm_supply)
     {
         panic_with_error!(e, BackstopError::NoEligibleWeight);
     }
-    (weights, total_eligible_blnd)
+    (weights, total_eligible_blnt)
 }
 
 pub(crate) fn allocate_distribution(
@@ -127,29 +127,29 @@ pub(crate) fn allocate_distribution(
     amount: i128,
     checkpoint: u64,
     weights: Vec<(Address, PoolOngoingEmissions, i128, i128)>,
-    total_eligible_blnd: i128,
+    total_eligible_blnt: i128,
 ) -> i128 {
     let (backstop_split, pool_split, split_carry) =
-        quote_ongoing_blnd_split(e, amount, state.split_carry);
+        quote_ongoing_blnt_split(e, amount, state.split_carry);
     let backstop_distribution = checked_add(e, backstop_split, state.backstop_carry);
     let pool_distribution = checked_add(e, pool_split, state.pool_carry);
     let mut backstop_allocated = 0_i128;
     let mut pool_allocated = 0_i128;
-    for (pool, mut pool_state, blnd_usdc, blnd_xlm) in weights.iter() {
-        let weight = checked_add(e, blnd_usdc, blnd_xlm);
-        let (backstop_allocation, pool_allocation) = if total_eligible_blnd == 0 {
+    for (pool, mut pool_state, blnt_usdc, blnt_xlm) in weights.iter() {
+        let weight = checked_add(e, blnt_usdc, blnt_xlm);
+        let (backstop_allocation, pool_allocation) = if total_eligible_blnt == 0 {
             (0, 0)
         } else {
             (
-                proportional_floor(e, backstop_distribution, weight, total_eligible_blnd),
-                proportional_floor(e, pool_distribution, weight, total_eligible_blnd),
+                proportional_floor(e, backstop_distribution, weight, total_eligible_blnt),
+                proportional_floor(e, pool_distribution, weight, total_eligible_blnt),
             )
         };
         allocate_pool_backstop_emissions(
             e,
             &mut pool_state,
-            blnd_usdc,
-            blnd_xlm,
+            blnt_usdc,
+            blnt_xlm,
             backstop_allocation,
         );
         pool_state.accrued_pool = checked_add(e, pool_state.accrued_pool, pool_allocation);
@@ -198,10 +198,10 @@ pub(crate) fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoing
 
 pub(crate) fn refresh_pool_ongoing_assets(e: &Env, pool: &Address) {
     let mut state = get_pool_ongoing_emissions(e, pool);
-    state.active_blnd_usdc = tier_for_token(e, pool, &storage::get_blnd_usdc_token(e))
+    state.active_blnt_usdc = tier_for_token(e, pool, &storage::get_blnt_usdc_token(e))
         .map(|tier| pool_active_emission_assets(e, tier, pool))
         .unwrap_or(0);
-    state.active_blnd_xlm = tier_for_token(e, pool, &storage::get_blnd_xlm_token(e))
+    state.active_blnt_xlm = tier_for_token(e, pool, &storage::get_blnt_xlm_token(e))
         .map(|tier| pool_active_emission_assets(e, tier, pool))
         .unwrap_or(0);
     set_pool_ongoing_emissions(e, pool, &state);
@@ -223,7 +223,7 @@ pub(crate) fn checkpoint_user_ongoing_for_weight_change(
 /// weight-sampling behavior. Tier and user streams are checkpointed
 /// separately before their balances change.
 pub(crate) fn prepare_pool_weight_change(e: &Env, tier: BackstopTier, pool: &Address) -> bool {
-    let emission_eligible = is_blnd_emission_tier(e, pool, tier);
+    let emission_eligible = is_blnt_emission_tier(e, pool, tier);
     if emission_eligible {
         migration::require_weight_mutation_allowed(e);
     }
@@ -241,24 +241,24 @@ pub(crate) fn finish_pool_weight_change(e: &Env, pool: &Address, emission_eligib
 fn allocate_pool_backstop_emissions(
     e: &Env,
     state: &mut PoolOngoingEmissions,
-    blnd_usdc_weight: i128,
-    blnd_xlm_weight: i128,
+    blnt_usdc_weight: i128,
+    blnt_xlm_weight: i128,
     allocation: i128,
 ) {
     if allocation < 0 {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
-    let total_weight = checked_add(e, blnd_usdc_weight, blnd_xlm_weight);
+    let total_weight = checked_add(e, blnt_usdc_weight, blnt_xlm_weight);
     let distribution = checked_add(e, allocation, state.backstop_tier_carry);
     if total_weight == 0 {
         return;
     }
 
-    let blnd_usdc = proportional_floor(e, distribution, blnd_usdc_weight, total_weight);
-    let blnd_xlm = proportional_floor(e, distribution, blnd_xlm_weight, total_weight);
-    state.backstop_tier_carry = checked_sub(e, distribution, checked_add(e, blnd_usdc, blnd_xlm));
-    state.pending_blnd_usdc = checked_add(e, state.pending_blnd_usdc, blnd_usdc);
-    state.pending_blnd_xlm = checked_add(e, state.pending_blnd_xlm, blnd_xlm);
+    let blnt_usdc = proportional_floor(e, distribution, blnt_usdc_weight, total_weight);
+    let blnt_xlm = proportional_floor(e, distribution, blnt_xlm_weight, total_weight);
+    state.backstop_tier_carry = checked_sub(e, distribution, checked_add(e, blnt_usdc, blnt_xlm));
+    state.pending_blnt_usdc = checked_add(e, state.pending_blnt_usdc, blnt_usdc);
+    state.pending_blnt_xlm = checked_add(e, state.pending_blnt_xlm, blnt_xlm);
 }
 
 pub(crate) fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
@@ -299,11 +299,11 @@ fn validate_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
 
 fn validate_pool_ongoing_emissions(e: &Env, state: &PoolOngoingEmissions) {
     if state.accrued_pool < 0
-        || state.active_blnd_usdc < 0
-        || state.active_blnd_xlm < 0
+        || state.active_blnt_usdc < 0
+        || state.active_blnt_xlm < 0
         || state.backstop_tier_carry < 0
-        || state.pending_blnd_usdc < 0
-        || state.pending_blnd_xlm < 0
+        || state.pending_blnt_usdc < 0
+        || state.pending_blnt_xlm < 0
     {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }

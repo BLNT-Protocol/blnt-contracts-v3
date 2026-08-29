@@ -14,7 +14,7 @@ fn backstop_config(e: &Env) -> soroban_sdk::Vec<BackstopTierConfig> {
     vec![
         e,
         BackstopTierConfig {
-            asset: BackstopAsset::BlndXlm,
+            asset: BackstopAsset::BlntXlm,
             take_rate_weight: 1,
         },
     ]
@@ -39,12 +39,12 @@ fn test_pool_factory() {
     let backstop_rate: u32 = 0_1000000;
     let max_positions: u32 = 6;
     let min_collateral: i128 = 1_0000000;
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -135,9 +135,9 @@ fn test_pool_factory() {
         assert_eq!(
             e.storage()
                 .instance()
-                .get::<_, Address>(&Symbol::new(&e, "BLNDTkn"))
+                .get::<_, Address>(&Symbol::new(&e, "BLNTTkn"))
                 .unwrap(),
-            blnd_id.clone()
+            blnt_id.clone()
         );
     });
     assert_ne!(deployed_pool_address_1, deployed_pool_address_2);
@@ -158,11 +158,11 @@ fn test_pool_factory_accepts_three_ordered_backstop_tiers() {
     let config = vec![
         &e,
         BackstopTierConfig {
-            asset: BackstopAsset::BlndXlm,
+            asset: BackstopAsset::BlntXlm,
             take_rate_weight: 4,
         },
         BackstopTierConfig {
-            asset: BackstopAsset::BlndUsdc,
+            asset: BackstopAsset::BlntUsdc,
             take_rate_weight: 3,
         },
         BackstopTierConfig {
@@ -181,7 +181,7 @@ fn test_pool_factory_accepts_maximum_backstop_weight() {
         &vec![
             &e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
+                asset: BackstopAsset::BlntXlm,
                 take_rate_weight: 100,
             },
         ],
@@ -240,11 +240,11 @@ fn test_pool_factory_rejects_more_than_three_backstop_tiers() {
         &vec![
             &e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
+                asset: BackstopAsset::BlntXlm,
                 take_rate_weight: 1,
             },
             BackstopTierConfig {
-                asset: BackstopAsset::BlndUsdc,
+                asset: BackstopAsset::BlntUsdc,
                 take_rate_weight: 1,
             },
             BackstopTierConfig {
@@ -283,7 +283,7 @@ fn test_pool_factory_accepts_equal_and_ascending_backstop_weights() {
         &vec![
             &e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
+                asset: BackstopAsset::BlntXlm,
                 take_rate_weight: 4,
             },
             BackstopTierConfig {
@@ -308,12 +308,12 @@ fn test_pool_factory_invalid_pool_init_args_backstop_rate() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -348,12 +348,12 @@ fn test_pool_factory_invalid_pool_init_args_max_positions() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -389,12 +389,12 @@ fn test_pool_factory_invalid_pool_init_args_max_positions_large() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -430,12 +430,12 @@ fn test_pool_factory_invalid_pool_init_args_min_collateral() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -478,12 +478,12 @@ fn test_pool_factory_frontrun_protection() {
     let backstop_rate: u32 = 0_1000000;
     let max_positions: u32 = 6;
     let min_collateral: i128 = 0;
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);

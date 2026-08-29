@@ -102,7 +102,7 @@ pub struct UserEmissionData {
 pub struct ReserveEmissionCarry {
     /// Exact division numerator not yet represented by the reserve index.
     pub index_carry: i128,
-    /// Exact unvested BLND remaining in the current seven-day stream.
+    /// Exact unvested BLNT remaining in the current seven-day stream.
     pub remaining: i128,
 }
 
@@ -132,7 +132,7 @@ const ADMIN_KEY: &str = "Admin";
 const PROPOSED_ADMIN_KEY: &str = "PropAdmin";
 const NAME_KEY: &str = "Name";
 const BACKSTOP_KEY: &str = "Backstop";
-const BLND_TOKEN_KEY: &str = "BLNDTkn";
+const BLNT_TOKEN_KEY: &str = "BLNTTkn";
 const ACCESS_CONTROLLER_KEY: &str = "AccessCtrl";
 const POOL_CONFIG_KEY: &str = "Config";
 const RES_LIST_KEY: &str = "ResList";
@@ -336,22 +336,22 @@ pub fn set_access_controller(e: &Env, access_controller: &Option<Address>) {
 
 /********** External Token Contracts **********/
 
-/// Fetch the BLND token ID
-pub fn get_blnd_token(e: &Env) -> Address {
+/// Fetch the BLNT token ID
+pub fn get_blnt_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get(&Symbol::new(e, BLND_TOKEN_KEY))
+        .get(&Symbol::new(e, BLNT_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set a new BLND token ID
+/// Set a new BLNT token ID
 ///
 /// ### Arguments
-/// * `blnd_token_id` - The ID of the BLND token
-pub fn set_blnd_token(e: &Env, blnd_token_id: &Address) {
+/// * `blnt_token_id` - The ID of the BLNT token
+pub fn set_blnt_token(e: &Env, blnt_token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY), blnd_token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLNT_TOKEN_KEY), blnt_token_id);
 }
 
 /********** Pool Config **********/
@@ -800,7 +800,7 @@ pub fn set_pool_emissions(e: &Env, emissions: &Map<u32, u64>) {
     );
 }
 
-/// Fetch unallocated BLND base-unit carry from the prior pool-tranche gulp.
+/// Fetch unallocated BLNT base-unit carry from the prior pool-tranche gulp.
 pub fn get_pool_emission_carry(e: &Env) -> i128 {
     let carry = e
         .storage()
@@ -813,7 +813,7 @@ pub fn get_pool_emission_carry(e: &Env) -> i128 {
     carry
 }
 
-/// Store unallocated BLND base-unit carry for the next pool-tranche gulp.
+/// Store unallocated BLNT base-unit carry for the next pool-tranche gulp.
 pub fn set_pool_emission_carry(e: &Env, carry: i128) {
     if carry < 0 {
         panic_with_error!(e, PoolError::BadRequest);

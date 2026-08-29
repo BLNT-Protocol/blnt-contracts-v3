@@ -28,10 +28,12 @@ make
 ```
 
 Artifacts are written to `target/wasm32v1-none/optimized`. The build includes
-the pool factory, backstop, and pool; Comet-based backstop valuation is
-integrated into the backstop. It rejects any production WASM larger than
-120,000 bytes, preserving the Protocol 27 deployment headroom established by
-the candidate's deployment testing.
+the pool factory, v3 BLNT emitter, backstop, and pool. The emitter preserves the
+legacy backstop-replacement API, adds a 60-day one-way BLND-to-BLNT conversion,
+and emits BLNT directly to v3 without replacing the v1/v2 BLND emitter. Comet
+V2-based backstop valuation is integrated into the backstop. The build rejects any production
+WASM larger than 120,000 bytes, preserving the Protocol 27 deployment headroom
+established by the candidate's deployment testing.
 
 Compare the optimized artifacts with the exact deployed v2 contracts:
 

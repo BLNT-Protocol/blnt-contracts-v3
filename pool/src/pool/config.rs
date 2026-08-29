@@ -22,7 +22,7 @@ pub fn execute_initialize(
     max_positions: &u32,
     min_collateral: &i128,
     backstop_address: &Address,
-    blnd_id: &Address,
+    blnt_id: &Address,
     access_controller: &Option<Address>,
 ) {
     let pool_config = PoolConfig {
@@ -38,7 +38,7 @@ pub fn execute_initialize(
     storage::set_name(e, name);
     storage::set_backstop(e, backstop_address);
     storage::set_pool_config(e, &pool_config);
-    storage::set_blnd_token(e, blnd_id);
+    storage::set_blnt_token(e, blnt_id);
     storage::set_access_controller(e, access_controller);
 }
 
@@ -235,7 +235,7 @@ mod tests {
         let max_positions = 2;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -247,7 +247,7 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
                 &None,
             );
 
@@ -259,7 +259,7 @@ mod tests {
             assert_eq!(pool_config.max_positions, max_positions);
             assert_eq!(pool_config.status, 6);
             assert_eq!(storage::get_backstop(&e), backstop_address);
-            assert_eq!(storage::get_blnd_token(&e), blnd_id);
+            assert_eq!(storage::get_blnt_token(&e), blnt_id);
         });
     }
 
@@ -277,7 +277,7 @@ mod tests {
         let max_positions = 3;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -289,7 +289,7 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
                 &None,
             );
         });
@@ -309,7 +309,7 @@ mod tests {
         let max_positions = 1;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -321,7 +321,7 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
                 &None,
             );
         });

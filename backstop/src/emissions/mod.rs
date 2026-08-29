@@ -5,7 +5,7 @@ mod manager;
 mod tier_accounting;
 pub(crate) use claim::execute_claim;
 #[cfg(test)]
-pub(crate) use claim::preview_claim as preview_user_ongoing_blnd;
+pub(crate) use claim::preview_claim as preview_user_ongoing_blnt;
 pub(crate) use manager::{
     add_to_reward_zone, distribute, get_reward_zone, gulp_emissions, remove_from_reward_zone,
 };

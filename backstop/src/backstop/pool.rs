@@ -28,7 +28,7 @@ pub struct PoolBackstopData {
 #[contracttype]
 pub struct PoolTierData {
     pub asset: BackstopAsset,
-    pub blnd_emission_eligible: bool,
+    pub blnt_emission_eligible: bool,
     pub take_rate_weight: u32,
     pub token: Address,
     pub tokens: i128,
@@ -41,8 +41,8 @@ pub struct PoolTierData {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum BackstopAsset {
-    BlndXlm,
-    BlndUsdc,
+    BlntXlm,
+    BlntUsdc,
     Usdc,
     Xlm,
 }
@@ -111,17 +111,17 @@ pub fn tier_for_token(e: &Env, pool: &Address, token: &Address) -> Option<Backst
     None
 }
 
-pub fn is_blnd_emission_tier(e: &Env, pool: &Address, tier: BackstopTier) -> bool {
+pub fn is_blnt_emission_tier(e: &Env, pool: &Address, tier: BackstopTier) -> bool {
     matches!(
         tier_asset(e, pool, tier),
-        BackstopAsset::BlndUsdc | BackstopAsset::BlndXlm
+        BackstopAsset::BlntUsdc | BackstopAsset::BlntXlm
     )
 }
 
 pub fn asset_token(e: &Env, asset: BackstopAsset) -> Address {
     match asset {
-        BackstopAsset::BlndXlm => storage::get_blnd_xlm_token(e),
-        BackstopAsset::BlndUsdc => storage::get_blnd_usdc_token(e),
+        BackstopAsset::BlntXlm => storage::get_blnt_xlm_token(e),
+        BackstopAsset::BlntUsdc => storage::get_blnt_usdc_token(e),
         BackstopAsset::Usdc => storage::get_usdc_token(e),
         BackstopAsset::Xlm => storage::get_xlm_token(e),
     }
@@ -129,8 +129,8 @@ pub fn asset_token(e: &Env, asset: BackstopAsset) -> Address {
 
 fn from_factory_asset(asset: FactoryBackstopAsset) -> BackstopAsset {
     match asset {
-        FactoryBackstopAsset::BlndXlm => BackstopAsset::BlndXlm,
-        FactoryBackstopAsset::BlndUsdc => BackstopAsset::BlndUsdc,
+        FactoryBackstopAsset::BlntXlm => BackstopAsset::BlntXlm,
+        FactoryBackstopAsset::BlntUsdc => BackstopAsset::BlntUsdc,
         FactoryBackstopAsset::Usdc => BackstopAsset::Usdc,
         FactoryBackstopAsset::Xlm => BackstopAsset::Xlm,
     }
@@ -271,7 +271,7 @@ impl PoolBalance {
     }
 }
 
-const BLND_WEIGHT: i128 = 8_000_000;
+const BLNT_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
 const PAIR_VALUE_MULTIPLIER: i128 = 5;
 const TOKEN_DECIMALS: u32 = 7;
@@ -315,7 +315,7 @@ fn tier_data(
     let asset = from_factory_asset(config.asset);
     PoolTierData {
         asset,
-        blnd_emission_eligible: matches!(asset, BackstopAsset::BlndUsdc | BackstopAsset::BlndXlm),
+        blnt_emission_eligible: matches!(asset, BackstopAsset::BlntUsdc | BackstopAsset::BlntXlm),
         take_rate_weight: config.take_rate_weight,
         token: asset_token(e, asset),
         tokens: balance.tokens,
@@ -335,8 +335,8 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         any_tokens |= partition.2 > 0;
         if partition.2 > 0 {
             match from_factory_asset(config.get(index).unwrap().asset) {
-                BackstopAsset::BlndUsdc => needs_anchor = true,
-                BackstopAsset::BlndXlm | BackstopAsset::Xlm => {
+                BackstopAsset::BlntUsdc => needs_anchor = true,
+                BackstopAsset::BlntXlm | BackstopAsset::Xlm => {
                     needs_anchor = true;
                     needs_target = true;
                 }
@@ -389,12 +389,12 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         };
     }
 
-    let blnd = storage::get_blnd_token(e);
+    let blnt = storage::get_blnt_token(e);
     let anchor = needs_anchor.then(|| {
         read_comet(
             e,
-            &storage::get_blnd_usdc_token(e),
-            &blnd,
+            &storage::get_blnt_usdc_token(e),
+            &blnt,
             &storage::get_usdc_token(e),
         )
     });
@@ -404,8 +404,8 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
     let target = needs_target.then(|| {
         read_comet(
             e,
-            &storage::get_blnd_xlm_token(e),
-            &blnd,
+            &storage::get_blnt_xlm_token(e),
+            &blnt,
             &storage::get_xlm_token(e),
         )
     });
@@ -457,13 +457,13 @@ fn quote_configured_tier(
         return unit_pool_tier_valuation(amounts);
     }
     match from_factory_asset(config.asset) {
-        BackstopAsset::BlndUsdc => pool_tier_valuation(
+        BackstopAsset::BlntUsdc => pool_tier_valuation(
             e,
             amounts,
             anchor_value.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
             anchor.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
         ),
-        BackstopAsset::BlndXlm => {
+        BackstopAsset::BlntXlm => {
             let anchor =
                 anchor.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
             let anchor_value = anchor_value
@@ -471,7 +471,7 @@ fn quote_configured_tier(
             let target =
                 target.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
             let target_value =
-                mul_div_floor(e, target.blnd_reserve, anchor_value, anchor.blnd_reserve);
+                mul_div_floor(e, target.blnt_reserve, anchor_value, anchor.blnt_reserve);
             pool_tier_valuation(e, amounts, target_value, target)
         }
         BackstopAsset::Usdc => unit_pool_tier_valuation(amounts),
@@ -516,9 +516,9 @@ fn xlm_asset_valuation(
     }
     let numerator = I256::from_i128(e, amount)
         .mul(&I256::from_i128(e, anchor.pair_reserve))
-        .mul(&I256::from_i128(e, target.blnd_reserve));
+        .mul(&I256::from_i128(e, target.blnt_reserve));
     let denominator =
-        I256::from_i128(e, anchor.blnd_reserve).mul(&I256::from_i128(e, target.pair_reserve));
+        I256::from_i128(e, anchor.blnt_reserve).mul(&I256::from_i128(e, target.pair_reserve));
     AssetValuation {
         usdc_value: numerator
             .div(&denominator)
@@ -530,24 +530,24 @@ fn xlm_asset_valuation(
 #[cfg(test)]
 fn quote_pool_lp_amounts(
     e: &Env,
-    blnd_usdc: (i128, i128, i128),
-    blnd_xlm: (i128, i128, i128),
+    blnt_usdc: (i128, i128, i128),
+    blnt_xlm: (i128, i128, i128),
 ) -> (PoolTierValuation, PoolTierValuation) {
-    let blnd = storage::get_blnd_token(e);
+    let blnt = storage::get_blnt_token(e);
     let usdc = storage::get_usdc_token(e);
-    let anchor = read_comet(e, &storage::get_blnd_usdc_token(e), &blnd, &usdc);
+    let anchor = read_comet(e, &storage::get_blnt_usdc_token(e), &blnt, &usdc);
     let anchor_value = checked_mul(e, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
-    let blnd_usdc_quote = pool_tier_valuation(e, blnd_usdc, anchor_value, &anchor);
+    let blnt_usdc_quote = pool_tier_valuation(e, blnt_usdc, anchor_value, &anchor);
     let target = read_comet(
         e,
-        &storage::get_blnd_xlm_token(e),
-        &blnd,
+        &storage::get_blnt_xlm_token(e),
+        &blnt,
         &storage::get_xlm_token(e),
     );
-    let target_value = mul_div_floor(e, target.blnd_reserve, anchor_value, anchor.blnd_reserve);
+    let target_value = mul_div_floor(e, target.blnt_reserve, anchor_value, anchor.blnt_reserve);
     (
-        blnd_usdc_quote,
-        pool_tier_valuation(e, blnd_xlm, target_value, &target),
+        blnt_usdc_quote,
+        pool_tier_valuation(e, blnt_xlm, target_value, &target),
     )
 }
 
@@ -619,13 +619,13 @@ fn assets_from_shares(e: &Env, shares: i128, balance: &PoolBalance) -> i128 {
 
 pub(crate) fn validate_backstop_assets(
     e: &Env,
-    blnd: &Address,
+    blnt: &Address,
     usdc: &Address,
     xlm: &Address,
-    blnd_usdc: &Address,
-    blnd_xlm: &Address,
+    blnt_usdc: &Address,
+    blnt_xlm: &Address,
 ) {
-    let addresses = [blnd, usdc, xlm, blnd_usdc, blnd_xlm];
+    let addresses = [blnt, usdc, xlm, blnt_usdc, blnt_xlm];
     for (index, address) in addresses.iter().enumerate() {
         if addresses
             .iter()
@@ -641,8 +641,8 @@ pub(crate) fn validate_backstop_assets(
             panic_with_error!(e, BackstopError::InvalidBackstopValuation);
         }
     }
-    validate_comet(e, blnd_usdc, blnd, usdc);
-    validate_comet(e, blnd_xlm, blnd, xlm);
+    validate_comet(e, blnt_usdc, blnt, usdc);
+    validate_comet(e, blnt_xlm, blnt, xlm);
 }
 
 fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTierConfig>) {
@@ -666,39 +666,39 @@ fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTier
 }
 
 struct CometComposition {
-    blnd_reserve: i128,
+    blnt_reserve: i128,
     pair_reserve: i128,
     total_supply: i128,
 }
 
-fn validate_comet(e: &Env, comet: &Address, blnd: &Address, pair: &Address) {
+fn validate_comet(e: &Env, comet: &Address, blnt: &Address, pair: &Address) {
     let client = CometClient::new(e, comet);
     let tokens = client.get_tokens();
     if tokens.len() != 2
-        || !tokens.contains(blnd)
+        || !tokens.contains(blnt)
         || !tokens.contains(pair)
-        || client.get_normalized_weight(blnd) != BLND_WEIGHT
+        || client.get_normalized_weight(blnt) != BLNT_WEIGHT
         || client.get_normalized_weight(pair) != PAIR_WEIGHT
     {
         panic_with_error!(e, BackstopError::InvalidBackstopValuation);
     }
 }
 
-fn read_comet(e: &Env, comet: &Address, blnd: &Address, pair: &Address) -> CometComposition {
+fn read_comet(e: &Env, comet: &Address, blnt: &Address, pair: &Address) -> CometComposition {
     let client = CometClient::new(e, comet);
     let total_supply = client.get_total_supply();
-    let blnd_reserve = client.get_balance(blnd);
+    let blnt_reserve = client.get_balance(blnt);
     let pair_reserve = client.get_balance(pair);
     if total_supply <= 0
-        || blnd_reserve <= 0
+        || blnt_reserve <= 0
         || pair_reserve <= 0
-        || client.get_normalized_weight(blnd) != BLND_WEIGHT
+        || client.get_normalized_weight(blnt) != BLNT_WEIGHT
         || client.get_normalized_weight(pair) != PAIR_WEIGHT
     {
         panic_with_error!(e, BackstopError::InvalidValuation);
     }
     CometComposition {
-        blnd_reserve,
+        blnt_reserve,
         pair_reserve,
         total_supply,
     }
@@ -1080,7 +1080,7 @@ mod tier_tests {
     use crate::{
         constants::{MAX_Q4W_SIZE, Q4W_LOCK_TIME},
         testutils::{
-            create_backstop, create_backstop_token, create_blnd_xlm_token, create_mock_pool,
+            create_backstop, create_backstop_token, create_blnt_xlm_token, create_mock_pool,
             create_mock_pool_factory, create_usdc_token,
         },
         BackstopClient,
@@ -1097,14 +1097,14 @@ mod tier_tests {
         let user = Address::generate(&e);
         let pool = Address::generate(&e);
         let backstop = create_backstop(&e);
-        let (blnd_usdc, blnd_usdc_client) = create_backstop_token(&e, &backstop, &admin);
-        let (blnd_xlm, blnd_xlm_client) = create_blnd_xlm_token(&e, &backstop, &admin);
+        let (blnt_usdc, blnt_usdc_client) = create_backstop_token(&e, &backstop, &admin);
+        let (blnt_xlm, blnt_xlm_client) = create_blnt_xlm_token(&e, &backstop, &admin);
         let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         factory.set_pool(&pool);
 
-        blnd_usdc_client.mint(&user, &100);
-        blnd_xlm_client.mint(&user, &200);
+        blnt_usdc_client.mint(&user, &100);
+        blnt_xlm_client.mint(&user, &200);
         usdc_client.mint(&user, &300);
 
         let client = BackstopClient::new(&e, &backstop);
@@ -1123,11 +1123,11 @@ mod tier_tests {
 
         assert_eq!(
             client.backstop_token(&BackstopTier::SecondLoss, &pool),
-            blnd_usdc
+            blnt_usdc
         );
         assert_eq!(
             client.backstop_token(&BackstopTier::FirstLoss, &pool),
-            blnd_xlm
+            blnt_xlm
         );
         assert_eq!(client.backstop_token(&BackstopTier::ThirdLoss, &pool), usdc);
         let pool_data = client.pool_data(&pool);
@@ -1162,14 +1162,14 @@ mod tier_tests {
         let recipient = Address::generate(&e);
         let backstop = create_backstop(&e);
         let (pool, _) = create_mock_pool(&e, &backstop);
-        let (_, blnd_usdc_client) = create_backstop_token(&e, &backstop, &admin);
-        let (_, blnd_xlm_client) = create_blnd_xlm_token(&e, &backstop, &admin);
+        let (_, blnt_usdc_client) = create_backstop_token(&e, &backstop, &admin);
+        let (_, blnt_xlm_client) = create_blnt_xlm_token(&e, &backstop, &admin);
         let (_, usdc_client) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         factory.set_pool(&pool);
 
-        blnd_usdc_client.mint(&user, &100);
-        blnd_xlm_client.mint(&user, &100);
+        blnt_usdc_client.mint(&user, &100);
+        blnt_xlm_client.mint(&user, &100);
         usdc_client.mint(&user, &100);
         let client = BackstopClient::new(&e, &backstop);
         client.deposit(&crate::BackstopTier::SecondLoss, &user, &pool, &100);
@@ -1215,7 +1215,7 @@ mod tier_tests {
             ),
             6
         );
-        assert_eq!(blnd_xlm_client.balance(&recipient), 6);
+        assert_eq!(blnt_xlm_client.balance(&recipient), 6);
         let user_balance = client.user_balance(&BackstopTier::FirstLoss, &pool, &user);
         assert_eq!(user_balance.shares, 94);
         assert!(user_balance.q4w.is_empty());
@@ -1287,7 +1287,7 @@ mod valuation_tests {
         storage,
         testutils::{
             create_backstop, create_backstop_token, create_backstop_with_real_comets,
-            create_blnd_xlm_token, create_mock_pool_factory, create_usdc_token,
+            create_blnt_xlm_token, create_mock_pool_factory, create_usdc_token,
         },
         BackstopClient,
     };
@@ -1334,7 +1334,7 @@ mod valuation_tests {
             &vec![
                 &e,
                 BackstopTierConfig {
-                    asset: FactoryBackstopAsset::BlndXlm,
+                    asset: FactoryBackstopAsset::BlntXlm,
                     take_rate_weight: 4,
                 },
                 BackstopTierConfig {
@@ -1351,7 +1351,7 @@ mod valuation_tests {
             &vec![
                 &e,
                 BackstopTierConfig {
-                    asset: FactoryBackstopAsset::BlndXlm,
+                    asset: FactoryBackstopAsset::BlntXlm,
                     take_rate_weight: 3,
                 },
                 BackstopTierConfig {
@@ -1363,9 +1363,9 @@ mod valuation_tests {
         assert!(client.try_pool_data(&ascending).is_ok());
     }
 
-    fn values(e: &Env, blnd_usdc: i128, blnd_xlm: i128, usdc: i128) -> ActivationValues {
+    fn values(e: &Env, blnt_usdc: i128, blnt_xlm: i128, usdc: i128) -> ActivationValues {
         ActivationValues {
-            tiers: soroban_sdk::vec![e, blnd_xlm, blnd_usdc, usdc],
+            tiers: soroban_sdk::vec![e, blnt_xlm, blnt_usdc, usdc],
         }
     }
 
@@ -1393,24 +1393,24 @@ mod valuation_tests {
         e.cost_estimate().budget().reset_unlimited();
         let backstop = create_backstop_with_real_comets(&e);
 
-        let (blnd_usdc, blnd_xlm) = e.as_contract(&backstop, || {
+        let (blnt_usdc, blnt_xlm) = e.as_contract(&backstop, || {
             set_test_valuation_override(&e, None);
-            let (blnd_usdc, blnd_xlm) = quote_pool_lp_amounts(
+            let (blnt_usdc, blnt_xlm) = quote_pool_lp_amounts(
                 &e,
                 (20 * SCALAR_7, 0, 20 * SCALAR_7),
                 (10 * SCALAR_7, 0, 10 * SCALAR_7),
             );
-            (blnd_usdc.total, blnd_xlm.total)
+            (blnt_usdc.total, blnt_xlm.total)
         });
 
         assert_eq!(
-            blnd_usdc,
+            blnt_usdc,
             AssetValuation {
                 usdc_value: 25 * SCALAR_7,
             }
         );
         assert_eq!(
-            blnd_xlm,
+            blnt_xlm,
             AssetValuation {
                 usdc_value: 125_000_000,
             }
@@ -1441,14 +1441,14 @@ mod valuation_tests {
         let user = Address::generate(&e);
         let pool = Address::generate(&e);
         let backstop = create_backstop(&e);
-        let (_, blnd_usdc) = create_backstop_token(&e, &backstop, &admin);
-        let (_, blnd_xlm) = create_blnd_xlm_token(&e, &backstop, &admin);
+        let (_, blnt_usdc) = create_backstop_token(&e, &backstop, &admin);
+        let (_, blnt_xlm) = create_blnt_xlm_token(&e, &backstop, &admin);
         let (_, usdc) = create_usdc_token(&e, &backstop, &admin);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         factory.set_pool(&pool);
 
-        blnd_usdc.mint(&user, &(4_000 * SCALAR_7));
-        blnd_xlm.mint(&user, &(5_000 * SCALAR_7));
+        blnt_usdc.mint(&user, &(4_000 * SCALAR_7));
+        blnt_xlm.mint(&user, &(5_000 * SCALAR_7));
         usdc.mint(&user, &(6_500 * SCALAR_7));
         let backstop_client = BackstopClient::new(&e, &backstop);
         backstop_client.deposit(
@@ -1483,18 +1483,18 @@ mod valuation_tests {
         );
 
         let pool_data = backstop_client.pool_data(&pool);
-        let blnd_xlm_data = pool_data.tiers.get(0).unwrap();
-        assert_eq!(blnd_xlm_data.token, blnd_xlm.address);
-        assert_eq!(blnd_xlm_data.tokens, 5_000 * SCALAR_7);
-        assert_eq!(blnd_xlm_data.shares, 5_000 * SCALAR_7);
-        assert_eq!(blnd_xlm_data.value, 5_000 * SCALAR_7);
-        assert_eq!(blnd_xlm_data.take_rate_weight, 4);
-        let blnd_usdc_data = pool_data.tiers.get(1).unwrap();
-        assert_eq!(blnd_usdc_data.token, blnd_usdc.address);
-        assert_eq!(blnd_usdc_data.tokens, 4_000 * SCALAR_7);
-        assert_eq!(blnd_usdc_data.shares, 4_000 * SCALAR_7);
-        assert_eq!(blnd_usdc_data.value, 4_000 * SCALAR_7);
-        assert_eq!(blnd_usdc_data.take_rate_weight, 3);
+        let blnt_xlm_data = pool_data.tiers.get(0).unwrap();
+        assert_eq!(blnt_xlm_data.token, blnt_xlm.address);
+        assert_eq!(blnt_xlm_data.tokens, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.shares, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.value, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.take_rate_weight, 4);
+        let blnt_usdc_data = pool_data.tiers.get(1).unwrap();
+        assert_eq!(blnt_usdc_data.token, blnt_usdc.address);
+        assert_eq!(blnt_usdc_data.tokens, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.shares, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.value, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.take_rate_weight, 3);
         let usdc_data = pool_data.tiers.get(2).unwrap();
         assert_eq!(usdc_data.token, usdc.address);
         assert_eq!(usdc_data.tokens, 6_500 * SCALAR_7);
@@ -1602,7 +1602,7 @@ mod valuation_tests {
         assert_eq!(tier.asset, BackstopAsset::Xlm);
         assert_eq!(tier.token, xlm);
         assert_eq!(tier.take_rate_weight, 100);
-        assert!(!tier.blnd_emission_eligible);
+        assert!(!tier.blnt_emission_eligible);
         assert_eq!(tier.value, ACTIVATION_THRESHOLD_USDC);
         assert_eq!(data.active_value, ACTIVATION_THRESHOLD_USDC);
     }

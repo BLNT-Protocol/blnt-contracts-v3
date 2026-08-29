@@ -25,7 +25,7 @@ fn test_backstop_inflation_attack() {
     let pool_address = fixture.pools[0].pool.address.clone();
 
     // setup backstop and update pool status
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(5_001_000 * SCALAR_7));
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(5_001_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(121_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(400_000 * SCALAR_7),
@@ -110,8 +110,8 @@ fn test_backstop_interest_auction_inflation_attack() {
     let pool_client = PoolClient::new(&fixture.env, &pool_address);
     pool_client.set_status(&3);
 
-    // mint LP tokens, ~ 10 BLND and 0.25 USDC per share
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(10_100_000 * SCALAR_7));
+    // mint LP tokens, ~ 10 BLNT and 0.25 USDC per share
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(10_100_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(251_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(1_000_000 * SCALAR_7),

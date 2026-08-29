@@ -24,13 +24,36 @@ amounts are illustrative raw base units, and omitted generic containers
 (`Vec`, `Map`, `Option`, and tuples) have their ordinary Soroban meanings.
 Private storage-only types are excluded.
 
+## Emitter
+
+V3 deploys a separate emitter for BLNT while the legacy emitter and BLND remain
+with v1/v2. The established emitter entry points and encodings are retained;
+the v3 emitter adds only the constructor and one-way conversion surface below.
+
+| Legacy entry point | V3 entry point | Classification | Reason |
+| --- | --- | --- | --- |
+| No constructor | `__constructor(legacy_blnd_token, initializer)` | Added | Binds the only token accepted by conversion, fixes the exclusive 60-day deadline, and prevents first-call initialization races. |
+| `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:USDC as the initial designated token. |
+| `distribute() -> i128` | Same | Extended | Mints BLNT rather than BLND at the inherited one-token-per-second rate. |
+| `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
+| `get_backstop() -> Address` | Same | Unchanged | Returns the current BLNT recipient backstop. |
+| `queue_swap_backstop(new_backstop, new_backstop_token)` | Same | Unchanged | Preserves strict raw-balance qualification and the 31-day future-upgrade queue. |
+| `get_queued_swap() -> Option<Swap>` | Same | Unchanged | Preserves the queued-swap view. |
+| `cancel_swap_backstop()` | Same | Unchanged | Preserves permissionless invalid-queue cancellation. |
+| `swap_backstop()` | Same | Unchanged | Preserves final distribution, revalidation, and recipient replacement. |
+| `drop(list)` | Same | Extended | Mints the initial BLNT allocation under the inherited one-call, 50-million-token ceiling. |
+| — | `swap_blnd_for_blnt(from, to, amount) -> i128` | Added | Before the exclusive deadline, burns exact legacy BLND receipts and mints BLNT 1:1 in raw seven-decimal units. |
+| — | `get_swap_deadline() -> u64` | Added | Returns the immutable exclusive conversion deadline. |
+| — | `get_legacy_blnd_token() -> Address` | Added | Returns the immutable legacy BLND input token. |
+| — | `get_total_swapped() -> i128` | Added | Returns cumulative successfully burned BLND. |
+
 ## Backstop
 
 ### Entry points
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnd_usdc_token, blnd_xlm_token, emitter, blnd_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical assets and both emission-eligible Comet LPs. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnt_usdc_token, blnt_xlm_token, emitter, blnt_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical BLNT assets and both emission-eligible Comet V2 LPs. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `deposit(from, pool, amount) -> i128` | `deposit(tier, from, pool, amount) -> i128` | Extended | Selects one independently accounted tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `queue_withdrawal(from, pool, amount) -> Q4W` | `queue_withdrawal(tier, from, pool, amount) -> Q4W` | Extended | Queues shares in one tier under the aggregate queue bound. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | — | `force_queue_withdrawal(tier, user, pool) -> Q4W` | Added | After backstop-deposit permission is revoked, queues all active shares in one tier only to the target's inherited Q4W. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
@@ -40,16 +63,16 @@ Private storage-only types are excluded.
 | `user_balance(pool, user) -> UserBalance` | `user_balance(tier, pool, user) -> UserBalance` | Extended | Returns one pool-user balance for one tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with an ordered one-to-three-tier vector, aggregate transferable active USDC-equivalent value, and transferable-value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
-| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; membership uses v3 activation value while allocation and full-zone replacement use eligible underlying BLND. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `distribute() -> i128` | Same | Extended | Keeps the v2 checkpoint surface while validating migration and allocating tier-aware emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-migration-lifecycle-and-backfill--extended) |
+| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; membership uses v3 activation value while allocation and full-zone replacement use eligible underlying BLNT. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh v3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-conversion-and-replacement--replaced-and-extended) |
 | `gulp_emissions(pool) -> i128` | Same | Extended | Retains the 70/30 gulp while scheduling the eligible tier streams. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `add_reward(to_add, to_remove)` | Same | Extended | Admission uses v3 activation; full-zone replacement remains strictly underlying-BLND weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `add_reward(to_add, to_remove)` | Same | Extended | Admission uses v3 activation; full-zone replacement remains strictly underlying-BLNT weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation valuation and otherwise preserves the v2 threshold and checkpoint rules. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLND-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `drop()` | Same | Extended | Keeps the v2 drop surface while verifying and funding the scheduled migration backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-migration-lifecycle-and-backfill--extended) |
-| — | `buy_and_burn(asset) -> i128` | Added | Permissionlessly swaps one bounded pending USDC or XLM haircut batch through its canonical BLND Comet and burns the exact BLND output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
+| `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLNT-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `drop()` | Same | Extended | Keeps the one-call drop surface for the immutable initial BLNT allocation; v3 launch schedules no migration backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-conversion-and-replacement--replaced-and-extended) |
+| — | `buy_and_burn(asset) -> i128` | Added | Permissionlessly swaps one bounded pending USDC or XLM haircut batch through its canonical BLNT Comet and burns the exact BLNT output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 | `draw(pool, amount, to)` | `draw(tier, pool, amount, to)` | Extended | A pool draws loss capital from the tier selected by the waterfall. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
-| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLND-LP-tier payment or 99% of a plain-USDC/plain-XLM payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
+| `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLNT-LP-tier payment or 99% of a plain-USDC/plain-XLM payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 
 ### Data types
 
@@ -58,9 +81,9 @@ Private storage-only types are excluded.
 | `Q4W` | <code>{"amount":100000000, "exp":1800000000}</code> | Same | Shape is unchanged. V3 maintains an independent queue per tier under one aggregate pool-user entry bound. |
 | `UserBalance` | <code>{"shares":900000000, "q4w":[{"amount":100000000, "exp":1800000000}]}</code> | Same shape, returned for the selected `tier` | `shares` excludes queued shares in both versions. |
 | `BackstopTier` | Not present | One of `"FirstLoss"`, `"SecondLoss"`, or `"ThirdLoss"` | New public selector for a v3 loss-waterfall position. Enum declaration order is the loss-waterfall order. |
-| `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | The only canonical assets assignable to a v3 tier. |
-| `PoolTierData` | Not present | <code>{"asset":"BlndXlm", "blnd_emission_eligible":true, "take_rate_weight":4, "token":"C_BLND_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}</code> | New nested summary; `value` is the tier's transferable, verified seven-decimal USDC-equivalent value. A deauthorized plain-USDC tier reports zero. |
-| `PoolBackstopData` | <code>{"tokens":1000000000, "shares":1000000000, "q4w_pct":1000000, "blnd":8000000000, "usdc":200000000, "token_spot_price":10000000}</code> | <code>{"active_value":900000000, "q4w_pct":1000000, "tiers":[{"asset":"BlndXlm", "blnd_emission_eligible":true, "take_rate_weight":4, "token":"C_BLND_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}, {"asset":"Xlm", "blnd_emission_eligible":false, "take_rate_weight":2, "token":"C_XLM", "tokens":400000000, "shares":400000000, "value":400000000}]}</code> | Replaced view shape. V3 reports configured tiers, aggregate transferable active value, and transferable-value-weighted Q4W instead of one LP's underlying reserves and spot price. A deauthorized plain-USDC tier retains accounting but reports zero value. |
+| `BackstopAsset` | Not present | One of `"BlntXlm"`, `"BlntUsdc"`, `"Usdc"`, or `"Xlm"` | The only canonical assets assignable to a v3 tier. |
+| `PoolTierData` | Not present | <code>{"asset":"BlntXlm", "blnt_emission_eligible":true, "take_rate_weight":4, "token":"C_BLNT_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}</code> | New nested summary; `value` is the tier's transferable, verified seven-decimal USDC-equivalent value. A deauthorized plain-USDC tier reports zero. |
+| `PoolBackstopData` | <code>{"tokens":1000000000, "shares":1000000000, "q4w_pct":1000000, "blnd":8000000000, "usdc":200000000, "token_spot_price":10000000}</code> | <code>{"active_value":900000000, "q4w_pct":1000000, "tiers":[{"asset":"BlntXlm", "blnt_emission_eligible":true, "take_rate_weight":4, "token":"C_BLNT_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}, {"asset":"Xlm", "blnt_emission_eligible":false, "take_rate_weight":2, "token":"C_XLM", "tokens":400000000, "shares":400000000, "value":400000000}]}</code> | Replaced view shape. V3 reports configured tiers, aggregate transferable active value, and transferable-value-weighted Q4W instead of one LP's underlying reserves and spot price. A deauthorized plain-USDC tier retains accounting but reports zero value. |
 
 ## Pool
 
@@ -73,7 +96,7 @@ signature change.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd, access_controller)` | Extended | Optionally binds one immutable external access controller; `None` preserves permissionless behavior. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
+| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnt, access_controller)` | Extended | Uses BLNT for v3 emissions and optionally binds one immutable external access controller; `None` preserves permissionless behavior. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `propose_admin(new_admin)` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
 | `accept_admin()` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
 | `update_pool(backstop_take_rate, max_positions, min_collateral)` | Same | Unchanged | Retains the v2 mutable pool parameters. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
@@ -123,7 +146,7 @@ appear in these values.
 | `ReserveEmissionMetadata` | <code>{"res_index":0, "res_type":1, "share":70}</code> | Same | Example assigns relative weight 70 to reserve 0's bToken stream. |
 | `ReserveEmissionData` | <code>{"expiration":1800604800, "eps":1000000, "index":25000000000000, "last_time":1800000000}</code> | Same | V3 carry is deliberately omitted from the public view. |
 | `UserEmissionData` | <code>{"index":25000000000000, "accrued":120000000}</code> | Same | V3 user carry is deliberately omitted from the public view. |
-| `AuctionData` | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLND_USDC_LP":1000000000}, "block":1234567}</code> | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLND_XLM_LP":1000000000}, "block":1234567}</code> | Shape is unchanged. These bad-debt examples show that v3 may expose the privately selected tier token in `lot`. |
+| `AuctionData` | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLND_USDC_LP":1000000000}, "block":1234567}</code> | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLNT_XLM_LP":1000000000}, "block":1234567}</code> | Shape is unchanged. These bad-debt examples show that v3 may expose the privately selected tier token in `lot`. |
 
 ## Pool factory
 
@@ -134,7 +157,7 @@ configuration and exposes that configuration to the backstop and clients.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(pool_init_meta)` | Same | Unchanged | Binds the immutable pool WASM hash, backstop, and BLND token through `PoolInitMeta`. |
+| `__constructor(pool_init_meta)` | Same shape | Extended | V3 binds the immutable pool WASM hash, backstop, and BLNT token through `PoolInitMeta`. |
 | `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral) -> Address` | `deploy(admin, name, salt, oracle, backstop_take_rate, max_positions, min_collateral, backstop_config, access_controller) -> Address` | Extended | Deploys a pool and records its immutable tier configuration and optional controller binding. |
 | `is_pool(pool_address) -> bool` | Same | Unchanged | Preserves the factory-registration boundary used by the backstop. |
 | — | `backstop_config(pool_address) -> PoolBackstopConfig` | Added | Returns the registered pool's immutable ordered tiers and optional controller binding in one response. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
@@ -143,10 +166,10 @@ configuration and exposes that configuration to the backstop and clients.
 
 | Type | V2 example | V3 example | Comparison |
 | --- | --- | --- | --- |
-| `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | Same | Pool-factory constructor ABI is unchanged. |
-| `BackstopAsset` | Not present | One of `"BlndXlm"`, `"BlndUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
-| `BackstopTierConfig` | Not present | <code>{"asset":"BlndXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |
-| `PoolBackstopConfig` | Not present | <code>{"access_controller":null, "tiers":[{"asset":"BlndXlm", "take_rate_weight":4}]}</code> | Factory-attested configuration consumed by the shared backstop. |
+| `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnt_id":"C_BLNT"}</code> | V3 changes the field name and emission token binding to BLNT. |
+| `BackstopAsset` | Not present | One of `"BlntXlm"`, `"BlntUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
+| `BackstopTierConfig` | Not present | <code>{"asset":"BlntXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |
+| `PoolBackstopConfig` | Not present | <code>{"access_controller":null, "tiers":[{"asset":"BlntXlm", "take_rate_weight":4}]}</code> | Factory-attested configuration consumed by the shared backstop. |
 
 ## Access controller
 

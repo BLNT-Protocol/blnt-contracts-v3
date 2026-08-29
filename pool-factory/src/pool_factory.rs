@@ -116,7 +116,7 @@ impl PoolFactory for PoolFactoryContract {
                 max_positions,
                 min_collateral,
                 pool_init_meta.backstop,
-                pool_init_meta.blnd_id,
+                pool_init_meta.blnt_id,
                 access_controller.clone(),
             ),
         );

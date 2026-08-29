@@ -23,7 +23,7 @@ const MIN_DISTRIBUTION_INTERVAL_SECONDS: u64 = 5;
 const POOL_EMISSION_GULP_INTERVAL_SECONDS: u64 = 24 * 60 * 60;
 pub(super) const CHECKPOINT_MAX_AGE_SECONDS: u64 = 60 * 60;
 
-/// Return the pools currently eligible for BLND emissions.
+/// Return the pools currently eligible for BLNT emissions.
 pub(crate) fn get_reward_zone(e: &Env) -> Vec<Address> {
     let reward_zone = storage::get_reward_zone(e);
     if reward_zone.len() > MAX_RZ_SIZE {
@@ -134,15 +134,15 @@ pub fn distribute(e: &Env) -> i128 {
     }
 
     let mut state = get_ongoing_emission_state(e);
-    let (weights, total_eligible_blnd) = collect_weights(e, true);
+    let (weights, total_eligible_blnt) = collect_weights(e, true);
     let last_distribution = state.last_distribution.unwrap();
-    let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
-    let binding_verified = storage::get_blnd_binding_verified(e);
+    let blnt = TokenClient::new(e, &storage::get_blnt_token(e));
+    let binding_verified = storage::get_blnt_binding_verified(e);
     let emitter_checkpoint_before = emitter.get_last_distro(&backstop);
     let balance_before = if binding_verified {
         None
     } else {
-        Some(blnd.balance(&backstop))
+        Some(blnt.balance(&backstop))
     };
     let emitted = emitter.distribute();
     if emitted < 0 {
@@ -166,7 +166,7 @@ pub fn distribute(e: &Env) -> i128 {
     }
 
     if let Some(balance_before) = balance_before {
-        let binding_delta = checked_signed_sub(e, blnd.balance(&backstop), balance_before);
+        let binding_delta = checked_signed_sub(e, blnt.balance(&backstop), balance_before);
         if emitted <= 0 || binding_delta != emitted {
             panic_with_error!(e, BackstopError::InvalidOngoingBalance);
         }
@@ -178,10 +178,10 @@ pub fn distribute(e: &Env) -> i128 {
         emissions_for_seconds(e, elapsed),
         checkpoint,
         weights,
-        total_eligible_blnd,
+        total_eligible_blnt,
     );
     if !binding_verified {
-        storage::set_blnd_binding_verified(e);
+        storage::set_blnt_binding_verified(e);
     }
     result
 }
@@ -200,7 +200,7 @@ pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     }
 
     let mut pool_state = get_pool_ongoing_emissions(e, pool);
-    let backstop_amount = checked_add(e, pool_state.pending_blnd_usdc, pool_state.pending_blnd_xlm);
+    let backstop_amount = checked_add(e, pool_state.pending_blnt_usdc, pool_state.pending_blnt_xlm);
     let pool_amount = pool_state.accrued_pool;
     if backstop_amount == 0 && pool_amount == 0 {
         return (0, 0);
@@ -208,29 +208,29 @@ pub fn gulp_emissions(e: &Env, pool: &Address) -> (i128, i128) {
     set_token_emission_eps(
         e,
         pool,
-        &storage::get_blnd_usdc_token(e),
-        pool_state.pending_blnd_usdc,
+        &storage::get_blnt_usdc_token(e),
+        pool_state.pending_blnt_usdc,
     );
     set_token_emission_eps(
         e,
         pool,
-        &storage::get_blnd_xlm_token(e),
-        pool_state.pending_blnd_xlm,
+        &storage::get_blnt_xlm_token(e),
+        pool_state.pending_blnt_xlm,
     );
-    pool_state.pending_blnd_usdc = 0;
-    pool_state.pending_blnd_xlm = 0;
+    pool_state.pending_blnt_usdc = 0;
+    pool_state.pending_blnt_xlm = 0;
     pool_state.accrued_pool = 0;
 
     if pool_amount > 0 {
         let backstop = e.current_contract_address();
-        let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
-        let allowance = checked_add(e, blnd.allowance(&backstop, pool), pool_amount);
+        let blnt = TokenClient::new(e, &storage::get_blnt_token(e));
+        let allowance = checked_add(e, blnt.allowance(&backstop, pool), pool_amount);
         let expiration_ledger = e
             .ledger()
             .sequence()
             .checked_add(storage::LEDGER_BUMP_USER)
             .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-        blnd.approve(&backstop, pool, &allowance, &expiration_ledger);
+        blnt.approve(&backstop, pool, &allowance, &expiration_ledger);
     }
 
     set_pool_ongoing_emissions(e, pool, &pool_state);
@@ -265,11 +265,11 @@ mod tests {
         backstop::{BackstopTier, PoolBalance, UserBalance},
         constants::{MAX_RZ_SIZE, SCALAR_7},
         dependencies::{BackstopTierConfig, FactoryBackstopAsset},
-        emissions::preview_user_ongoing_blnd,
+        emissions::preview_user_ongoing_blnt,
         migration,
         storage::{self, OngoingEmissionState, PoolOngoingEmissions},
         testutils::{
-            create_backstop, create_blnd_token, create_comet_lp_pool, create_emitter,
+            create_backstop, create_blnt_token, create_comet_lp_pool, create_emitter,
             create_mock_pool, create_mock_pool_factory, create_token, create_usdc_token,
             sync_mock_pool_factory_config,
         },
@@ -281,9 +281,9 @@ mod tests {
     struct Fixture {
         admin: Address,
         backstop: Address,
-        blnd: Address,
-        blnd_usdc: Address,
-        blnd_xlm: Address,
+        blnt: Address,
+        blnt_usdc: Address,
+        blnt_xlm: Address,
         config: Vec<BackstopTierConfig>,
         e: Env,
         factory: Address,
@@ -298,19 +298,19 @@ mod tests {
 
             let backstop = create_backstop(&e);
             let admin = Address::generate(&e);
-            let (blnd, blnd_client) = create_blnd_token(&e, &backstop, &admin);
+            let (blnt, blnt_client) = create_blnt_token(&e, &backstop, &admin);
             let (usdc, _) = create_usdc_token(&e, &backstop, &admin);
             let (xlm, _) = create_token(&e, &admin);
-            let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
-            let (blnd_xlm, _) = create_comet_lp_pool(&e, &admin, &blnd, &xlm);
+            let (blnt_usdc, _) = create_comet_lp_pool(&e, &admin, &blnt, &usdc);
+            let (blnt_xlm, _) = create_comet_lp_pool(&e, &admin, &blnt, &xlm);
             let (factory, _) = create_mock_pool_factory(&e, &backstop);
             e.as_contract(&backstop, || {
-                storage::set_blnd_usdc_token(&e, &blnd_usdc);
-                storage::set_blnd_xlm_token(&e, &blnd_xlm);
+                storage::set_blnt_usdc_token(&e, &blnt_usdc);
+                storage::set_blnt_xlm_token(&e, &blnt_xlm);
             });
             sync_mock_pool_factory_config(&e, &backstop);
-            let (emitter, _) = create_emitter(&e, &backstop, &blnd_usdc, &blnd, 1_000);
-            blnd_client.set_admin(&emitter);
+            let (emitter, _) = create_emitter(&e, &backstop, &blnt_usdc, &blnt, 1_000);
+            blnt_client.set_admin(&emitter);
             e.as_contract(&backstop, || {
                 migration::activate_for_test(&e, 1_000);
             });
@@ -318,11 +318,11 @@ mod tests {
                 &e,
                 [
                     BackstopTierConfig {
-                        asset: FactoryBackstopAsset::BlndXlm,
+                        asset: FactoryBackstopAsset::BlntXlm,
                         take_rate_weight: 4,
                     },
                     BackstopTierConfig {
-                        asset: FactoryBackstopAsset::BlndUsdc,
+                        asset: FactoryBackstopAsset::BlntUsdc,
                         take_rate_weight: 3,
                     },
                     BackstopTierConfig {
@@ -335,9 +335,9 @@ mod tests {
             Self {
                 admin,
                 backstop,
-                blnd,
-                blnd_usdc,
-                blnd_xlm,
+                blnt,
+                blnt_usdc,
+                blnt_xlm,
                 config,
                 e,
                 factory,
@@ -350,7 +350,7 @@ mod tests {
 
         fn claimable(&self, tier: &BackstopTier, user: &Address, pools: &Vec<Address>) -> i128 {
             self.e.as_contract(&self.backstop, || {
-                preview_user_ongoing_blnd(&self.e, *tier, user, pools)
+                preview_user_ongoing_blnt(&self.e, *tier, user, pools)
             })
         }
 
@@ -364,9 +364,9 @@ mod tests {
                 .as_contract(&self.backstop, || get_ongoing_emission_state(&self.e))
         }
 
-        fn blnd_binding_verified(&self) -> bool {
+        fn blnt_binding_verified(&self) -> bool {
             self.e.as_contract(&self.backstop, || {
-                storage::get_blnd_binding_verified(&self.e)
+                storage::get_blnt_binding_verified(&self.e)
             })
         }
 
@@ -375,7 +375,7 @@ mod tests {
                 .as_contract(&self.backstop, || super::distribute(&self.e))
         }
 
-        fn pool(&self, blnd_usdc: i128, blnd_xlm: i128) -> Address {
+        fn pool(&self, blnt_usdc: i128, blnt_xlm: i128) -> Address {
             let (pool, _) = create_mock_pool(&self.e, &self.backstop);
             MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
@@ -386,8 +386,8 @@ mod tests {
                     &pool,
                     &PoolBalance {
                         q4w: 0,
-                        shares: blnd_usdc,
-                        tokens: blnd_usdc,
+                        shares: blnt_usdc,
+                        tokens: blnt_usdc,
                     },
                 );
                 storage::set_pool_balance_for_tier(
@@ -396,8 +396,8 @@ mod tests {
                     &pool,
                     &PoolBalance {
                         q4w: 0,
-                        shares: blnd_xlm,
-                        tokens: blnd_xlm,
+                        shares: blnt_xlm,
+                        tokens: blnt_xlm,
                     },
                 );
             });
@@ -430,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_weights_use_active_blnd_usdc_lp_tokens() {
+    fn backfill_weights_use_active_blnt_usdc_lp_tokens() {
         let fixture = Fixture::create();
         let first = fixture.pool(10 * SCALAR_7, 0);
         let second = fixture.pool(20 * SCALAR_7, 20 * SCALAR_7);
@@ -449,11 +449,11 @@ mod tests {
                     first,
                     PoolOngoingEmissions {
                         accrued_pool: 0,
-                        active_blnd_usdc: 10 * SCALAR_7,
-                        active_blnd_xlm: 0,
+                        active_blnt_usdc: 10 * SCALAR_7,
+                        active_blnt_xlm: 0,
                         backstop_tier_carry: 0,
-                        pending_blnd_usdc: 0,
-                        pending_blnd_xlm: 0,
+                        pending_blnt_usdc: 0,
+                        pending_blnt_xlm: 0,
                     },
                     10 * SCALAR_7,
                     0,
@@ -462,11 +462,11 @@ mod tests {
                     second,
                     PoolOngoingEmissions {
                         accrued_pool: 0,
-                        active_blnd_usdc: 20 * SCALAR_7,
-                        active_blnd_xlm: 20 * SCALAR_7,
+                        active_blnt_usdc: 20 * SCALAR_7,
+                        active_blnt_xlm: 20 * SCALAR_7,
                         backstop_tier_carry: 0,
-                        pending_blnd_usdc: 0,
-                        pending_blnd_xlm: 0,
+                        pending_blnt_usdc: 0,
+                        pending_blnt_xlm: 0,
                     },
                     20 * SCALAR_7,
                     0,
@@ -517,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn allocates_by_emitter_checkpoint_and_ignores_unrelated_blnd() {
+    fn allocates_by_emitter_checkpoint_and_ignores_unrelated_blnt() {
         let fixture = Fixture::create();
         let first = fixture.pool(10 * SCALAR_7, 0);
         let second = fixture.pool(0, 10 * SCALAR_7);
@@ -530,17 +530,17 @@ mod tests {
                 fixture.pool_emissions(&pool),
                 PoolOngoingEmissions {
                     accrued_pool: 15_000_000,
-                    active_blnd_usdc: if pool == first { 10 * SCALAR_7 } else { 0 },
-                    active_blnd_xlm: if pool == second { 10 * SCALAR_7 } else { 0 },
+                    active_blnt_usdc: if pool == first { 10 * SCALAR_7 } else { 0 },
+                    active_blnt_xlm: if pool == second { 10 * SCALAR_7 } else { 0 },
                     backstop_tier_carry: 0,
-                    pending_blnd_usdc: if pool == first { 35_000_000 } else { 0 },
-                    pending_blnd_xlm: if pool == second { 35_000_000 } else { 0 },
+                    pending_blnt_usdc: if pool == first { 35_000_000 } else { 0 },
+                    pending_blnt_xlm: if pool == second { 35_000_000 } else { 0 },
                 }
             );
         }
-        assert!(fixture.blnd_binding_verified());
+        assert!(fixture.blnt_binding_verified());
 
-        MockTokenClient::new(&fixture.e, &fixture.blnd).mint(&fixture.backstop, &1);
+        MockTokenClient::new(&fixture.e, &fixture.blnt).mint(&fixture.backstop, &1);
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.distribution(), 5 * SCALAR_7);
         assert_eq!(
@@ -559,17 +559,17 @@ mod tests {
     }
 
     #[test]
-    fn first_positive_distribution_binds_the_configured_blnd_token() {
+    fn first_positive_distribution_binds_the_configured_blnt_token() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 0);
         fixture.set_reward_zone(&vec![&fixture.e, pool]);
         fixture.e.ledger().set_timestamp(1_005);
 
-        assert!(!fixture.blnd_binding_verified());
+        assert!(!fixture.blnt_binding_verified());
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
-        assert!(fixture.blnd_binding_verified());
+        assert!(fixture.blnt_binding_verified());
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop),
             5 * SCALAR_7
         );
     }
@@ -588,7 +588,7 @@ mod tests {
         assert_eq!(emitter.distribute(), 5 * SCALAR_7);
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(fixture.client().distribute(), 10 * SCALAR_7);
-        assert!(fixture.blnd_binding_verified());
+        assert!(fixture.blnt_binding_verified());
 
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
@@ -637,20 +637,20 @@ mod tests {
     }
 
     #[test]
-    fn users_claim_only_the_two_blnd_tier_allocations() {
+    fn users_claim_only_the_two_blnt_tier_allocations() {
         let fixture = Fixture::create();
         let pool = fixture.pool(10 * SCALAR_7, 10 * SCALAR_7);
-        let blnd_usdc_user = Address::generate(&fixture.e);
-        let blnd_xlm_user = Address::generate(&fixture.e);
+        let blnt_usdc_user = Address::generate(&fixture.e);
+        let blnt_xlm_user = Address::generate(&fixture.e);
         fixture.user_position(
             BackstopTier::SecondLoss,
-            &blnd_usdc_user,
+            &blnt_usdc_user,
             &pool,
             10 * SCALAR_7,
         );
         fixture.user_position(
             BackstopTier::FirstLoss,
-            &blnd_xlm_user,
+            &blnt_xlm_user,
             &pool,
             10 * SCALAR_7,
         );
@@ -666,7 +666,7 @@ mod tests {
         assert_eq!(
             fixture.claimable(
                 &BackstopTier::SecondLoss,
-                &blnd_usdc_user,
+                &blnt_usdc_user,
                 &vec![&fixture.e, pool.clone()],
             ),
             35_000_000
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(
             fixture.claimable(
                 &BackstopTier::FirstLoss,
-                &blnd_xlm_user,
+                &blnt_xlm_user,
                 &vec![&fixture.e, pool.clone()],
             ),
             35_000_000
@@ -684,21 +684,21 @@ mod tests {
         // two tier positions.
         fixture.client().distribute();
 
-        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
-        let blnd_usdc_before =
-            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
-        let blnd_xlm_before =
-            TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop);
-        let blnd_usdc_out = fixture.client().claim(
+        let blnt_before = TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop);
+        let blnt_usdc_before =
+            TokenClient::new(&fixture.e, &fixture.blnt_usdc).balance(&fixture.backstop);
+        let blnt_xlm_before =
+            TokenClient::new(&fixture.e, &fixture.blnt_xlm).balance(&fixture.backstop);
+        let blnt_usdc_out = fixture.client().claim(
             &BackstopTier::SecondLoss,
-            &blnd_usdc_user,
+            &blnt_usdc_user,
             &vec![&fixture.e, pool.clone()],
             &0,
         );
         assert_eq!(
             fixture.claimable(
                 &BackstopTier::SecondLoss,
-                &blnd_usdc_user,
+                &blnt_usdc_user,
                 &vec![&fixture.e, pool.clone()],
             ),
             0
@@ -706,30 +706,30 @@ mod tests {
         assert_eq!(
             fixture.claimable(
                 &BackstopTier::FirstLoss,
-                &blnd_xlm_user,
+                &blnt_xlm_user,
                 &vec![&fixture.e, pool.clone()],
             ),
             35_000_000
         );
-        let blnd_xlm_out = fixture.client().claim(
+        let blnt_xlm_out = fixture.client().claim(
             &BackstopTier::FirstLoss,
-            &blnd_xlm_user,
+            &blnt_xlm_user,
             &vec![&fixture.e, pool.clone()],
             &0,
         );
-        assert!(blnd_usdc_out > 0);
-        assert!(blnd_xlm_out > 0);
+        assert!(blnt_usdc_out > 0);
+        assert!(blnt_xlm_out > 0);
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
-            blnd_before - 70_000_000
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop),
+            blnt_before - 70_000_000
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
-            blnd_usdc_before + blnd_usdc_out
+            TokenClient::new(&fixture.e, &fixture.blnt_usdc).balance(&fixture.backstop),
+            blnt_usdc_before + blnt_usdc_out
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd_xlm).balance(&fixture.backstop),
-            blnd_xlm_before + blnd_xlm_out
+            TokenClient::new(&fixture.e, &fixture.blnt_xlm).balance(&fixture.backstop),
+            blnt_xlm_before + blnt_xlm_out
         );
         assert_eq!(fixture.ongoing_state().backstop_claimed, 7 * SCALAR_7);
         assert!(fixture.pool_emissions(&pool).accrued_pool > 3 * SCALAR_7);
@@ -766,8 +766,8 @@ mod tests {
             .client()
             .user_balance(&BackstopTier::SecondLoss, &second, &user)
             .shares;
-        let blnd_before = TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop);
-        let lp_before = TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop);
+        let blnt_before = TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop);
+        let lp_before = TokenClient::new(&fixture.e, &fixture.blnt_usdc).balance(&fixture.backstop);
 
         let lp_out = fixture
             .client()
@@ -775,11 +775,11 @@ mod tests {
 
         assert!(lp_out > 0);
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
-            blnd_before - aggregate_claim
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop),
+            blnt_before - aggregate_claim
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop),
+            TokenClient::new(&fixture.e, &fixture.blnt_usdc).balance(&fixture.backstop),
             lp_before + lp_out
         );
         assert_eq!(
@@ -830,8 +830,8 @@ mod tests {
         fixture.e.ledger().set_timestamp(1_010);
         fixture.client().distribute();
         assert_eq!(fixture.client().gulp_emissions(&pool), 3 * SCALAR_7);
-        let blnd = TokenClient::new(&fixture.e, &fixture.blnd);
-        assert_eq!(blnd.allowance(&fixture.backstop, &pool), 3 * SCALAR_7);
+        let blnt = TokenClient::new(&fixture.e, &fixture.blnt);
+        assert_eq!(blnt.allowance(&fixture.backstop, &pool), 3 * SCALAR_7);
         assert_eq!(
             fixture.e.as_contract(&fixture.backstop, || {
                 storage::get_pool_emission_gulp(&fixture.e, &pool)
@@ -841,10 +841,10 @@ mod tests {
         assert!(fixture.client().try_gulp_emissions(&pool).is_err());
 
         fixture.e.as_contract(&pool, || {
-            blnd.transfer_from(&pool, &fixture.backstop, &recipient, &SCALAR_7);
+            blnt.transfer_from(&pool, &fixture.backstop, &recipient, &SCALAR_7);
         });
-        assert_eq!(blnd.allowance(&fixture.backstop, &pool), 2 * SCALAR_7);
-        assert_eq!(blnd.balance(&recipient), SCALAR_7);
+        assert_eq!(blnt.allowance(&fixture.backstop, &pool), 2 * SCALAR_7);
+        assert_eq!(blnt.balance(&recipient), SCALAR_7);
 
         fixture.e.ledger().set_timestamp(1_015);
         assert_eq!(fixture.client().distribute(), 5 * SCALAR_7);
@@ -853,22 +853,22 @@ mod tests {
     #[test]
     fn rejects_emitter_output_in_a_different_token() {
         let fixture = Fixture::create();
-        let (other_blnd, other_blnd_client) =
+        let (other_blnt, other_blnt_client) =
             create_token(&fixture.e, &Address::generate(&fixture.e));
         let (emitter, _) = create_emitter(
             &fixture.e,
             &fixture.backstop,
-            &fixture.blnd_usdc,
-            &other_blnd,
+            &fixture.blnt_usdc,
+            &other_blnt,
             1_000,
         );
-        other_blnd_client.set_admin(&emitter);
+        other_blnt_client.set_admin(&emitter);
         let pool = fixture.pool(10 * SCALAR_7, 0);
         fixture.set_reward_zone(&vec![&fixture.e, pool]);
         fixture.e.ledger().set_timestamp(1_005);
 
         assert!(fixture.client().try_distribute().is_err());
-        assert!(!fixture.blnd_binding_verified());
+        assert!(!fixture.blnt_binding_verified());
         assert_eq!(
             fixture.ongoing_state(),
             OngoingEmissionState {
@@ -883,7 +883,7 @@ mod tests {
             }
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &other_blnd).balance(&fixture.backstop),
+            TokenClient::new(&fixture.e, &other_blnt).balance(&fixture.backstop),
             0
         );
     }
@@ -901,13 +901,13 @@ mod tests {
         assert_eq!(fixture.distribution(), 5 * SCALAR_7);
         for pool in pools.iter() {
             let emissions = fixture.pool_emissions(&pool);
-            assert!(emissions.pending_blnd_usdc > 0 || emissions.pending_blnd_xlm > 0);
+            assert!(emissions.pending_blnt_usdc > 0 || emissions.pending_blnt_xlm > 0);
             assert!(emissions.accrued_pool > 0);
         }
     }
 
     #[test]
-    fn zero_eligible_blnd_is_carried_until_a_blnd_tier_is_deposited() {
+    fn zero_eligible_blnt_is_carried_until_a_blnt_tier_is_deposited() {
         let fixture = Fixture::create();
         let pool = fixture.pool(0, 0);
         fixture.set_reward_zone(&vec![&fixture.e, pool.clone()]);
@@ -934,7 +934,7 @@ mod tests {
             &pool,
             &SCALAR_7,
         );
-        assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, SCALAR_7);
+        assert_eq!(fixture.pool_emissions(&pool).active_blnt_usdc, SCALAR_7);
 
         fixture.e.ledger().set_timestamp(1_010);
         assert_eq!(fixture.distribution(), 5 * SCALAR_7);
@@ -968,7 +968,7 @@ mod tests {
             &pool,
             &SCALAR_7,
         );
-        assert_eq!(fixture.pool_emissions(&pool).active_blnd_usdc, 9 * SCALAR_7);
+        assert_eq!(fixture.pool_emissions(&pool).active_blnt_usdc, 9 * SCALAR_7);
     }
 }
 
@@ -986,7 +986,7 @@ mod reward_zone_tests {
         dependencies::{BackstopTierConfig, FactoryBackstopAsset},
         storage,
         testutils::{
-            create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
+            create_backstop, create_blnt_token, create_comet_lp_pool, create_mock_pool_factory,
             create_token, create_usdc_token, sync_mock_pool_factory_config,
         },
         BackstopClient,
@@ -1008,26 +1008,26 @@ mod reward_zone_tests {
             e.ledger().set_timestamp(10_000);
             let admin = Address::generate(&e);
             let backstop = create_backstop(&e);
-            let (blnd, _) = create_blnd_token(&e, &backstop, &admin);
+            let (blnt, _) = create_blnt_token(&e, &backstop, &admin);
             let (usdc, _) = create_usdc_token(&e, &backstop, &admin);
             let (xlm, _) = create_token(&e, &admin);
-            let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
-            let (blnd_xlm, _) = create_comet_lp_pool(&e, &admin, &blnd, &xlm);
+            let (blnt_usdc, _) = create_comet_lp_pool(&e, &admin, &blnt, &usdc);
+            let (blnt_xlm, _) = create_comet_lp_pool(&e, &admin, &blnt, &xlm);
             let (factory, _) = create_mock_pool_factory(&e, &backstop);
             e.as_contract(&backstop, || {
-                storage::set_blnd_usdc_token(&e, &blnd_usdc);
-                storage::set_blnd_xlm_token(&e, &blnd_xlm);
+                storage::set_blnt_usdc_token(&e, &blnt_usdc);
+                storage::set_blnt_xlm_token(&e, &blnt_xlm);
             });
             sync_mock_pool_factory_config(&e, &backstop);
             let config = Vec::from_array(
                 &e,
                 [
                     BackstopTierConfig {
-                        asset: FactoryBackstopAsset::BlndXlm,
+                        asset: FactoryBackstopAsset::BlntXlm,
                         take_rate_weight: 4,
                     },
                     BackstopTierConfig {
-                        asset: FactoryBackstopAsset::BlndUsdc,
+                        asset: FactoryBackstopAsset::BlntUsdc,
                         take_rate_weight: 3,
                     },
                     BackstopTierConfig {
@@ -1048,7 +1048,7 @@ mod reward_zone_tests {
             BackstopClient::new(&self.e, &self.backstop)
         }
 
-        fn pool(&self, blnd_usdc: i128, queued_blnd_usdc: i128, usdc: i128) -> Address {
+        fn pool(&self, blnt_usdc: i128, queued_blnt_usdc: i128, usdc: i128) -> Address {
             let pool = Address::generate(&self.e);
             MockPoolFactoryClient::new(&self.e, &self.factory).set_pool(&pool);
             self.e.as_contract(&self.backstop, || {
@@ -1058,9 +1058,9 @@ mod reward_zone_tests {
                     BackstopTier::SecondLoss,
                     &pool,
                     &PoolBalance {
-                        q4w: queued_blnd_usdc,
-                        shares: blnd_usdc,
-                        tokens: blnd_usdc,
+                        q4w: queued_blnt_usdc,
+                        shares: blnt_usdc,
+                        tokens: blnt_usdc,
                     },
                 );
                 storage::set_pool_balance_for_tier(
@@ -1119,7 +1119,7 @@ mod reward_zone_tests {
     }
 
     #[test]
-    fn membership_is_bounded_checkpoint_gated_after_distribution_and_blnd_weighted() {
+    fn membership_is_bounded_checkpoint_gated_after_distribution_and_blnt_weighted() {
         let fixture = Fixture::create();
         let client = fixture.client();
         let first = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC - SCALAR_7);
@@ -1229,7 +1229,7 @@ mod reward_zone_tests {
     }
 
     #[test]
-    fn zero_blnd_member_requires_threshold_failure_and_a_fresh_checkpoint() {
+    fn zero_blnt_member_requires_threshold_failure_and_a_fresh_checkpoint() {
         let fixture = Fixture::create();
         let client = fixture.client();
         let pool = fixture.pool(SCALAR_7, 0, ACTIVATION_THRESHOLD_USDC);

@@ -16,12 +16,12 @@ use test_suites::{
 
 fn create_backstop_assets(e: &Env) -> (Address, Address, Address, Address, Address) {
     let admin = Address::generate(e);
-    let (blnd, _) = create_stellar_token(e, &admin);
+    let (blnt, _) = create_stellar_token(e, &admin);
     let (usdc, _) = create_stellar_token(e, &admin);
     let (xlm, _) = create_stellar_token(e, &admin);
-    let (blnd_usdc, _) = create_lp_pool(e, &admin, &blnd, &usdc);
-    let (blnd_xlm, _) = create_lp_pool(e, &admin, &blnd, &xlm);
-    (blnd, usdc, xlm, blnd_usdc, blnd_xlm)
+    let (blnt_usdc, _) = create_lp_pool(e, &admin, &blnt, &usdc);
+    let (blnt_xlm, _) = create_lp_pool(e, &admin, &blnt, &xlm);
+    (blnt, usdc, xlm, blnt_usdc, blnt_xlm)
 }
 
 /// Test user exposed functions on the backstop for basic functionality, auth, and events.
@@ -35,7 +35,7 @@ fn test_backstop() {
     let bstop_token = &fixture.lp;
     let sam = Address::generate(&fixture.env);
 
-    // Verify constructor bound the BLND:USDC tier token.
+    // Verify constructor bound the BLNT:USDC tier token.
     assert_eq!(
         fixture
             .backstop
@@ -46,8 +46,8 @@ fn test_backstop() {
     // Mint some backstop tokens
     // assumes Sam makes up 20% of the backstop after depositing (50k / 0.8 * 0.2 = 12.5k)
     //  -> mint 12.5k LP tokens to sam
-    fixture.tokens[TokenIndex::BLND].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLND per LP token
-    fixture.tokens[TokenIndex::BLND].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
+    fixture.tokens[TokenIndex::BLNT].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLNT per LP token
+    fixture.tokens[TokenIndex::BLNT].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     fixture.tokens[TokenIndex::USDC].mint(&sam, &(3_126_000_0000_0000_000_000 * SCALAR_7)); // 0.25 USDC per LP token
     fixture.tokens[TokenIndex::USDC].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     bstop_token.join_pool(
@@ -61,8 +61,8 @@ fn test_backstop() {
     );
 
     //  -> mint Frodo additional backstop tokens (5k) for donation later
-    fixture.tokens[TokenIndex::BLND].mint(&frodo, &(50_001 * SCALAR_7)); // 10 BLND per LP token
-    fixture.tokens[TokenIndex::BLND].approve(&frodo, &bstop_token.address, &i128::MAX, &99999);
+    fixture.tokens[TokenIndex::BLNT].mint(&frodo, &(50_001 * SCALAR_7)); // 10 BLNT per LP token
+    fixture.tokens[TokenIndex::BLNT].approve(&frodo, &bstop_token.address, &i128::MAX, &99999);
     fixture.tokens[TokenIndex::USDC].mint(&frodo, &(1_251 * SCALAR_7)); // 0.25 USDC per LP token
     fixture.tokens[TokenIndex::USDC].approve(&frodo, &bstop_token.address, &i128::MAX, &99999);
     bstop_token.join_pool(
@@ -487,10 +487,10 @@ fn test_backstop() {
         bstop_bstop_token_balance
     );
 
-    // Sam compounds BLND emissions into the originating BLND:USDC tier.
-    let bstop_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    // Sam compounds BLNT emissions into the originating BLNT:USDC tier.
+    let bstop_blend_balance = fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
     let bstop_lp_balance = bstop_token.balance(&fixture.backstop.address);
-    let sam_blend_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
+    let sam_blend_balance = fixture.tokens[TokenIndex::BLNT].balance(&sam);
     let sam_shares = fixture
         .backstop
         .user_balance(&BackstopTier::SecondLoss, &pool.address, &sam)
@@ -523,8 +523,8 @@ fn test_backstop() {
     );
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
 
-    let blnd_compounded =
-        bstop_blend_balance - fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    let blnt_compounded =
+        bstop_blend_balance - fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
     let shares_minted = fixture
         .backstop
         .user_balance(&BackstopTier::SecondLoss, &pool.address, &sam)
@@ -543,12 +543,12 @@ fn test_backstop() {
                     pool.address.clone()
                 )
                     .into_val(&fixture.env),
-                (blnd_compounded, lp_compounded, shares_minted).into_val(&fixture.env),
+                (blnt_compounded, lp_compounded, shares_minted).into_val(&fixture.env),
             )
         ]
     );
 
-    assert!(blnd_compounded > 0);
+    assert!(blnt_compounded > 0);
     assert_eq!(
         bstop_token.balance(&fixture.backstop.address),
         bstop_lp_balance + lp_compounded
@@ -556,7 +556,7 @@ fn test_backstop() {
     assert!(lp_compounded > 0);
     assert!(shares_minted > 0);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&sam),
+        fixture.tokens[TokenIndex::BLNT].balance(&sam),
         sam_blend_balance
     );
 }
@@ -566,7 +566,7 @@ fn test_backstop_constructor() {
     let e = Env::default();
     e.mock_all_auths();
 
-    let (blnd_token, usdc_token, xlm_token, backstop_token, blnd_xlm_token) =
+    let (blnt_token, usdc_token, xlm_token, backstop_token, blnt_xlm_token) =
         create_backstop_assets(&e);
     let emitter = Address::generate(&e);
     let contract_id = Address::generate(&e);
@@ -577,7 +577,7 @@ fn test_backstop_constructor() {
         (PoolInitMeta {
             backstop: contract_id.clone(),
             pool_hash: BytesN::from_array(&e, &[0; 32]),
-            blnd_id: blnd_token.clone(),
+            blnt_id: blnt_token.clone(),
         },),
     );
     e.register_at(
@@ -585,9 +585,9 @@ fn test_backstop_constructor() {
         BackstopContract {},
         (
             backstop_token.clone(),
-            blnd_xlm_token.clone(),
+            blnt_xlm_token.clone(),
             emitter.clone(),
-            blnd_token.clone(),
+            blnt_token.clone(),
             usdc_token.clone(),
             xlm_token.clone(),
             pool_factory.clone(),
@@ -603,12 +603,12 @@ fn test_backstop_constructor() {
             .unwrap();
         assert_eq!(contract_emitter, emitter);
 
-        let contract_blnd_token = e
+        let contract_blnt_token = e
             .storage()
             .instance()
-            .get::<Symbol, Address>(&Symbol::new(&e, "BLNDTkn"))
+            .get::<Symbol, Address>(&Symbol::new(&e, "BLNTTkn"))
             .unwrap();
-        assert_eq!(contract_blnd_token, blnd_token);
+        assert_eq!(contract_blnt_token, blnt_token);
 
         let contract_usdc_token = e
             .storage()
@@ -624,12 +624,12 @@ fn test_backstop_constructor() {
             .unwrap();
         assert_eq!(contract_xlm_token, xlm_token);
 
-        let contract_blnd_xlm_token = e
+        let contract_blnt_xlm_token = e
             .storage()
             .instance()
             .get::<Symbol, Address>(&Symbol::new(&e, "BXLMTkn"))
             .unwrap();
-        assert_eq!(contract_blnd_xlm_token, blnd_xlm_token);
+        assert_eq!(contract_blnt_xlm_token, blnt_xlm_token);
 
         let contract_pool_factory = e
             .storage()
@@ -653,25 +653,25 @@ fn test_backstop_constructor_rejects_wrong_comet_pair() {
     let e = Env::default();
     e.mock_all_auths();
     let contract_id = Address::generate(&e);
-    let (blnd_token, usdc_token, xlm_token, blnd_usdc_token, _) = create_backstop_assets(&e);
+    let (blnt_token, usdc_token, xlm_token, blnt_usdc_token, _) = create_backstop_assets(&e);
     let admin = Address::generate(&e);
-    let (wrong_blnd_xlm, _) = create_lp_pool(&e, &admin, &blnd_token, &usdc_token);
+    let (wrong_blnt_xlm, _) = create_lp_pool(&e, &admin, &blnt_token, &usdc_token);
     let pool_factory = e.register(
         MockPoolFactory {},
         (PoolInitMeta {
             backstop: contract_id.clone(),
             pool_hash: BytesN::from_array(&e, &[0; 32]),
-            blnd_id: blnd_token.clone(),
+            blnt_id: blnt_token.clone(),
         },),
     );
     e.register_at(
         &contract_id,
         BackstopContract {},
         (
-            blnd_usdc_token,
-            wrong_blnd_xlm,
+            blnt_usdc_token,
+            wrong_blnt_xlm,
             Address::generate(&e),
-            blnd_token,
+            blnt_token,
             usdc_token,
             xlm_token,
             pool_factory,
@@ -686,24 +686,24 @@ fn test_backstop_constructor_rejects_drop_list_over_cap() {
     let e = Env::default();
     e.mock_all_auths();
     let contract_id = Address::generate(&e);
-    let (blnd, usdc, xlm, blnd_usdc, blnd_xlm) = create_backstop_assets(&e);
+    let (blnt, usdc, xlm, blnt_usdc, blnt_xlm) = create_backstop_assets(&e);
     let pool_factory = e.register(
         MockPoolFactory {},
         (PoolInitMeta {
             backstop: contract_id.clone(),
             pool_hash: BytesN::from_array(&e, &[0; 32]),
-            blnd_id: blnd.clone(),
+            blnt_id: blnt.clone(),
         },),
     );
-    let drop_list = vec![&e, (Address::generate(&e), 40_000_000 * SCALAR_7 + 1)];
+    let drop_list = vec![&e, (Address::generate(&e), 50_000_000 * SCALAR_7 + 1)];
     e.register_at(
         &contract_id,
         BackstopContract {},
         (
-            blnd_usdc,
-            blnd_xlm,
+            blnt_usdc,
+            blnt_xlm,
             Address::generate(&e),
-            blnd,
+            blnt,
             usdc,
             xlm,
             pool_factory,

@@ -1,5 +1,5 @@
 override MAX_WASM_BYTES := 120000
-PRODUCTION_WASMS := backstop.wasm pool.wasm pool_factory.wasm
+PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 
 .PHONY: default test build wasm-sizes wasm-size-report fmt clean generate-js
 
@@ -14,6 +14,8 @@ build:
 	stellar contract build --package pool-factory --locked \
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package backstop --locked \
+		--out-dir target/wasm32v1-none/optimized
+	stellar contract build --package emitter --locked \
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package pool --locked \
 		--out-dir target/wasm32v1-none/optimized
@@ -45,6 +47,10 @@ generate-js:
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
 		--wasm ./target/wasm32v1-none/optimized/backstop.wasm --output-dir ./js/js-backstop/ \
+		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
+	stellar contract bindings typescript --overwrite \
+		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \
+		--wasm ./target/wasm32v1-none/optimized/emitter.wasm --output-dir ./js/js-emitter/ \
 		--rpc-url http://localhost:8000 --network-passphrase "Standalone Network ; February 2017" --network Standalone
 	stellar contract bindings typescript --overwrite \
 		--contract-id CBWH54OKUK6U2J2A4J2REJEYB625NEFCHISWXLOPR2D2D6FTN63TJTWN \

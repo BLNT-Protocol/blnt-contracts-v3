@@ -65,7 +65,7 @@ pub fn execute_claim(e: &Env, from: &Address, reserve_token_ids: &Vec<u32>, to: 
 
     if to_claim > 0 {
         let backstop = storage::get_backstop(e);
-        TokenClient::new(e, &storage::get_blnd_token(e)).transfer_from(
+        TokenClient::new(e, &storage::get_blnt_token(e)).transfer_from(
             &e.current_contract_address(),
             &backstop,
             to,
@@ -1565,10 +1565,10 @@ mod tests {
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
 
-        let (_blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let (_blnt, blnt_token_client) = testutils::create_blnt_token(&e, &pool, &bombadil);
         let backstop = Address::generate(&e);
-        blnd_token_client.mint(&backstop, &100_000_0000000);
-        blnd_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
+        blnt_token_client.mint(&backstop, &100_000_0000000);
+        blnt_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
@@ -1662,9 +1662,9 @@ mod tests {
             assert_eq!(result, 400_3222222 + 301_0222222);
 
             // verify tokens are sent
-            assert_eq!(blnd_token_client.balance(&merry), 400_3222222 + 301_0222222);
+            assert_eq!(blnt_token_client.balance(&merry), 400_3222222 + 301_0222222);
             assert_eq!(
-                blnd_token_client.balance(&backstop),
+                blnt_token_client.balance(&backstop),
                 100_000_0000000 - (400_3222222 + 301_0222222)
             )
         });
@@ -1681,10 +1681,10 @@ mod tests {
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
 
-        let (_blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let (_blnt, blnt_token_client) = testutils::create_blnt_token(&e, &pool, &bombadil);
         let backstop = Address::generate(&e);
-        blnd_token_client.mint(&backstop, &100_000_0000000);
-        blnd_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
+        blnt_token_client.mint(&backstop, &100_000_0000000);
+        blnt_token_client.approve(&backstop, &pool, &100_000_0000000, &1_000_000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
@@ -1778,9 +1778,9 @@ mod tests {
             assert_eq!(result, 400_3222222);
 
             // verify tokens are sent
-            assert_eq!(blnd_token_client.balance(&merry), 400_3222222);
+            assert_eq!(blnt_token_client.balance(&merry), 400_3222222);
             assert_eq!(
-                blnd_token_client.balance(&backstop),
+                blnt_token_client.balance(&backstop),
                 100_000_0000000 - 400_3222222
             )
         });
@@ -1797,16 +1797,16 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
         let merry = Address::generate(&e);
-        let (blnd, blnd_token_client) = testutils::create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_token_client) = testutils::create_blnt_token(&e, &pool, &bombadil);
         let (usdc, _) = testutils::create_token_contract(&e, &bombadil);
-        let (backstop_token, _) = testutils::create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (backstop_token, _) = testutils::create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
 
-        let (backstop, _) = testutils::create_backstop(&e, &pool, &backstop_token, &usdc, &blnd);
+        let (backstop, _) = testutils::create_backstop(&e, &pool, &backstop_token, &usdc, &blnt);
         // mock backstop having emissions for pool
         e.as_contract(&backstop, || {
-            blnd_token_client.approve(&backstop, &pool, &100_000_0000000_i128, &1000000);
+            blnt_token_client.approve(&backstop, &pool, &100_000_0000000_i128, &1000000);
         });
-        blnd_token_client.mint(&backstop, &100_000_0000000);
+        blnt_token_client.mint(&backstop, &100_000_0000000);
 
         e.ledger().set(LedgerInfo {
             timestamp: 1501000000, // 10^6 seconds have passed
@@ -1876,7 +1876,7 @@ mod tests {
             let reserve_token_ids: Vec<u32> = vec![&e, res_token_index_0, res_token_index_1, 6];
             execute_claim(&e, &samwise, &reserve_token_ids, &merry);
 
-            assert_eq!(blnd_token_client.balance(&backstop), 100_000_0000000)
+            assert_eq!(blnt_token_client.balance(&backstop), 100_000_0000000)
         });
     }
 }

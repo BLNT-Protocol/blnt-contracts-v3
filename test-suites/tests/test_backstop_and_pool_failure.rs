@@ -29,7 +29,7 @@ fn test_backstop_and_pool_failure() {
 
     /*
      * Backstop starts with 50,000 LP tokens, worth about
-     * 12500 USDC and 500k BLND, or about 62,500 USDC total
+     * 12500 USDC and 500k BLNT, or about 62,500 USDC total
      * at the setup LP weights.
      *
      * Frodo positions:
@@ -232,12 +232,12 @@ fn test_backstop_and_pool_failure() {
         bad_debt_auction.bid.get_unchecked(stable.address.clone()),
         bad_debt_1
     );
-    let blnd_usdc_token = fixture.backstop.backstop_token(
+    let blnt_usdc_token = fixture.backstop.backstop_token(
         &backstop::BackstopTier::SecondLoss,
         &pool_fixture.pool.address,
     );
     assert_eq!(
-        bad_debt_auction.lot.get(blnd_usdc_token).unwrap(),
+        bad_debt_auction.lot.get(blnt_usdc_token).unwrap(),
         pool_backstop_data.tiers.get(1).unwrap().tokens
     );
 

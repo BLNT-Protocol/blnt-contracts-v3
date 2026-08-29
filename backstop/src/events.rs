@@ -62,7 +62,7 @@ vec_event!(
     BuyAndBurnEvent,
     "buy_and_burn",
     [asset: BackstopAsset],
-    [amount: i128, blnd_burned: i128, pending: i128]
+    [amount: i128, blnt_burned: i128, pending: i128]
 );
 vec_event!(
     TierDepositEvent,
@@ -115,7 +115,7 @@ vec_event!(
     ClaimEvent,
     "claim",
     [tier: BackstopTier, user: Address, pool: Address],
-    [blnd_amount: i128, lp_amount: i128, shares: i128]
+    [blnt_amount: i128, lp_amount: i128, shares: i128]
 );
 vec_event!(
     DrawEvent,
@@ -275,13 +275,13 @@ impl BackstopEvents {
         RewardZoneRemoveEvent { to_remove }.publish(e);
     }
 
-    /// Emitted when a user's ongoing BLND compounds into its originating tier.
+    /// Emitted when a user's ongoing BLNT compounds into its originating tier.
     pub fn claim(
         e: &Env,
         tier: BackstopTier,
         user: Address,
         pool: Address,
-        blnd_amount: i128,
+        blnt_amount: i128,
         lp_amount: i128,
         shares: i128,
     ) {
@@ -289,7 +289,7 @@ impl BackstopEvents {
             tier,
             user,
             pool,
-            blnd_amount,
+            blnt_amount,
             lp_amount,
             shares,
         }
@@ -356,13 +356,13 @@ impl BackstopEvents {
         e: &Env,
         asset: BackstopAsset,
         amount: i128,
-        blnd_burned: i128,
+        blnt_burned: i128,
         pending: i128,
     ) {
         BuyAndBurnEvent {
             asset,
             amount,
-            blnd_burned,
+            blnt_burned,
             pending,
         }
         .publish(e);
@@ -450,7 +450,7 @@ mod tests {
             &BuyAndBurnEvent {
                 asset: BackstopAsset::Xlm,
                 amount: 20,
-                blnd_burned: 200,
+                blnt_burned: 200,
                 pending: 10,
             },
             (Symbol::new(&e, "buy_and_burn"), BackstopAsset::Xlm).into_val(&e),

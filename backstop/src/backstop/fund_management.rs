@@ -109,7 +109,7 @@ mod tests {
     use crate::{
         backstop::{execute_deposit, BackstopTier},
         testutils::{
-            create_backstop, create_backstop_token, create_blnd_xlm_token, create_mock_pool_factory,
+            create_backstop, create_backstop_token, create_blnt_xlm_token, create_mock_pool_factory,
         },
     };
 
@@ -127,7 +127,7 @@ mod tests {
         let samwise = Address::generate(&e);
         let frodo = Address::generate(&e);
 
-        let (_, backstop_token_client) = create_blnd_xlm_token(&e, &backstop_id, &bombadil);
+        let (_, backstop_token_client) = create_blnt_xlm_token(&e, &backstop_id, &bombadil);
         backstop_token_client.mint(&samwise, &100_0000000);
         backstop_token_client.mint(&frodo, &100_0000000);
 

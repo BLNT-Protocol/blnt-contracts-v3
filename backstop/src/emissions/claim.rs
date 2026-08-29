@@ -8,7 +8,7 @@ use soroban_sdk::{
 use crate::storage::UserEmissionData;
 use crate::{
     backstop::{
-        credit_tier_shares, is_blnd_emission_tier, require_registered_pool, tier_token,
+        credit_tier_shares, is_blnt_emission_tier, require_registered_pool, tier_token,
         BackstopTier,
     },
     dependencies::CometClient,
@@ -46,7 +46,7 @@ pub fn execute_claim(
         panic_with_error!(e, BackstopError::NegativeAmountError);
     }
 
-    let mut blnd_amount = 0_i128;
+    let mut blnt_amount = 0_i128;
     let mut claims = Map::<Address, i128>::new(e);
     let first_pool = pool_addresses.get(0).unwrap();
     require_emission_tier(e, tier, &first_pool);
@@ -64,10 +64,10 @@ pub fn execute_claim(
 
         let pool_claim = distributor::claim_emissions(e, tier, &pool, from);
         claims.set(pool.clone(), pool_claim);
-        blnd_amount = checked_add(e, blnd_amount, pool_claim);
+        blnt_amount = checked_add(e, blnt_amount, pool_claim);
     }
 
-    if blnd_amount == 0 {
+    if blnt_amount == 0 {
         return ClaimResult {
             lp_amount: 0,
             allocations: vec![e],
@@ -75,14 +75,14 @@ pub fn execute_claim(
     }
 
     let mut ongoing = get_ongoing_emission_state(e);
-    ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnd_amount);
+    ongoing.backstop_claimed = checked_add(e, ongoing.backstop_claimed, blnt_amount);
     set_ongoing_emission_state(e, &ongoing);
 
     let backstop = e.current_contract_address();
-    let blnd = storage::get_blnd_token(e);
-    let blnd_client = TokenClient::new(e, &blnd);
+    let blnt = storage::get_blnt_token(e);
+    let blnt_client = TokenClient::new(e, &blnt);
     let lp_client = TokenClient::new(e, &lp_token);
-    let blnd_before = blnd_client.balance(&backstop);
+    let blnt_before = blnt_client.balance(&backstop);
     let lp_before = lp_client.balance(&backstop);
     let approval_ledger = e
         .ledger()
@@ -95,14 +95,14 @@ pub fn execute_claim(
         e,
         backstop.clone().into_val(e),
         lp_token.clone().into_val(e),
-        blnd_amount.into_val(e),
+        blnt_amount.into_val(e),
         approval_ledger.into_val(e),
     ];
     e.authorize_as_current_contract(vec![
         e,
         InvokerContractAuthEntry::Contract(SubContractInvocation {
             context: ContractContext {
-                contract: blnd.clone(),
+                contract: blnt.clone(),
                 fn_name: Symbol::new(e, "approve"),
                 args: approval_args,
             },
@@ -110,14 +110,14 @@ pub fn execute_claim(
         }),
     ]);
     let lp_amount = CometClient::new(e, &lp_token).dep_tokn_amt_in_get_lp_tokns_out(
-        &blnd,
-        &blnd_amount,
+        &blnt,
+        &blnt_amount,
         &min_lp_tokens_out,
         &backstop,
     );
-    let blnd_after = blnd_client.balance(&backstop);
+    let blnt_after = blnt_client.balance(&backstop);
     let lp_after = lp_client.balance(&backstop);
-    if blnd_before.checked_sub(blnd_after) != Some(blnd_amount)
+    if blnt_before.checked_sub(blnt_after) != Some(blnt_amount)
         || lp_after.checked_sub(lp_before) != Some(lp_amount)
         || lp_amount <= 0
     {
@@ -127,7 +127,7 @@ pub fn execute_claim(
     let mut allocations = vec![e];
     for pool in pool_addresses.iter() {
         let pool_claim = claims.get(pool.clone()).unwrap_or(0);
-        let pool_lp_amount = proportional_floor(e, lp_amount, pool_claim, blnd_amount);
+        let pool_lp_amount = proportional_floor(e, lp_amount, pool_claim, blnt_amount);
         if pool_lp_amount == 0 {
             continue;
         }
@@ -142,7 +142,7 @@ pub fn execute_claim(
 }
 
 fn require_emission_tier(e: &Env, tier: BackstopTier, pool: &Address) {
-    if !is_blnd_emission_tier(e, pool, tier) {
+    if !is_blnt_emission_tier(e, pool, tier) {
         panic_with_error!(e, BackstopError::InvalidEmissionValue);
     }
 }
@@ -202,7 +202,7 @@ mod tests {
         backstop::{BackstopTier, PoolBalance, UserBalance},
         storage::{BackstopEmissionData, OngoingEmissionState, UserEmissionData},
         testutils::{
-            create_backstop_with_real_comets as create_raw_backstop, create_blnd_token,
+            create_backstop_with_real_comets as create_raw_backstop, create_blnt_token,
             create_comet_lp_pool, create_usdc_token,
         },
     };
@@ -255,11 +255,11 @@ mod tests {
                 &vec![
                     e,
                     mock_pool_factory::BackstopTierConfig {
-                        asset: mock_pool_factory::BackstopAsset::BlndXlm,
+                        asset: mock_pool_factory::BackstopAsset::BlntXlm,
                         take_rate_weight: 4,
                     },
                     mock_pool_factory::BackstopTierConfig {
-                        asset: mock_pool_factory::BackstopAsset::BlndUsdc,
+                        asset: mock_pool_factory::BackstopAsset::BlntUsdc,
                         take_rate_weight: 3,
                     },
                     mock_pool_factory::BackstopTierConfig {
@@ -319,11 +319,11 @@ mod tests {
         }
 
         pub fn set_backstop_token(e: &Env, token: &Address) {
-            crate::storage::set_blnd_usdc_token(e, token);
+            crate::storage::set_blnt_usdc_token(e, token);
         }
 
-        pub fn set_blnd_token(e: &Env, token: &Address) {
-            crate::storage::set_blnd_token(e, token);
+        pub fn set_blnt_token(e: &Env, token: &Address) {
+            crate::storage::set_blnt_token(e, token);
         }
     }
 
@@ -352,9 +352,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -384,14 +384,14 @@ mod tests {
             carry: 0,
         };
         let (lp_address, lp_client) =
-            create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+            create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,
@@ -445,7 +445,7 @@ mod tests {
                 backstop_lp_balance + 6_4729327
             );
             assert_eq!(
-                blnd_token_client.balance(&backstop_address),
+                blnt_token_client.balance(&backstop_address),
                 100_0000000 - (76_3155136 + 5_2894736)
             );
             let sam_balance_1 = storage::get_user_balance(&e, &pool_1_id, &samwise);
@@ -503,9 +503,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -535,14 +535,14 @@ mod tests {
             carry: 0,
         };
         let (lp_address, lp_client) =
-            create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+            create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,
@@ -581,9 +581,9 @@ mod tests {
             );
         });
 
-        let blnd_before = blnd_token_client.balance(&backstop_address);
+        let blnt_before = blnt_token_client.balance(&backstop_address);
         let lp_before = lp_client.balance(&backstop_address);
-        let allowance_before = blnd_token_client.allowance(&backstop_address, &lp_address);
+        let allowance_before = blnt_token_client.allowance(&backstop_address, &lp_address);
         let ongoing_before = e.as_contract(&backstop_address, || {
             crate::storage::get_ongoing_emission_state(&e)
         });
@@ -601,10 +601,10 @@ mod tests {
             Some(Ok(soroban_sdk::Error::from_contract_error(20)))
         );
 
-        assert_eq!(blnd_token_client.balance(&backstop_address), blnd_before);
+        assert_eq!(blnt_token_client.balance(&backstop_address), blnt_before);
         assert_eq!(lp_client.balance(&backstop_address), lp_before);
         assert_eq!(
-            blnd_token_client.allowance(&backstop_address, &lp_address),
+            blnt_token_client.allowance(&backstop_address, &lp_address),
             allowance_before
         );
         e.as_contract(&backstop_address, || {
@@ -670,9 +670,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &300_0000000);
+        blnt_token_client.mint(&backstop_address, &300_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -702,14 +702,14 @@ mod tests {
             carry: 0,
         };
         let (lp_address, lp_client) =
-            create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+            create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,
@@ -763,7 +763,7 @@ mod tests {
                 backstop_lp_balance + 6_4729327
             );
             assert_eq!(
-                blnd_token_client.balance(&backstop_address),
+                blnt_token_client.balance(&backstop_address),
                 300_0000000 - (76_3155136 + 5_2894736)
             );
             let sam_balance_1 = storage::get_user_balance(&e, &pool_1_id, &samwise);
@@ -824,7 +824,7 @@ mod tests {
             assert_eq!(result_1, 10_7836702);
             // V3 carries the two sub-token units that v2's floor rounding discarded.
             assert_eq!(
-                blnd_token_client.balance(&backstop_address),
+                blnt_token_client.balance(&backstop_address),
                 300_0000000 - (109_5788706 + 29_1282348) - (76_3155136 + 5_2894736) - 2
             );
             assert_eq!(
@@ -885,8 +885,8 @@ mod tests {
         let samwise = Address::generate(&e);
         let frodo = Address::generate(&e);
 
-        let (_, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        let (_, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -935,8 +935,8 @@ mod tests {
                 &0,
             );
             assert_eq!(result, 0);
-            assert_eq!(blnd_token_client.balance(&frodo), 0);
-            assert_eq!(blnd_token_client.balance(&backstop_address), 100_0000000);
+            assert_eq!(blnt_token_client.balance(&frodo), 0);
+            assert_eq!(blnt_token_client.balance(&backstop_address), 100_0000000);
 
             let new_backstop_1_data =
                 storage::get_backstop_emis_data(&e, &pool_1_id).unwrap_optimized();
@@ -982,9 +982,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -1013,14 +1013,14 @@ mod tests {
             accrued: 0,
             carry: 0,
         };
-        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,
@@ -1090,9 +1090,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -1121,14 +1121,14 @@ mod tests {
             accrued: 0,
             carry: 0,
         };
-        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,
@@ -1193,9 +1193,9 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd_address, blnd_token_client) = create_blnd_token(&e, &backstop_address, &bombadil);
+        let (blnt_address, blnt_token_client) = create_blnt_token(&e, &backstop_address, &bombadil);
         let (usdc_address, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        blnd_token_client.mint(&backstop_address, &100_0000000);
+        blnt_token_client.mint(&backstop_address, &100_0000000);
 
         let backstop_1_emissions_data = BackstopEmissionData {
             expiration: 1500000000 + 7 * 24 * 60 * 60,
@@ -1224,14 +1224,14 @@ mod tests {
             accrued: 0,
             carry: 0,
         };
-        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnd_address, &usdc_address);
+        let (lp_address, _) = create_comet_lp_pool(&e, &bombadil, &blnt_address, &usdc_address);
         e.as_contract(&backstop_address, || {
             storage::set_backstop_emis_data(&e, &pool_1_id, &backstop_1_emissions_data);
             storage::set_user_emis_data(&e, &pool_1_id, &samwise, &user_1_emissions_data);
             storage::set_backstop_emis_data(&e, &pool_2_id, &backstop_2_emissions_data);
             storage::set_user_emis_data(&e, &pool_2_id, &samwise, &user_2_emissions_data);
             storage::set_backstop_token(&e, &lp_address);
-            storage::set_blnd_token(&e, &blnd_address);
+            storage::set_blnt_token(&e, &blnt_address);
             storage::set_pool_balance(
                 &e,
                 &pool_1_id,

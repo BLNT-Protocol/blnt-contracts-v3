@@ -4,8 +4,8 @@ use soroban_sdk::{contractclient, contracttype, Address, Env, Vec};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 pub enum BackstopAsset {
-    BlndXlm,
-    BlndUsdc,
+    BlntXlm,
+    BlntUsdc,
     Usdc,
     Xlm,
 }

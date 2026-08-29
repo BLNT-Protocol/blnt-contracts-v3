@@ -35,8 +35,8 @@ fn exercise_reward_zone(wasm: bool) {
             .iter()
             .map(|tier| MockBackstopTierConfig {
                 asset: match tier.asset {
-                    pool_factory::BackstopAsset::BlndXlm => MockBackstopAsset::BlndXlm,
-                    pool_factory::BackstopAsset::BlndUsdc => MockBackstopAsset::BlndUsdc,
+                    pool_factory::BackstopAsset::BlntXlm => MockBackstopAsset::BlntXlm,
+                    pool_factory::BackstopAsset::BlntUsdc => MockBackstopAsset::BlntUsdc,
                     pool_factory::BackstopAsset::Usdc => MockBackstopAsset::Usdc,
                     pool_factory::BackstopAsset::Xlm => MockBackstopAsset::Xlm,
                 },
@@ -48,7 +48,7 @@ fn exercise_reward_zone(wasm: bool) {
         (second, third)
     };
 
-    fixture.tokens[TokenIndex::BLND].mint(&depositor, &(1_000 * SCALAR_7));
+    fixture.tokens[TokenIndex::BLNT].mint(&depositor, &(1_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&depositor, &(50_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(10 * SCALAR_7),

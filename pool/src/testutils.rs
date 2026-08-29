@@ -108,7 +108,7 @@ pub(crate) fn create_token_contract<'a>(
     (contract_address, client)
 }
 
-pub(crate) fn create_blnd_token<'a>(
+pub(crate) fn create_blnt_token<'a>(
     e: &Env,
     pool_address: &Address,
     admin: &Address,
@@ -116,7 +116,7 @@ pub(crate) fn create_blnd_token<'a>(
     let (contract_address, client) = create_token_contract(e, admin);
 
     e.as_contract(pool_address, || {
-        storage::set_blnd_token(e, &contract_address);
+        storage::set_blnt_token(e, &contract_address);
     });
     (contract_address, client)
 }
@@ -140,7 +140,7 @@ pub(crate) fn create_mock_pool_factory<'a>(
     let pool_init_meta = PoolInitMeta {
         backstop: backstop.clone(),
         pool_hash: BytesN::<32>::from_array(&e, &[0u8; 32]),
-        blnd_id: Address::generate(e),
+        blnt_id: Address::generate(e),
     };
     let contract_address = e.register(MockPoolFactory {}, (pool_init_meta,));
     (
@@ -155,11 +155,11 @@ pub(crate) fn create_emitter<'a>(
     e: &Env,
     backstop_id: &Address,
     backstop_token: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
 ) -> (Address, EmitterClient<'a>) {
     let contract_address = e.register(MockEmitter, ());
     let client = EmitterClient::new(e, &contract_address);
-    client.initialize(blnd_token, backstop_id, backstop_token);
+    client.initialize(blnt_token, backstop_id, backstop_token);
     (contract_address.clone(), client)
 }
 
@@ -174,23 +174,23 @@ pub(crate) fn create_backstop<'a>(
     pool_address: &Address,
     backstop_token: &Address,
     usdc_token: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
 ) -> (Address, BackstopClient<'a>) {
     let backstop_id = Address::generate(e);
     let comet_admin = Address::generate(e);
     let (xlm_token, _) = create_token_contract(e, &comet_admin);
-    let (blnd_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnd_token, &xlm_token);
+    let (blnt_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnt_token, &xlm_token);
     let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
     mock_pool_factory_client.set_pool_config(
         pool_address,
         &vec![
             e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
+                asset: BackstopAsset::BlntXlm,
                 take_rate_weight: 4,
             },
             BackstopTierConfig {
-                asset: BackstopAsset::BlndUsdc,
+                asset: BackstopAsset::BlntUsdc,
                 take_rate_weight: 3,
             },
             BackstopTierConfig {
@@ -199,15 +199,15 @@ pub(crate) fn create_backstop<'a>(
             },
         ],
     );
-    let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnd_token);
+    let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnt_token);
     e.register_at(
         &backstop_id,
         BackstopContract {},
         (
             backstop_token,
-            blnd_xlm_token,
+            blnt_xlm_token,
             emitter,
-            blnd_token,
+            blnt_token,
             usdc_token,
             xlm_token,
             pool_factory,
@@ -225,31 +225,31 @@ pub(crate) fn create_backstop<'a>(
     (backstop_id.clone(), client)
 }
 
-/// Deploy a test Comet LP pool of 80% BLND / 20% USDC and set it as the backstop token.
+/// Deploy a test Comet LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
 ///
 /// Initializes the pool with the following settings:
 /// - Swap fee: 0.3%
-/// - BLND: 1,000
+/// - BLNT: 1,000
 /// - USDC: 25
 /// - Shares: 100
 pub(crate) fn create_comet_lp_pool<'a>(
     e: &Env,
     admin: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
     usdc_token: &Address,
 ) -> (Address, comet::Client<'a>) {
     let contract_address = Address::generate(e);
     e.register_at(&contract_address, comet::WASM, ());
     let client = comet::Client::new(e, &contract_address);
 
-    let blnd_client = MockTokenClient::new(e, blnd_token);
+    let blnt_client = MockTokenClient::new(e, blnt_token);
     let usdc_client = MockTokenClient::new(e, usdc_token);
-    blnd_client.mint(&admin, &1_000_0000000);
+    blnt_client.mint(&admin, &1_000_0000000);
     usdc_client.mint(&admin, &25_0000000);
 
     client.init(
         admin,
-        &vec![e, blnd_token.clone(), usdc_token.clone()],
+        &vec![e, blnt_token.clone(), usdc_token.clone()],
         &vec![e, 0_8000000, 0_2000000],
         &vec![e, 1_000_0000000, 25_0000000],
         &0_0030000,

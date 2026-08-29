@@ -18,8 +18,8 @@ enum EmitterError {
     BadDrop = 1101,
     SwapNotQueued = 1102,
     SwapAlreadyExists = 1103,
-    SwapCannotBeCanceled = 1104,
-    SwapNotUnlocked = 1105,
+    SwapNotUnlocked = 1104,
+    SwapCannotBeCanceled = 1105,
 }
 
 #[derive(Clone)]
@@ -35,7 +35,7 @@ pub struct Swap {
 enum DataKey {
     Backstop,
     BackstopToken,
-    BlndToken,
+    BlntToken,
     Dropped(Address),
     LastDistro(Address),
     Swap,
@@ -46,13 +46,13 @@ pub struct MockEmitter;
 
 #[contractimpl]
 impl MockEmitter {
-    pub fn initialize(env: Env, blnd_token: Address, backstop: Address, backstop_token: Address) {
-        if env.storage().instance().has(&DataKey::BlndToken) {
+    pub fn initialize(env: Env, blnt_token: Address, backstop: Address, backstop_token: Address) {
+        if env.storage().instance().has(&DataKey::BlntToken) {
             panic_with_error!(&env, EmitterError::AlreadyInitializedError);
         }
         env.storage()
             .instance()
-            .set(&DataKey::BlndToken, &blnd_token);
+            .set(&DataKey::BlntToken, &blnt_token);
         env.storage().instance().set(&DataKey::Backstop, &backstop);
         env.storage()
             .instance()
@@ -66,8 +66,8 @@ impl MockEmitter {
         let elapsed = env.ledger().timestamp() - last_distro;
         let amount = i128::from(elapsed) * SCALAR_7;
         set_last_distro(&env, &backstop, env.ledger().timestamp());
-        let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
-        StellarAssetClient::new(&env, &blnd).mint(&backstop, &amount);
+        let blnt: Address = env.storage().instance().get(&DataKey::BlntToken).unwrap();
+        StellarAssetClient::new(&env, &blnt).mint(&backstop, &amount);
         amount
     }
 
@@ -151,8 +151,8 @@ impl MockEmitter {
         if total > MAX_DROP {
             panic_with_error!(&env, EmitterError::BadDrop);
         }
-        let blnd: Address = env.storage().instance().get(&DataKey::BlndToken).unwrap();
-        let token = StellarAssetClient::new(&env, &blnd);
+        let blnt: Address = env.storage().instance().get(&DataKey::BlntToken).unwrap();
+        let token = StellarAssetClient::new(&env, &blnt);
         for (recipient, amount) in list.iter() {
             token.mint(&recipient, &amount);
         }

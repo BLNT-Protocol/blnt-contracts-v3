@@ -21,7 +21,7 @@ pub const SCALAR_12: i128 = 1_000_000_000_000;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum TokenIndex {
-    BLND = 0,
+    BLNT = 0,
     USDC = 1,
     WETH = 2,
     XLM = 3,
@@ -58,8 +58,8 @@ pub struct TestFixture<'a> {
 impl TestFixture<'_> {
     /// Create a new TestFixture for the Blend Protocol
     ///
-    /// Deploys BLND (0), USDC (1), wETH (2), XLM (3), and STABLE (4) test tokens, alongside all required
-    /// Blend Protocol contracts, including a BLND-USDC LP.
+    /// Deploys BLNT (0), USDC (1), wETH (2), XLM (3), and STABLE (4) test tokens, alongside all required
+    /// Blend Protocol contracts, including a BLNT-USDC LP.
     pub fn create<'a>(wasm: bool) -> TestFixture<'a> {
         let e = Env::new_with_config(EnvTestConfig {
             capture_snapshot_at_drop: false,
@@ -82,15 +82,15 @@ impl TestFixture<'_> {
         });
 
         // deploy tokens
-        let (blnd_id, blnd_client) = create_stellar_token(&e, &bombadil);
+        let (blnt_id, blnt_client) = create_stellar_token(&e, &bombadil);
         let (eth_id, eth_client) = create_token(&e, &bombadil, 9, "wETH");
         let (usdc_id, usdc_client) = create_stellar_token(&e, &bombadil);
         let (xlm_id, xlm_client) = create_stellar_token(&e, &bombadil);
         let (stable_id, stable_client) = create_token(&e, &bombadil, 6, "STABLE");
 
         // deploy external contracts
-        let (lp, lp_client) = create_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
-        let (blnd_xlm_lp, _) = create_lp_pool(&e, &bombadil, &blnd_id, &xlm_id);
+        let (lp, lp_client) = create_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
+        let (blnt_xlm_lp, _) = create_lp_pool(&e, &bombadil, &blnt_id, &xlm_id);
 
         // generate Blend Protocol contract IDs
         let backstop_id = Address::generate(&e);
@@ -98,14 +98,14 @@ impl TestFixture<'_> {
         let incumbent_backstop = Address::generate(&e);
 
         let (emitter_id, emitter_client) = create_emitter(&e);
-        blnd_client.set_admin(&emitter_id);
-        emitter_client.initialize(&blnd_id, &incumbent_backstop, &lp);
+        blnt_client.set_admin(&emitter_id);
+        emitter_client.initialize(&blnt_id, &incumbent_backstop, &lp);
 
         let pool_hash = e.deployer().upload_contract_wasm(POOL_WASM);
         let pool_init_meta = PoolInitMeta {
             backstop: backstop_id.clone(),
             pool_hash: pool_hash.clone(),
-            blnd_id: blnd_id.clone(),
+            blnt_id: blnt_id.clone(),
         };
         let pool_factory_client = create_pool_factory(&e, &pool_factory_id, wasm, pool_init_meta);
         let backstop_client = create_backstop(
@@ -113,9 +113,9 @@ impl TestFixture<'_> {
             &backstop_id,
             wasm,
             &lp,
-            &blnd_xlm_lp,
+            &blnt_xlm_lp,
             &emitter_id,
-            &blnd_id,
+            &blnt_id,
             &usdc_id,
             &xlm_id,
             &pool_factory_id,
@@ -123,11 +123,11 @@ impl TestFixture<'_> {
         let backstop_config = svec![
             &e,
             BackstopTierConfig {
-                asset: BackstopAsset::BlndXlm,
+                asset: BackstopAsset::BlntXlm,
                 take_rate_weight: 4,
             },
             BackstopTierConfig {
-                asset: BackstopAsset::BlndUsdc,
+                asset: BackstopAsset::BlntUsdc,
                 take_rate_weight: 3,
             },
             BackstopTierConfig {
@@ -141,7 +141,7 @@ impl TestFixture<'_> {
         // sufficient because the synthetic incumbent holds none.
         lp_client.transfer(&bombadil, &backstop_id, &1);
         let migration_start = e.ledger().timestamp();
-        emitter_client.queue_swap_backstop(&backstop_id, &blnd_xlm_lp);
+        emitter_client.queue_swap_backstop(&backstop_id, &blnt_xlm_lp);
         backstop_client.distribute();
         e.ledger()
             .set_timestamp(migration_start + 24 * 60 * 60 * 24);
@@ -151,10 +151,10 @@ impl TestFixture<'_> {
         emitter_client.swap_backstop();
         backstop_client.distribute();
 
-        // This test deployment uses an empty discretionary BLND recipient list;
+        // This test deployment uses an empty discretionary BLNT recipient list;
         // test users are funded explicitly.
-        blnd_client.mint(&bombadil, &(10_000_000 * SCALAR_7));
-        blnd_client.mint(&frodo, &(30_000_000 * SCALAR_7));
+        blnt_client.mint(&bombadil, &(10_000_000 * SCALAR_7));
+        blnt_client.mint(&frodo, &(30_000_000 * SCALAR_7));
 
         // initialize oracle
         let (_, mock_oracle_client) = create_mock_oracle(&e);
@@ -191,7 +191,7 @@ impl TestFixture<'_> {
             lp: lp_client,
             pools: vec![],
             tokens: vec![
-                blnd_client,
+                blnt_client,
                 usdc_client,
                 eth_client,
                 xlm_client,

@@ -356,7 +356,7 @@ impl PoolContract {
     ///
     /// Pool Factory supplied:
     /// * `backstop_id` - The contract address of the pool's backstop module
-    /// * `blnd_id` - The contract ID of the BLND token
+    /// * `blnt_id` - The contract ID of the BLNT token
     /// * `access_controller` - Optional immutable pool access controller
     pub fn __constructor(
         e: Env,
@@ -367,7 +367,7 @@ impl PoolContract {
         max_positions: u32,
         min_collateral: i128,
         backstop_id: Address,
-        blnd_id: Address,
+        blnt_id: Address,
         access_controller: Option<Address>,
     ) {
         admin.require_auth();
@@ -381,7 +381,7 @@ impl PoolContract {
             &max_positions,
             &min_collateral,
             &backstop_id,
-            &blnd_id,
+            &blnt_id,
             &access_controller,
         );
     }

@@ -22,8 +22,8 @@ pub enum PoolFactoryDataKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[contracttype]
 pub enum BackstopAsset {
-    BlndXlm,
-    BlndUsdc,
+    BlntXlm,
+    BlntUsdc,
     Usdc,
     Xlm,
 }
@@ -47,7 +47,7 @@ pub struct PoolBackstopConfig {
 pub struct PoolInitMeta {
     pub pool_hash: BytesN<32>,
     pub backstop: Address,
-    pub blnd_id: Address,
+    pub blnt_id: Address,
 }
 
 /// Bump the instance rent for the contract

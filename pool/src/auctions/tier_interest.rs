@@ -592,8 +592,8 @@ mod tests {
 
     fn tier_data(e: &Env, value: i128, weight: u32) -> crate::dependencies::BackstopPoolTierData {
         crate::dependencies::BackstopPoolTierData {
-            asset: crate::dependencies::BackstopContractAsset::BlndXlm,
-            blnd_emission_eligible: false,
+            asset: crate::dependencies::BackstopContractAsset::BlntXlm,
+            blnt_emission_eligible: false,
             take_rate_weight: weight,
             token: Address::generate(e),
             tokens: value,
@@ -711,7 +711,7 @@ mod tests {
         let contract = create_pool(&e);
         let asset = Address::generate(&e);
         let bid_token = Address::generate(&e);
-        let blnd_usdc_auction = TierAuctionData {
+        let blnt_usdc_auction = TierAuctionData {
             auction: AuctionData {
                 bid: soroban_sdk::map![&e, (bid_token, 12)],
                 lot: soroban_sdk::map![&e, (asset, 10)],
@@ -720,8 +720,8 @@ mod tests {
             tier: super::super::BackstopTier::SecondLoss,
         };
         e.as_contract(&contract, || {
-            set_tier_auction(&e, AuctionType::InterestAuction, &blnd_usdc_auction);
-            assert_eq!(get_interest_auction(&e), blnd_usdc_auction);
+            set_tier_auction(&e, AuctionType::InterestAuction, &blnt_usdc_auction);
+            assert_eq!(get_interest_auction(&e), blnt_usdc_auction);
             assert!(has_tier_auction(&e, AuctionType::InterestAuction));
             assert!(
                 !has_tier_auction(&e, AuctionType::BadDebtAuction),

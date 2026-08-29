@@ -21,8 +21,8 @@ fn test_backstop_rz_changes_handle_emissions() {
     // Mint some backstop tokens
     // assumes Sam makes up 20% of the backstop after depositing (50k / 0.8 * 0.2 = 12.5k)
     //  -> mint 12.5k LP tokens to sam
-    fixture.tokens[TokenIndex::BLND].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLND per LP token
-    fixture.tokens[TokenIndex::BLND].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
+    fixture.tokens[TokenIndex::BLNT].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLNT per LP token
+    fixture.tokens[TokenIndex::BLNT].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     fixture.tokens[TokenIndex::USDC].mint(&sam, &(3_126_000_0000_0000_000_000 * SCALAR_7)); // 0.25 USDC per LP token
     fixture.tokens[TokenIndex::USDC].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     bstop_token.join_pool(
@@ -131,8 +131,8 @@ fn test_backstop_full_rz_under_limits() {
 
     // Mint some backstop tokens
     let per_pool_lp_deposit = 30_000 * SCALAR_7;
-    fixture.tokens[TokenIndex::BLND].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLND per LP token
-    fixture.tokens[TokenIndex::BLND].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
+    fixture.tokens[TokenIndex::BLNT].mint(&sam, &(125_001_000_0000_0000_000_000 * SCALAR_7)); // 10 BLNT per LP token
+    fixture.tokens[TokenIndex::BLNT].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     fixture.tokens[TokenIndex::USDC].mint(&sam, &(3_126_000_0000_0000_000_000 * SCALAR_7)); // 0.25 USDC per LP token
     fixture.tokens[TokenIndex::USDC].approve(&sam, &bstop_token.address, &i128::MAX, &99999);
     bstop_token.join_pool(

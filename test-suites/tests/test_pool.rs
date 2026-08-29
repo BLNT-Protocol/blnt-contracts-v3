@@ -483,8 +483,8 @@ fn test_pool_user() {
     );
 
     // Sam claims emissions on XLM supply (5d23h59m)
-    let blnd = &fixture.tokens[TokenIndex::BLND];
-    let sam_blnd_balance = blnd.balance(&sam);
+    let blnt = &fixture.tokens[TokenIndex::BLNT];
+    let sam_blnt_balance = blnt.balance(&sam);
     let result = pool_fixture
         .pool
         .claim(&sam, &vec![&fixture.env, xlm_pool_index * 2 + 1], &sam);
@@ -525,7 +525,7 @@ fn test_pool_user() {
         ]
     );
     assert_eq!(result, 2940_3117269); // ~ 4.99k / (100k + 4.99k) * 0.12 (xlm eps) * 5d23hr59m in seconds
-    assert_eq!(blnd.balance(&sam), sam_blnd_balance + result);
+    assert_eq!(blnt.balance(&sam), sam_blnt_balance + result);
 
     // Sam sends XLM to the pool
     let gulp_amount = SCALAR_7;
@@ -609,13 +609,13 @@ fn test_pool_config() {
     assert_eq!(new_pool_config.bstop_rate, 0_0500000);
 
     // Initialize a reserve (admin only)
-    let blnd = &fixture.tokens[TokenIndex::BLND];
+    let blnt = &fixture.tokens[TokenIndex::BLNT];
     let mut reserve_config = default_reserve_metadata();
     reserve_config.l_factor = 0_500_0000;
     reserve_config.c_factor = 0_200_0000;
     pool_fixture
         .pool
-        .queue_set_reserve(&blnd.address, &reserve_config);
+        .queue_set_reserve(&blnt.address, &reserve_config);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -626,7 +626,7 @@ fn test_pool_config() {
                     Symbol::new(&fixture.env, "queue_set_reserve"),
                     vec![
                         &fixture.env,
-                        blnd.address.to_val(),
+                        blnt.address.to_val(),
                         reserve_config.into_val(&fixture.env)
                     ]
                 )),
@@ -637,11 +637,11 @@ fn test_pool_config() {
 
     fixture.jump(604800); // 1 week
 
-    pool_fixture.pool.set_reserve(&blnd.address);
+    pool_fixture.pool.set_reserve(&blnt.address);
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     let event_data: soroban_sdk::Vec<Val> = vec![
         &fixture.env,
-        blnd.address.into_val(&fixture.env),
+        blnt.address.into_val(&fixture.env),
         3_u32.into_val(&fixture.env),
     ];
     assert_eq!(
@@ -655,7 +655,7 @@ fn test_pool_config() {
             )
         ]
     );
-    let new_reserve_config = fixture.read_reserve_config(0, TokenIndex::BLND);
+    let new_reserve_config = fixture.read_reserve_config(0, TokenIndex::BLNT);
     assert_eq!(new_reserve_config.l_factor, 0_500_0000);
     assert_eq!(new_reserve_config.c_factor, 0_200_0000);
     assert_eq!(new_reserve_config.index, 3); // setup includes 3 assets (0 indexed)
@@ -664,7 +664,7 @@ fn test_pool_config() {
     reserve_config.c_factor = 0;
     pool_fixture
         .pool
-        .queue_set_reserve(&blnd.address, &reserve_config);
+        .queue_set_reserve(&blnt.address, &reserve_config);
     assert_eq!(
         fixture.env.auths()[0],
         (
@@ -675,7 +675,7 @@ fn test_pool_config() {
                     Symbol::new(&fixture.env, "queue_set_reserve"),
                     vec![
                         &fixture.env,
-                        blnd.address.to_val(),
+                        blnt.address.to_val(),
                         reserve_config.into_val(&fixture.env)
                     ]
                 )),
@@ -684,7 +684,7 @@ fn test_pool_config() {
         )
     );
     fixture.jump(604800); // 1 week
-    pool_fixture.pool.set_reserve(&blnd.address);
+    pool_fixture.pool.set_reserve(&blnt.address);
     assert_eq!(
         event,
         vec![
@@ -708,7 +708,7 @@ fn test_pool_config() {
             )
         ]
     );
-    let new_reserve_config = fixture.read_reserve_config(0, TokenIndex::BLND);
+    let new_reserve_config = fixture.read_reserve_config(0, TokenIndex::BLNT);
     assert_eq!(new_reserve_config.l_factor, 0_500_0000);
     assert_eq!(new_reserve_config.c_factor, 0);
     assert_eq!(new_reserve_config.index, 3);
@@ -899,7 +899,7 @@ fn test_pool_config() {
             share: 0_400_0000
         },
         ReserveEmissionMetadata {
-            res_index: 3, // BLND
+            res_index: 3, // BLNT
             res_type: 1,  // b_token
             share: 0_200_0000
         },

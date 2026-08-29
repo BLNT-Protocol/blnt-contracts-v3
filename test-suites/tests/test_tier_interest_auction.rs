@@ -290,11 +290,11 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let pool = &fixture.pools[0].pool;
     let pool_address = pool.address.clone();
 
-    let blnd_xlm_token = fixture
+    let blnt_xlm_token = fixture
         .backstop
         .backstop_token(&BackstopTier::FirstLoss, &pool_address);
-    let blnd_xlm = LPClient::new(&e, &blnd_xlm_token);
-    fixture.tokens[TokenIndex::BLND].mint(&operator, &(500_000 * SCALAR_7));
+    let blnt_xlm = LPClient::new(&e, &blnt_xlm_token);
+    fixture.tokens[TokenIndex::BLNT].mint(&operator, &(500_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&operator, &(50_000 * SCALAR_7));
     fixture.tokens[TokenIndex::XLM].mint(&operator, &(50_000 * SCALAR_7));
     fixture.lp.join_pool(
@@ -302,7 +302,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &vec![&e, i128::MAX, i128::MAX],
         &operator,
     );
-    blnd_xlm.join_pool(
+    blnt_xlm.join_pool(
         &(20_000 * SCALAR_7),
         &vec![&e, i128::MAX, i128::MAX],
         &operator,
@@ -337,7 +337,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &i128::MAX,
         &allowance_expiration,
     );
-    blnd_xlm.approve(
+    blnt_xlm.approve(
         &operator,
         &fixture.backstop.address,
         &i128::MAX,
@@ -360,9 +360,9 @@ fn exercise_tier_interest_auctions(wasm: bool) {
 
     let expected_lots = [800 * SCALAR_7, 600 * SCALAR_7, 400 * SCALAR_7];
     let expected_bids = [768 * SCALAR_7, 576 * SCALAR_7, 480 * SCALAR_7];
-    // The BLND:USDC auction fills 300 ledgers into the declining-bid half of
+    // The BLNT:USDC auction fills 300 ledgers into the declining-bid half of
     // the v2 curve. The USDC tier transfers its full bid but credits 99% and
-    // reserves 1% for the independent BLND buy-and-burn.
+    // reserves 1% for the independent BLNT buy-and-burn.
     let realized_payments = [768 * SCALAR_7, 288 * SCALAR_7, 480 * SCALAR_7];
     let realized_tier_gains = [
         realized_payments[0],
@@ -371,7 +371,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     ];
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
-    let blnd_usdc_token = fixture
+    let blnt_usdc_token = fixture
         .backstop
         .backstop_token(&BackstopTier::SecondLoss, &pool_address);
     let empty = vec![&e];
@@ -421,7 +421,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &fixture.backstop.address,
         // The matching assertion accepts the canonically selected tier and
         // does not supply its bid amount.
-        &vec![&e, blnd_xlm_token.clone()],
+        &vec![&e, blnt_xlm_token.clone()],
         &lot_assets,
         &100,
     );
@@ -488,7 +488,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         Some(expected_lots[0])
     );
     assert_eq!(
-        first.bid.get(blnd_xlm_token.clone()),
+        first.bid.get(blnt_xlm_token.clone()),
         Some(expected_bids[0])
     );
     assert_eq!(
@@ -591,7 +591,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         Some(expected_lots[1])
     );
     assert_eq!(
-        second.bid.get(blnd_usdc_token.clone()),
+        second.bid.get(blnt_usdc_token.clone()),
         Some(expected_bids[1])
     );
 
@@ -704,7 +704,7 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     }
 
     // A fresh checkpoint uses the tiers' appreciated post-fill values. The
-    // cyclic cursor returns to BLND:XLM, and stale release must preserve its
+    // cyclic cursor returns to BLNT:XLM, and stale release must preserve its
     // exact weighted pending amount.
     let additional_credit = 560 * SCALAR_7;
     fixture.tokens[TokenIndex::USDC].mint(&pool_address, &additional_credit);
@@ -836,7 +836,7 @@ fn tier_interest_auctions_cover_all_tiers_optimized_wasm() {
 }
 
 #[test]
-fn xlm_interest_haircut_uses_blnd_xlm_comet_optimized_wasm() {
+fn xlm_interest_haircut_uses_blnt_xlm_comet_optimized_wasm() {
     let mut fixture = TestFixture::create(true);
     let e = fixture.env.clone();
     let operator = fixture.users.first().unwrap().clone();

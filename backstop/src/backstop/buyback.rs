@@ -16,17 +16,17 @@ use soroban_sdk::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BuybackResult {
-    pub blnd_burned: i128,
+    pub blnt_burned: i128,
     pub pair_in: i128,
     pub pending: i128,
 }
 
 /// Convert one bounded pending USDC or XLM batch through its canonical Comet
-/// and burn the exact BLND received. No-work calls return zeroes.
+/// and burn the exact BLNT received. No-work calls return zeroes.
 pub fn execute_buy_and_burn(e: &Env, asset: BackstopAsset) -> BuybackResult {
     let comet_address = match asset {
-        BackstopAsset::Usdc => storage::get_blnd_usdc_token(e),
-        BackstopAsset::Xlm => storage::get_blnd_xlm_token(e),
+        BackstopAsset::Usdc => storage::get_blnt_usdc_token(e),
+        BackstopAsset::Xlm => storage::get_blnt_xlm_token(e),
         _ => panic_with_error!(e, BackstopError::BadRequest),
     };
     let pending = storage::get_buyback_pending(e, asset);
@@ -36,7 +36,7 @@ pub fn execute_buy_and_burn(e: &Env, asset: BackstopAsset) -> BuybackResult {
 
     let backstop = e.current_contract_address();
     let pair = asset_token(e, asset);
-    let blnd = storage::get_blnd_token(e);
+    let blnt = storage::get_blnt_token(e);
     let comet = CometClient::new(e, &comet_address);
 
     let pair_reserve = comet.get_balance(&pair);
@@ -54,46 +54,46 @@ pub fn execute_buy_and_burn(e: &Env, asset: BackstopAsset) -> BuybackResult {
         return no_work(pending);
     }
 
-    let spot_price = comet.get_spot_price(&pair, &blnd);
+    let spot_price = comet.get_spot_price(&pair, &blnt);
     if spot_price <= 0 {
         panic_with_error!(e, BackstopError::InvalidValuation);
     }
     let max_price = spot_price
         .fixed_mul_ceil(BUYBACK_MAX_PRICE_NUMERATOR, BUYBACK_MAX_PRICE_DENOMINATOR)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    let min_blnd_out = pair_in
+    let min_blnt_out = pair_in
         .fixed_mul_floor(SCALAR_7, max_price)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    if min_blnd_out <= 0 {
+    if min_blnt_out <= 0 {
         return no_work(pending);
     }
 
     let pair_client = TokenClient::new(e, &pair);
-    let blnd_client = TokenClient::new(e, &blnd);
+    let blnt_client = TokenClient::new(e, &blnt);
     let pair_before = pair_client.balance(&backstop);
-    let blnd_before = blnd_client.balance(&backstop);
+    let blnt_before = blnt_client.balance(&backstop);
     // Contract auth applies to the next sub-contract call, so keep the
     // authorization immediately adjacent to the Comet invocation.
     authorize_comet_input(e, &backstop, &pair, &comet_address, pair_in);
-    let (reported_blnd_out, reported_spot_price) =
-        comet.swap_exact_amount_in(&pair, &pair_in, &blnd, &min_blnd_out, &max_price, &backstop);
+    let (reported_blnt_out, reported_spot_price) =
+        comet.swap_exact_amount_in(&pair, &pair_in, &blnt, &min_blnt_out, &max_price, &backstop);
     let pair_after = pair_client.balance(&backstop);
-    let blnd_after_swap = blnd_client.balance(&backstop);
-    let blnd_out = blnd_after_swap
-        .checked_sub(blnd_before)
+    let blnt_after_swap = blnt_client.balance(&backstop);
+    let blnt_out = blnt_after_swap
+        .checked_sub(blnt_before)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::BalanceError));
     if pair_before.checked_sub(pair_after) != Some(pair_in)
-        || blnd_out <= 0
-        || blnd_out < min_blnd_out
-        || reported_blnd_out != blnd_out
+        || blnt_out <= 0
+        || blnt_out < min_blnt_out
+        || reported_blnt_out != blnt_out
         || reported_spot_price <= 0
         || reported_spot_price > max_price
     {
         panic_with_error!(e, BackstopError::BalanceError);
     }
 
-    blnd_client.burn(&backstop, &blnd_out);
-    if blnd_client.balance(&backstop) != blnd_before {
+    blnt_client.burn(&backstop, &blnt_out);
+    if blnt_client.balance(&backstop) != blnt_before {
         panic_with_error!(e, BackstopError::BalanceError);
     }
 
@@ -102,7 +102,7 @@ pub fn execute_buy_and_burn(e: &Env, asset: BackstopAsset) -> BuybackResult {
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
     storage::set_buyback_pending(e, asset, next_pending);
     BuybackResult {
-        blnd_burned: blnd_out,
+        blnt_burned: blnt_out,
         pair_in,
         pending: next_pending,
     }
@@ -144,7 +144,7 @@ fn authorize_comet_input(
 
 fn no_work(pending: i128) -> BuybackResult {
     BuybackResult {
-        blnd_burned: 0,
+        blnt_burned: 0,
         pair_in: 0,
         pending,
     }
@@ -177,15 +177,15 @@ mod tests {
         let filler = Address::generate(&e);
         let (_, factory) = create_mock_pool_factory(&e, &backstop);
         factory.set_pool(&pool);
-        let (usdc, blnd, comet_address) = e.as_contract(&backstop, || {
+        let (usdc, blnt, comet_address) = e.as_contract(&backstop, || {
             (
                 storage::get_usdc_token(&e),
-                storage::get_blnd_token(&e),
-                storage::get_blnd_usdc_token(&e),
+                storage::get_blnt_token(&e),
+                storage::get_blnt_usdc_token(&e),
             )
         });
         let usdc_client = MockTokenClient::new(&e, &usdc);
-        let blnd_client = MockTokenClient::new(&e, &blnd);
+        let blnt_client = MockTokenClient::new(&e, &blnt);
         usdc_client.mint(&depositor, &(100 * SCALAR_7));
         usdc_client.mint(&filler, &(100 * SCALAR_7));
         usdc_client.approve(
@@ -211,19 +211,19 @@ mod tests {
 
         let comet = CometClient::new(&e, &comet_address);
         let comet_usdc_before = comet.get_balance(&usdc);
-        let comet_blnd_before = comet.get_balance(&blnd);
-        let blnd_burned = BackstopClient::new(&e, &backstop).buy_and_burn(&BackstopAsset::Usdc);
+        let comet_blnt_before = comet.get_balance(&blnt);
+        let blnt_burned = BackstopClient::new(&e, &backstop).buy_and_burn(&BackstopAsset::Usdc);
         let expected_usdc_in = core::cmp::min(
             SCALAR_7,
             comet_usdc_before / BUYBACK_MAX_RESERVE_DENOMINATOR,
         );
-        assert!(blnd_burned > 0);
+        assert!(blnt_burned > 0);
         assert_eq!(
             comet.get_balance(&usdc) - comet_usdc_before,
             expected_usdc_in
         );
-        assert_eq!(comet_blnd_before - comet.get_balance(&blnd), blnd_burned);
-        assert_eq!(blnd_client.balance(&backstop), 0);
+        assert_eq!(comet_blnt_before - comet.get_balance(&blnt), blnt_burned);
+        assert_eq!(blnt_client.balance(&backstop), 0);
         e.as_contract(&backstop, || {
             assert_eq!(
                 storage::get_buyback_pending(&e, BackstopAsset::Usdc),
@@ -248,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn xlm_haircut_swaps_through_the_blnd_xlm_comet() {
+    fn xlm_haircut_swaps_through_the_blnt_xlm_comet() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited();
@@ -268,15 +268,15 @@ mod tests {
                 },
             ],
         );
-        let (xlm, blnd, comet_address) = e.as_contract(&backstop, || {
+        let (xlm, blnt, comet_address) = e.as_contract(&backstop, || {
             (
                 storage::get_xlm_token(&e),
-                storage::get_blnd_token(&e),
-                storage::get_blnd_xlm_token(&e),
+                storage::get_blnt_token(&e),
+                storage::get_blnt_xlm_token(&e),
             )
         });
         let xlm_client = MockTokenClient::new(&e, &xlm);
-        let blnd_client = MockTokenClient::new(&e, &blnd);
+        let blnt_client = MockTokenClient::new(&e, &blnt);
         xlm_client.mint(&depositor, &(100 * SCALAR_7));
         xlm_client.mint(&filler, &(100 * SCALAR_7));
         xlm_client.approve(
@@ -306,14 +306,14 @@ mod tests {
 
         let comet = CometClient::new(&e, &comet_address);
         let comet_xlm_before = comet.get_balance(&xlm);
-        let comet_blnd_before = comet.get_balance(&blnd);
-        let blnd_burned = BackstopClient::new(&e, &backstop).buy_and_burn(&BackstopAsset::Xlm);
+        let comet_blnt_before = comet.get_balance(&blnt);
+        let blnt_burned = BackstopClient::new(&e, &backstop).buy_and_burn(&BackstopAsset::Xlm);
         let expected_xlm_in =
             core::cmp::min(SCALAR_7, comet_xlm_before / BUYBACK_MAX_RESERVE_DENOMINATOR);
-        assert!(blnd_burned > 0);
+        assert!(blnt_burned > 0);
         assert_eq!(comet.get_balance(&xlm) - comet_xlm_before, expected_xlm_in);
-        assert_eq!(comet_blnd_before - comet.get_balance(&blnd), blnd_burned);
-        assert_eq!(blnd_client.balance(&backstop), 0);
+        assert_eq!(comet_blnt_before - comet.get_balance(&blnt), blnt_burned);
+        assert_eq!(blnt_client.balance(&backstop), 0);
         e.as_contract(&backstop, || {
             assert_eq!(
                 storage::get_buyback_pending(&e, BackstopAsset::Xlm),

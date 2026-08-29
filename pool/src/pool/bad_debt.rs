@@ -100,7 +100,7 @@ mod tests {
         auctions::AuctionData,
         storage::PoolConfig,
         testutils::{
-            self, create_backstop, create_blnd_token, create_comet_lp_pool, create_pool,
+            self, create_backstop, create_blnt_token, create_comet_lp_pool, create_pool,
             create_token_contract,
         },
         Positions,
@@ -125,15 +125,15 @@ mod tests {
         let frodo = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -197,16 +197,16 @@ mod tests {
         let frodo = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -305,16 +305,16 @@ mod tests {
         let frodo = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -395,16 +395,16 @@ mod tests {
         let bombadil = Address::generate(&e);
         let frodo = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -465,10 +465,10 @@ mod tests {
 
         let pool = create_pool(&e);
         let bombadil = Address::generate(&e);
-        let (blnd, _) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, _) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, _) = create_token_contract(&e, &bombadil);
-        let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (backstop_address, _) = create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+        let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (backstop_address, _) = create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -542,16 +542,16 @@ mod tests {
         let bombadil = Address::generate(&e);
         let frodo = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_000_0000000; // under 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -628,15 +628,15 @@ mod tests {
         let frodo = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -722,13 +722,13 @@ mod tests {
         let admin = Address::generate(&e);
         let supplier = Address::generate(&e);
         let depositor = Address::generate(&e);
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &admin);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &admin);
         let (usdc, usdc_client) = create_token_contract(&e, &admin);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &admin, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
-        blnd_client.mint(&depositor, &500_001_0000000);
-        blnd_client.approve(&depositor, &lp_token, &i128::MAX, &99999);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
+        blnt_client.mint(&depositor, &500_001_0000000);
+        blnt_client.approve(&depositor, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&depositor, &12_501_0000000);
         usdc_client.approve(&depositor, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -795,16 +795,16 @@ mod tests {
         let frodo = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_blnd_token(&e, &pool, &bombadil);
+        let (blnt, blnt_client) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            create_backstop(&e, &pool, &lp_token, &usdc, &blnd);
+            create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
 
         // mint lp tokens and deposit them into the pool's backstop
         let backstop_tokens = 1_500_0000000; // over 5% of threshold
-        blnd_client.mint(&frodo, &500_001_0000000);
-        blnd_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&frodo, &500_001_0000000);
+        blnt_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&frodo, &12_501_0000000);
         usdc_client.approve(&frodo, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(

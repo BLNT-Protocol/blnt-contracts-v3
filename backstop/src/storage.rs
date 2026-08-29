@@ -43,19 +43,19 @@ pub struct UserEmissionData {
     pub index: i128,
 }
 
-/// Pool-local ongoing BLND allocation and cached active LP-token amounts.
+/// Pool-local ongoing BLNT allocation and cached active LP-token amounts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 pub struct PoolOngoingEmissions {
     pub accrued_pool: i128,
-    pub active_blnd_usdc: i128,
-    pub active_blnd_xlm: i128,
+    pub active_blnt_usdc: i128,
+    pub active_blnt_xlm: i128,
     pub backstop_tier_carry: i128,
-    pub pending_blnd_usdc: i128,
-    pub pending_blnd_xlm: i128,
+    pub pending_blnt_usdc: i128,
+    pub pending_blnt_xlm: i128,
 }
 
-/// Aggregate accounting for migration-backfill and ongoing BLND obligations.
+/// Aggregate accounting for migration-backfill and ongoing BLNT obligations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype(export = false)]
 pub struct OngoingEmissionState {
@@ -72,16 +72,16 @@ pub struct OngoingEmissionState {
 /********** Storage Key Types **********/
 
 const EMITTER_KEY: &str = "Emitter";
-const BLND_USDC_TOKEN_KEY: &str = "BToken";
+const BLNT_USDC_TOKEN_KEY: &str = "BToken";
 const POOL_FACTORY_KEY: &str = "PoolFact";
-const BLND_TOKEN_KEY: &str = "BLNDTkn";
-const BLND_XLM_TOKEN_KEY: &str = "BXLMTkn";
+const BLNT_TOKEN_KEY: &str = "BLNTTkn";
+const BLNT_XLM_TOKEN_KEY: &str = "BXLMTkn";
 const USDC_TOKEN_KEY: &str = "USDCTkn";
 const XLM_TOKEN_KEY: &str = "XLMTkn";
 const DROP_LIST_KEY: &str = "DropList";
 const REWARD_ZONE_KEY: &str = "RZ";
 const BACKFILL_FUNDED_AMOUNT_KEY: &str = "BFundAmt";
-const BLND_BINDING_VERIFIED_KEY: &str = "BlndBound";
+const BLNT_BINDING_VERIFIED_KEY: &str = "BlntBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
@@ -193,37 +193,37 @@ pub fn set_pool_factory(e: &Env, pool_factory_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, POOL_FACTORY_KEY), pool_factory_id);
 }
 
-/// Fetch the BLND token id
-pub fn get_blnd_token(e: &Env) -> Address {
+/// Fetch the BLNT token id
+pub fn get_blnt_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY))
+        .get::<Symbol, Address>(&Symbol::new(e, BLNT_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set the BLND token id
+/// Set the BLNT token id
 ///
 /// ### Arguments
-/// * `blnd_token_id` - The ID of the new BLND token
-pub fn set_blnd_token(e: &Env, blnd_token_id: &Address) {
+/// * `blnt_token_id` - The ID of the new BLNT token
+pub fn set_blnt_token(e: &Env, blnt_token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY), blnd_token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLNT_TOKEN_KEY), blnt_token_id);
 }
 
-/// Fetch the BLND:XLM backstop token id
-pub fn get_blnd_xlm_token(e: &Env) -> Address {
+/// Fetch the BLNT:XLM backstop token id
+pub fn get_blnt_xlm_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BLND_XLM_TOKEN_KEY))
+        .get::<Symbol, Address>(&Symbol::new(e, BLNT_XLM_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set the BLND:XLM backstop token id
-pub fn set_blnd_xlm_token(e: &Env, token_id: &Address) {
+/// Set the BLNT:XLM backstop token id
+pub fn set_blnt_xlm_token(e: &Env, token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_XLM_TOKEN_KEY), token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLNT_XLM_TOKEN_KEY), token_id);
 }
 
 /// Fetch the USDC token id
@@ -259,25 +259,25 @@ pub fn set_xlm_token(e: &Env, xlm_token_id: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, XLM_TOKEN_KEY), xlm_token_id);
 }
 
-/// Fetch the BLND:USDC backstop token id.
-pub fn get_blnd_usdc_token(e: &Env) -> Address {
+/// Fetch the BLNT:USDC backstop token id.
+pub fn get_blnt_usdc_token(e: &Env) -> Address {
     e.storage()
         .instance()
-        .get::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY))
+        .get::<Symbol, Address>(&Symbol::new(e, BLNT_USDC_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set the BLND:USDC backstop token id.
+/// Set the BLNT:USDC backstop token id.
 ///
 /// ### Arguments
-/// * `blnd_usdc_token_id` - The ID of the BLND:USDC backstop token
-pub fn set_blnd_usdc_token(e: &Env, blnd_usdc_token_id: &Address) {
+/// * `blnt_usdc_token_id` - The ID of the BLNT:USDC backstop token
+pub fn set_blnt_usdc_token(e: &Env, blnt_usdc_token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_USDC_TOKEN_KEY), blnd_usdc_token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLNT_USDC_TOKEN_KEY), blnt_usdc_token_id);
 }
 
-/// Return a canonical pair asset reserved for its next BLND buy-and-burn.
+/// Return a canonical pair asset reserved for its next BLNT buy-and-burn.
 pub fn get_buyback_pending(e: &Env, asset: BackstopAsset) -> i128 {
     e.storage()
         .instance()
@@ -285,7 +285,7 @@ pub fn get_buyback_pending(e: &Env, asset: BackstopAsset) -> i128 {
         .unwrap_or(0)
 }
 
-/// Store a canonical pair asset reserved for its next BLND buy-and-burn.
+/// Store a canonical pair asset reserved for its next BLNT buy-and-burn.
 pub fn set_buyback_pending(e: &Env, asset: BackstopAsset, amount: i128) {
     e.storage()
         .instance()
@@ -578,22 +578,22 @@ pub fn set_reward_zone_distribution_started(e: &Env) {
         .set(&Symbol::new(e, REWARD_ZONE_DISTRIBUTED_KEY), &true);
 }
 
-/// Return whether the configured BLND token has been bound to emitter output.
-pub fn get_blnd_binding_verified(e: &Env) -> bool {
+/// Return whether the configured BLNT token has been bound to emitter output.
+pub fn get_blnt_binding_verified(e: &Env) -> bool {
     e.storage()
         .instance()
-        .get(&Symbol::new(e, BLND_BINDING_VERIFIED_KEY))
+        .get(&Symbol::new(e, BLNT_BINDING_VERIFIED_KEY))
         .unwrap_or(false)
 }
 
-/// Record that the configured BLND token has been bound to emitter output.
-pub fn set_blnd_binding_verified(e: &Env) {
+/// Record that the configured BLNT token has been bound to emitter output.
+pub fn set_blnt_binding_verified(e: &Env) {
     e.storage()
         .instance()
-        .set(&Symbol::new(e, BLND_BINDING_VERIFIED_KEY), &true);
+        .set(&Symbol::new(e, BLNT_BINDING_VERIFIED_KEY), &true);
 }
 
-/// Get aggregate ongoing BLND accounting.
+/// Get aggregate ongoing BLNT accounting.
 pub fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
     e.storage()
         .instance()
@@ -610,14 +610,14 @@ pub fn get_ongoing_emission_state(e: &Env) -> OngoingEmissionState {
         })
 }
 
-/// Set aggregate ongoing BLND accounting.
+/// Set aggregate ongoing BLNT accounting.
 pub fn set_ongoing_emission_state(e: &Env, state: &OngoingEmissionState) {
     e.storage()
         .instance()
         .set(&Symbol::new(e, ONGOING_EMISSION_STATE_KEY), state);
 }
 
-/// Get one pool's ongoing BLND allocation and cached active tier amounts.
+/// Get one pool's ongoing BLNT allocation and cached active tier amounts.
 pub fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoingEmissions {
     let key = BackstopDataKey::PoolOngoingEmissions(pool.clone());
     get_persistent_default(
@@ -625,18 +625,18 @@ pub fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoingEmissio
         &key,
         || PoolOngoingEmissions {
             accrued_pool: 0,
-            active_blnd_usdc: 0,
-            active_blnd_xlm: 0,
+            active_blnt_usdc: 0,
+            active_blnt_xlm: 0,
             backstop_tier_carry: 0,
-            pending_blnd_usdc: 0,
-            pending_blnd_xlm: 0,
+            pending_blnt_usdc: 0,
+            pending_blnt_xlm: 0,
         },
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,
     )
 }
 
-/// Set one pool's ongoing BLND allocation and cached active tier amounts.
+/// Set one pool's ongoing BLNT allocation and cached active tier amounts.
 pub fn set_pool_ongoing_emissions(e: &Env, pool: &Address, emissions: &PoolOngoingEmissions) {
     let key = BackstopDataKey::PoolOngoingEmissions(pool.clone());
     e.storage().persistent().set(&key, emissions);

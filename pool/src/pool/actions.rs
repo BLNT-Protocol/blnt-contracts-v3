@@ -1660,12 +1660,12 @@ mod tests {
 
         // creating reserves for a pool exhausts the budget
         e.cost_estimate().budget().reset_unlimited();
-        let (blnd_id, _) = testutils::create_token_contract(&e, &bombadil);
+        let (blnt_id, _) = testutils::create_token_contract(&e, &bombadil);
         let (usdc_id, _) = testutils::create_token_contract(&e, &bombadil);
         let (backstop_token_id, backstop_token_client) =
-            testutils::create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
+            testutils::create_comet_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
+            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnt_id);
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
         reserve_data_0.last_time = 12345;
@@ -1784,16 +1784,16 @@ mod tests {
 
         let pool_address = create_pool(&e);
         let (usdc_id, usdc_client) = testutils::create_token_contract(&e, &bombadil);
-        let (blnd_id, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &bombadil);
+        let (blnt_id, blnt_client) = testutils::create_blnt_token(&e, &pool_address, &bombadil);
 
         let (backstop_token_id, backstop_token_client) =
-            create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
+            create_comet_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        blnd_client.mint(&samwise, &10_000_0000000);
+            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnt_id);
+        blnt_client.mint(&samwise, &10_000_0000000);
         usdc_client.mint(&samwise, &250_0000000);
         let exp_ledger = e.ledger().sequence() + 100;
-        blnd_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
+        blnt_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
         usdc_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
         backstop_token_client.join_pool(
             &(100 * SCALAR_7),

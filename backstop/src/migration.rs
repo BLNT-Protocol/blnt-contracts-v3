@@ -39,7 +39,7 @@ pub(crate) enum MigrationStatus {
 pub(crate) struct MigrationState {
     pub activated_at: Option<u64>,
     pub backfill_end: Option<u64>,
-    pub blnd_binding_verified: bool,
+    pub blnt_binding_verified: bool,
     pub funded_backfill: Option<i128>,
     pub migration_epoch_start: Option<u64>,
     pub scheduled_backfill: i128,
@@ -97,7 +97,7 @@ pub(crate) fn state(e: &Env) -> MigrationState {
     MigrationState {
         activated_at: activated_at(e),
         backfill_end: backfill_end(e),
-        blnd_binding_verified: storage::get_blnd_binding_verified(e),
+        blnt_binding_verified: storage::get_blnt_binding_verified(e),
         funded_backfill: funded_backfill(e),
         migration_epoch_start: migration_epoch_start(e),
         scheduled_backfill: scheduled_backfill(e),
@@ -193,8 +193,8 @@ pub(crate) fn drop(e: &Env) {
     // create two obligations. A later failure rolls this marker back.
     storage::set_backfill_funded_amount(e, scheduled);
     let candidate = e.current_contract_address();
-    let blnd = TokenClient::new(e, &storage::get_blnd_token(e));
-    let balance_before = blnd.balance(&candidate);
+    let blnt = TokenClient::new(e, &storage::get_blnt_token(e));
+    let balance_before = blnt.balance(&candidate);
     let mut recipients = storage::get_drop_list(e);
     let mut expected_candidate_delta = scheduled;
     for (recipient, amount) in recipients.iter() {
@@ -208,23 +208,25 @@ pub(crate) fn drop(e: &Env) {
         recipients.push_back((candidate.clone(), scheduled));
     }
     emitter(e).drop(&recipients);
-    let received = checked_signed_sub(e, blnd.balance(&candidate), balance_before);
+    let received = checked_signed_sub(e, blnt.balance(&candidate), balance_before);
     if received != expected_candidate_delta {
         panic_with_error!(e, BackstopError::InvalidBackfillFunding);
     }
-    storage::set_blnd_binding_verified(e);
+    storage::set_blnt_binding_verified(e);
     BackstopEvents::backfill_funded(e, scheduled);
 }
 
 fn activate(e: &Env) -> u64 {
     let activated = e.ledger().timestamp();
-    let verified_unlock = verified_queue_unlock(e)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::MigrationNotPrepared));
-    let activation_deadline = verified_unlock
-        .checked_add(ACTIVATION_GRACE_SECONDS)
-        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-    if activated < verified_unlock || activated > activation_deadline {
-        panic_with_error!(e, BackstopError::SyncWindowExpired);
+    if let Some(verified_unlock) = verified_queue_unlock(e) {
+        let activation_deadline = verified_unlock
+            .checked_add(ACTIVATION_GRACE_SECONDS)
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        if activated < verified_unlock || activated > activation_deadline {
+            panic_with_error!(e, BackstopError::SyncWindowExpired);
+        }
+    } else if migration_epoch_start(e).is_some() {
+        panic_with_error!(e, BackstopError::MigrationNotPrepared);
     }
     let last_distribution = emitter(e).get_last_distro(&e.current_contract_address());
     if last_distribution > activated {
@@ -259,7 +261,7 @@ fn require_not_active(e: &Env) {
 
 fn require_valid_queue(e: &Env, queued: &Swap) {
     if queued.new_backstop != e.current_contract_address()
-        || queued.new_backstop_token != storage::get_blnd_xlm_token(e)
+        || queued.new_backstop_token != storage::get_blnt_xlm_token(e)
     {
         panic_with_error!(e, BackstopError::InvalidQueuedSwap);
     }
@@ -334,7 +336,7 @@ pub fn activate_for_test(e: &Env, checkpoint: u64) {
 mod tests {
     use mock_emitter::MockEmitter;
     use mock_pool::{MockPool, MockPoolClient};
-    use sep_41_token::TokenClient;
+    use sep_41_token::{testutils::MockTokenClient, TokenClient};
     use soroban_sdk::{
         testutils::{Address as _, Ledger},
         vec, Address, Env, Vec,
@@ -346,7 +348,7 @@ mod tests {
         dependencies::EmitterClient,
         emissions, storage,
         testutils::{
-            create_backstop, create_blnd_token, create_comet_lp_pool, create_mock_pool_factory,
+            create_backstop, create_blnt_token, create_comet_lp_pool, create_mock_pool_factory,
             create_token, create_usdc_token, sync_mock_pool_factory_config,
         },
         BackstopClient,
@@ -360,9 +362,9 @@ mod tests {
     struct Fixture {
         admin: Address,
         backstop: Address,
-        blnd: Address,
-        blnd_usdc: Address,
-        blnd_xlm: Address,
+        blnt: Address,
+        blnt_usdc: Address,
+        blnt_xlm: Address,
         e: Env,
         emitter: Address,
         incumbent: Address,
@@ -381,14 +383,14 @@ mod tests {
             let admin = Address::generate(&e);
             let incumbent = Address::generate(&e);
             let user = Address::generate(&e);
-            let (blnd, blnd_client) = create_blnd_token(&e, &backstop, &admin);
+            let (blnt, blnt_client) = create_blnt_token(&e, &backstop, &admin);
             let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
             let (xlm, _) = create_token(&e, &admin);
-            let (blnd_usdc, _) = create_comet_lp_pool(&e, &admin, &blnd, &usdc);
-            let (blnd_xlm, _) = create_comet_lp_pool(&e, &admin, &blnd, &xlm);
+            let (blnt_usdc, _) = create_comet_lp_pool(&e, &admin, &blnt, &usdc);
+            let (blnt_xlm, _) = create_comet_lp_pool(&e, &admin, &blnt, &xlm);
             e.as_contract(&backstop, || {
-                storage::set_blnd_usdc_token(&e, &blnd_usdc);
-                storage::set_blnd_xlm_token(&e, &blnd_xlm);
+                storage::set_blnt_usdc_token(&e, &blnt_usdc);
+                storage::set_blnt_xlm_token(&e, &blnt_xlm);
             });
             sync_mock_pool_factory_config(&e, &backstop);
 
@@ -399,13 +401,13 @@ mod tests {
 
             let emitter = e.register(MockEmitter, ());
             let emitter_client = EmitterClient::new(&e, &emitter);
-            emitter_client.initialize(&blnd, &incumbent, &blnd_usdc);
-            blnd_client.set_admin(&emitter);
+            emitter_client.initialize(&blnt, &incumbent, &blnt_usdc);
+            blnt_client.set_admin(&emitter);
             e.as_contract(&backstop, || storage::set_emitter(&e, &emitter));
 
-            TokenClient::new(&e, &blnd_usdc).transfer(&admin, &incumbent, &(10 * SCALAR_7));
-            TokenClient::new(&e, &blnd_usdc).transfer(&admin, &user, &(30 * SCALAR_7));
-            TokenClient::new(&e, &blnd_xlm).transfer(&admin, &user, &(10 * SCALAR_7));
+            TokenClient::new(&e, &blnt_usdc).transfer(&admin, &incumbent, &(10 * SCALAR_7));
+            TokenClient::new(&e, &blnt_usdc).transfer(&admin, &user, &(30 * SCALAR_7));
+            TokenClient::new(&e, &blnt_xlm).transfer(&admin, &user, &(10 * SCALAR_7));
             usdc_client.mint(&user, &(20 * SCALAR_7));
 
             let client = BackstopClient::new(&e, &backstop);
@@ -419,9 +421,9 @@ mod tests {
             Self {
                 admin,
                 backstop,
-                blnd,
-                blnd_usdc,
-                blnd_xlm,
+                blnt,
+                blnt_usdc,
+                blnt_xlm,
                 e,
                 emitter,
                 incumbent,
@@ -436,7 +438,7 @@ mod tests {
 
         fn claimable(&self, tier: &BackstopTier, user: &Address, pools: &Vec<Address>) -> i128 {
             self.e.as_contract(&self.backstop, || {
-                emissions::preview_user_ongoing_blnd(&self.e, *tier, user, pools)
+                emissions::preview_user_ongoing_blnt(&self.e, *tier, user, pools)
             })
         }
 
@@ -458,7 +460,7 @@ mod tests {
             }
             let epoch_start = self.migration_state().migration_epoch_start.unwrap();
             self.emitter()
-                .queue_swap_backstop(&self.backstop, &self.blnd_xlm);
+                .queue_swap_backstop(&self.backstop, &self.blnt_xlm);
             assert_eq!(self.client().distribute(), 0);
             epoch_start
         }
@@ -469,6 +471,32 @@ mod tests {
             self.emitter().swap_backstop();
             assert_eq!(self.client().distribute(), 0);
         }
+    }
+
+    #[test]
+    fn fresh_emitter_activates_without_a_queued_swap_or_backfill() {
+        let fixture = Fixture::create();
+        let emitter = fixture.e.register(MockEmitter, ());
+        EmitterClient::new(&fixture.e, &emitter).initialize(
+            &fixture.blnt,
+            &fixture.backstop,
+            &fixture.blnt_usdc,
+        );
+        MockTokenClient::new(&fixture.e, &fixture.blnt).set_admin(&emitter);
+        fixture.e.as_contract(&fixture.backstop, || {
+            storage::set_emitter(&fixture.e, &emitter)
+        });
+
+        assert_eq!(fixture.client().distribute(), 0);
+        let state = fixture.migration_state();
+        assert_eq!(state.status, MigrationStatus::Active);
+        assert_eq!(state.migration_epoch_start, None);
+        assert_eq!(state.verified_queue_unlock, None);
+        assert_eq!(state.scheduled_backfill, 0);
+        assert_eq!(state.backfill_end, Some(1_000));
+
+        fixture.e.ledger().set_timestamp(4_600);
+        assert_eq!(fixture.client().distribute(), 3_600 * SCALAR_7);
     }
 
     #[test]
@@ -493,8 +521,8 @@ mod tests {
         let pool_state = fixture.e.as_contract(&fixture.backstop, || {
             emissions::get_pool_ongoing_emissions(&fixture.e, &fixture.pool)
         });
-        assert!(pool_state.pending_blnd_usdc > 0);
-        assert_eq!(pool_state.pending_blnd_xlm, 0);
+        assert!(pool_state.pending_blnt_usdc > 0);
+        assert_eq!(pool_state.pending_blnt_xlm, 0);
         assert_eq!(
             fixture.claimable(
                 &BackstopTier::SecondLoss,
@@ -552,13 +580,13 @@ mod tests {
 
         fixture.client().drop();
         assert_eq!(fixture.migration_state().funded_backfill, Some(scheduled));
-        assert!(fixture.migration_state().blnd_binding_verified);
+        assert!(fixture.migration_state().blnt_binding_verified);
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&fixture.backstop),
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&fixture.backstop),
             scheduled + 10 * SCALAR_7
         );
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&discretionary_recipient),
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&discretionary_recipient),
             discretionary_amount
         );
         assert!(fixture.client().try_drop().is_err());
@@ -571,7 +599,7 @@ mod tests {
             ) > 0
         );
         assert!(
-            TokenClient::new(&fixture.e, &fixture.blnd_usdc).balance(&fixture.backstop)
+            TokenClient::new(&fixture.e, &fixture.blnt_usdc).balance(&fixture.backstop)
                 > 20 * SCALAR_7
         );
     }
@@ -620,7 +648,7 @@ mod tests {
         fixture.client().drop();
         assert_eq!(fixture.migration_state().funded_backfill, Some(0));
         assert_eq!(
-            TokenClient::new(&fixture.e, &fixture.blnd).balance(&recipient),
+            TokenClient::new(&fixture.e, &fixture.blnt).balance(&recipient),
             amount
         );
     }
@@ -670,7 +698,7 @@ mod tests {
 
         // Preserve the emitter's strict raw-balance qualification without
         // creating replacement tier shares or emission weight.
-        TokenClient::new(&fixture.e, &fixture.blnd_usdc).transfer(
+        TokenClient::new(&fixture.e, &fixture.blnt_usdc).transfer(
             &fixture.admin,
             &fixture.backstop,
             &(11 * SCALAR_7),
@@ -770,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn observed_queue_must_target_the_candidate_and_blnd_xlm() {
+    fn observed_queue_must_target_the_candidate_and_blnt_xlm() {
         let fixture = Fixture::create();
         assert_eq!(fixture.client().distribute(), 0);
         fixture
@@ -830,7 +858,7 @@ mod tests {
         let fixture = Fixture::create();
         let epoch_start = fixture.queue();
         let original_unlock = fixture.unlock();
-        let token = TokenClient::new(&fixture.e, &fixture.blnd_usdc);
+        let token = TokenClient::new(&fixture.e, &fixture.blnt_usdc);
 
         fixture.e.ledger().set_timestamp(original_unlock);
         let incumbent_top_up = token.balance(&fixture.backstop) - token.balance(&fixture.incumbent);
@@ -839,7 +867,7 @@ mod tests {
         token.transfer(&fixture.admin, &fixture.backstop, &1);
         fixture
             .emitter()
-            .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnt_xlm);
         let replacement_unlock = fixture.emitter().get_queued_swap().unwrap().unlock_time;
         fixture
             .e
@@ -876,7 +904,7 @@ mod tests {
         );
         fixture
             .emitter()
-            .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnt_xlm);
         assert_eq!(fixture.client().distribute(), 0);
 
         fixture.swap_and_sync();
@@ -904,7 +932,7 @@ mod tests {
         assert_eq!(fixture.client().distribute(), MAX_BACKFILLED_EMISSIONS);
         fixture
             .emitter()
-            .queue_swap_backstop(&fixture.backstop, &fixture.blnd_xlm);
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnt_xlm);
         assert_eq!(fixture.client().distribute(), 0);
         assert_eq!(
             fixture.migration_state().scheduled_backfill,

@@ -8,6 +8,10 @@
         "bytes": 30772,
         "sha256": "c1f4502a757e25c611f5a159bc1ab0eef64085adac6c68123dca66e87faffbc2"
       },
+      "emitter": {
+        "bytes": 10448,
+        "sha256": "438a5528cff17ede6fe515f095c43c5f15727af17d006971485e52462e7e7b89"
+      },
       "pool": {
         "bytes": 57328,
         "sha256": "a41fc53d6753b6c04eb15b021c55052366a4c8e0e21bc72700f461264ec1350e"

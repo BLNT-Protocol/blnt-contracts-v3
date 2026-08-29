@@ -452,7 +452,7 @@ fn test_liquidations() {
     );
 
     // create a committed single-tier bad-debt auction
-    let blnd_usdc_token = fixture.backstop.backstop_token(
+    let blnt_usdc_token = fixture.backstop.backstop_token(
         &backstop::BackstopTier::SecondLoss,
         &pool_fixture.pool.address,
     );
@@ -482,7 +482,7 @@ fn test_liquidations() {
     assert!(
         bad_debt_auction_data
             .lot
-            .get(blnd_usdc_token.clone())
+            .get(blnt_usdc_token.clone())
             .unwrap()
             > 0
     );
@@ -542,14 +542,14 @@ fn test_liquidations() {
         xlm_bad_debt.fixed_mul_floor(80, 100).unwrap()
     );
     assert_eq!(
-        new_auction.lot.get(blnd_usdc_token.clone()).unwrap(),
+        new_auction.lot.get(blnt_usdc_token.clone()).unwrap(),
         bad_debt_auction_data
             .lot
-            .get(blnd_usdc_token.clone())
+            .get(blnt_usdc_token.clone())
             .unwrap()
             - bad_debt_auction_data
                 .lot
-                .get(blnd_usdc_token)
+                .get(blnt_usdc_token)
                 .unwrap()
                 .fixed_mul_floor(20, 100)
                 .unwrap()

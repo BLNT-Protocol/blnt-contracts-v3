@@ -3,7 +3,7 @@ use crate::{
         self, load_pool_backstop_data, tier_token, validate_backstop_assets, BackstopAsset,
         BackstopTier, PoolBackstopData, UserBalance, Q4W,
     },
-    constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
+    constants::MAX_INITIAL_DROP,
     emissions,
     errors::BackstopError,
     events::BackstopEvents,
@@ -90,7 +90,7 @@ pub trait Backstop {
 
     /********** Emissions **********/
 
-    /// Allocate the next migration-backfill or ongoing BLND checkpoint.
+    /// Allocate the next migration-backfill or ongoing BLNT checkpoint.
     fn distribute(e: Env) -> i128;
 
     /// Start or refresh the pool's tier streams and grant its accrued 30% allowance.
@@ -99,7 +99,7 @@ pub trait Backstop {
     /// Add a threshold-qualified pool to the reward zone.
     ///
     /// If all 30 slots are occupied, the replacement must have strictly more
-    /// active underlying BLND than the named member.
+    /// active underlying BLNT than the named member.
     ///
     /// ### Arguments
     /// * `to_add` - The address of the pool to add
@@ -118,7 +118,7 @@ pub trait Backstop {
     /// If the pool is not below the threshold or if the pool is not in the reward zone
     fn remove_reward(e: Env, to_remove: Address);
 
-    /// Compound one eligible tier's accrued BLND across a list of pools.
+    /// Compound one eligible tier's accrued BLNT across a list of pools.
     fn claim(
         e: Env,
         tier: BackstopTier,
@@ -130,7 +130,7 @@ pub trait Backstop {
     /// Execute the configured initial drop and fund any scheduled migration backfill.
     fn drop(e: Env);
 
-    /// Swap a bounded pending USDC or XLM haircut through its canonical Comet and burn the BLND output.
+    /// Swap a bounded pending USDC or XLM haircut through its canonical Comet and burn the BLNT output.
     fn buy_and_burn(e: Env, asset: BackstopAsset) -> i128;
 
     /********** Fund Management *********/
@@ -149,7 +149,7 @@ pub trait Backstop {
     fn draw(e: Env, tier: BackstopTier, pool_address: Address, amount: i128, to: Address);
 
     /// (Only Pool) Sends one tier token from `from` to a pool's backstop.
-    /// Plain-USDC and plain-XLM donations credit 99% and reserve 1% for BLND buy-and-burn.
+    /// Plain-USDC and plain-XLM donations credit 99% and reserve 1% for BLNT buy-and-burn.
     ///
     /// NOTE: This is not a deposit, and `from` will permanently lose access to the funds
     ///
@@ -170,21 +170,21 @@ impl BackstopContract {
     /// Construct the backstop contract
     ///
     /// ### Arguments
-    /// * `blnd_usdc_token` - The canonical BLND:USDC LP token
-    /// * `blnd_xlm_token` - The canonical BLND:XLM LP token
+    /// * `blnt_usdc_token` - The canonical BLNT:USDC LP token
+    /// * `blnt_xlm_token` - The canonical BLNT:XLM LP token
     /// * `emitter` - The Emitter contract ID
-    /// * `blnd_token` - The BLND token ID
+    /// * `blnt_token` - The BLNT token ID
     /// * `usdc_token` - The USDC token ID
     /// * `xlm_token` - The XLM token ID
     /// * `pool_factory` - The pool factory ID
-    /// * `drop_list` - Immutable discretionary recipient addresses and BLND amounts
+    /// * `drop_list` - Immutable discretionary recipient addresses and BLNT amounts
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
-        blnd_usdc_token: Address,
-        blnd_xlm_token: Address,
+        blnt_usdc_token: Address,
+        blnt_xlm_token: Address,
         emitter: Address,
-        blnd_token: Address,
+        blnt_token: Address,
         usdc_token: Address,
         xlm_token: Address,
         pool_factory: Address,
@@ -192,13 +192,13 @@ impl BackstopContract {
     ) {
         validate_backstop_assets(
             &e,
-            &blnd_token,
+            &blnt_token,
             &usdc_token,
             &xlm_token,
-            &blnd_usdc_token,
-            &blnd_xlm_token,
+            &blnt_usdc_token,
+            &blnt_xlm_token,
         );
-        let mut drop_total = MAX_BACKFILLED_EMISSIONS;
+        let mut drop_total = 0_i128;
         for (_, amount) in drop_list.iter() {
             require_nonnegative(&e, amount);
             drop_total = drop_total
@@ -208,9 +208,9 @@ impl BackstopContract {
         if drop_total > MAX_INITIAL_DROP {
             panic_with_error!(&e, BackstopError::BadRequest);
         }
-        storage::set_blnd_usdc_token(&e, &blnd_usdc_token);
-        storage::set_blnd_xlm_token(&e, &blnd_xlm_token);
-        storage::set_blnd_token(&e, &blnd_token);
+        storage::set_blnt_usdc_token(&e, &blnt_usdc_token);
+        storage::set_blnt_xlm_token(&e, &blnt_xlm_token);
+        storage::set_blnt_token(&e, &blnt_token);
         storage::set_usdc_token(&e, &usdc_token);
         storage::set_xlm_token(&e, &xlm_token);
         storage::set_pool_factory(&e, &pool_factory);
@@ -383,8 +383,8 @@ impl Backstop for BackstopContract {
     ) -> i128 {
         storage::extend_instance(&e);
         let claim = emissions::execute_claim(&e, tier, &from, &pool_addresses, min_lp_tokens_out);
-        for (pool, blnd_amount, lp_amount, shares) in claim.allocations.iter() {
-            BackstopEvents::claim(&e, tier, from.clone(), pool, blnd_amount, lp_amount, shares);
+        for (pool, blnt_amount, lp_amount, shares) in claim.allocations.iter() {
+            BackstopEvents::claim(&e, tier, from.clone(), pool, blnt_amount, lp_amount, shares);
         }
         claim.lp_amount
     }
@@ -402,11 +402,11 @@ impl Backstop for BackstopContract {
                 &e,
                 asset,
                 result.pair_in,
-                result.blnd_burned,
+                result.blnt_burned,
                 result.pending,
             );
         }
-        result.blnd_burned
+        result.blnt_burned
     }
 
     /********** Fund Management *********/

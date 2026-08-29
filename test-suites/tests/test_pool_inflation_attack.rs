@@ -22,7 +22,7 @@ fn test_pool_inflation_attack() {
     fixture.create_pool_reserve(0, TokenIndex::XLM, &xlm_config);
 
     // setup backstop and update pool status
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(500_100 * SCALAR_7));
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(500_100 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(12_600 * SCALAR_7));
     fixture.lp.join_pool(
         &(50_000 * SCALAR_7),

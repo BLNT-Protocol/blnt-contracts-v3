@@ -479,8 +479,8 @@ mod tests {
 
     fn test_tier_data(e: &Env, tokens: i128, value: i128) -> BackstopPoolTierData {
         BackstopPoolTierData {
-            asset: crate::dependencies::BackstopContractAsset::BlndXlm,
-            blnd_emission_eligible: false,
+            asset: crate::dependencies::BackstopContractAsset::BlntXlm,
+            blnt_emission_eligible: false,
             take_rate_weight: 1,
             token: Address::generate(e),
             tokens,
@@ -491,18 +491,18 @@ mod tests {
 
     fn test_pool_data(
         e: &Env,
-        blnd_xlm: BackstopPoolTierData,
-        blnd_usdc: BackstopPoolTierData,
+        blnt_xlm: BackstopPoolTierData,
+        blnt_usdc: BackstopPoolTierData,
         usdc: BackstopPoolTierData,
     ) -> BackstopPoolData {
         BackstopPoolData {
-            active_value: blnd_xlm
+            active_value: blnt_xlm
                 .value
-                .checked_add(blnd_usdc.value)
+                .checked_add(blnt_usdc.value)
                 .and_then(|total| total.checked_add(usdc.value))
                 .unwrap(),
             q4w_pct: 0,
-            tiers: vec![e, blnd_xlm, blnd_usdc, usdc],
+            tiers: vec![e, blnt_xlm, blnt_usdc, usdc],
         }
     }
 
@@ -600,14 +600,14 @@ mod tests {
         let filler = Address::generate(&e);
         let unhealthy_filler = Address::generate(&e);
         let pool_address = create_pool(&e);
-        let (blnd, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &admin);
+        let (blnt, blnt_client) = testutils::create_blnt_token(&e, &pool_address, &admin);
         let (usdc, usdc_client) = testutils::create_token_contract(&e, &admin);
-        let (lp_token, lp_token_client) = testutils::create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (lp_token, lp_token_client) = testutils::create_comet_lp_pool(&e, &admin, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
+            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnt);
 
-        blnd_client.mint(&depositor, &500_001_0000000);
-        blnd_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
+        blnt_client.mint(&depositor, &500_001_0000000);
+        blnt_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
         usdc_client.mint(&depositor, &12_501_0000000);
         usdc_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
         lp_token_client.join_pool(
@@ -804,11 +804,11 @@ mod tests {
 
         let admin = Address::generate(&e);
         let pool_address = create_pool(&e);
-        let (blnd, _) = testutils::create_blnd_token(&e, &pool_address, &admin);
+        let (blnt, _) = testutils::create_blnt_token(&e, &pool_address, &admin);
         let (usdc, _) = testutils::create_token_contract(&e, &admin);
-        let (lp_token, _) = testutils::create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (lp_token, _) = testutils::create_comet_lp_pool(&e, &admin, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
+            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnt);
         // Keep a small positive tier balance so creation must obtain a valid
         // quote and use the tier before supplier default is allowed.
         backstop_client.deposit(
@@ -944,13 +944,13 @@ mod tests {
         let admin = Address::generate(&e);
         let depositor = Address::generate(&e);
         let pool_address = create_pool(&e);
-        let (blnd, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &admin);
+        let (blnt, blnt_client) = testutils::create_blnt_token(&e, &pool_address, &admin);
         let (usdc, usdc_client) = testutils::create_token_contract(&e, &admin);
-        let (lp_token, lp_token_client) = testutils::create_comet_lp_pool(&e, &admin, &blnd, &usdc);
+        let (lp_token, lp_token_client) = testutils::create_comet_lp_pool(&e, &admin, &blnt, &usdc);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnd);
-        blnd_client.mint(&depositor, &(5_001 * SCALAR_7));
-        blnd_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
+            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnt);
+        blnt_client.mint(&depositor, &(5_001 * SCALAR_7));
+        blnt_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
         usdc_client.mint(&depositor, &(126 * SCALAR_7));
         usdc_client.approve(&depositor, &lp_token, &i128::MAX, &99_999);
         lp_token_client.join_pool(

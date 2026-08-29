@@ -17,8 +17,8 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     fixture.tokens[TokenIndex::WETH].mint(&frodo, &(100 * 10i128.pow(9)));
 
     // mint LP tokens with whale
-    // Frodo starts with 30m explicitly funded BLND.
-    fixture.tokens[TokenIndex::BLND].mint(&frodo, &(70_000_000 * SCALAR_7));
+    // Frodo starts with 30m explicitly funded BLNT.
+    fixture.tokens[TokenIndex::BLNT].mint(&frodo, &(70_000_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&frodo, &(2_600_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(10_000_000 * SCALAR_7),
@@ -166,7 +166,7 @@ mod tests {
         );
         assert_eq!(
             10_000_000 * SCALAR_7,
-            fixture.tokens[TokenIndex::BLND].balance(&fixture.bombadil)
+            fixture.tokens[TokenIndex::BLNT].balance(&fixture.bombadil)
         );
 
         // validate pool actions
@@ -223,7 +223,7 @@ mod tests {
         );
         assert_eq!(
             10_000_000 * SCALAR_7,
-            fixture.tokens[TokenIndex::BLND].balance(&fixture.bombadil)
+            fixture.tokens[TokenIndex::BLNT].balance(&fixture.bombadil)
         );
 
         // validate pool actions

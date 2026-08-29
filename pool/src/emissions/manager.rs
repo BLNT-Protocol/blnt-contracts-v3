@@ -81,7 +81,7 @@ pub fn gulp_emissions(e: &Env) -> i128 {
 
 /// Validate the pool's current emission targets before reserving its tranche
 /// from the backstop. This prevents an empty or fully disabled configuration
-/// from making otherwise claimable BLND unreachable.
+/// from making otherwise claimable BLNT unreachable.
 fn require_enabled_pool_emissions(e: &Env) {
     let pool_emissions = storage::get_pool_emissions(e);
     if pool_emissions.is_empty() {
