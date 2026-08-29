@@ -50,7 +50,9 @@ impl Reserve {
 
         let cur_util = reserve.utilization(e);
         if cur_util == 0 {
-            // if there are no assets borrowed, we don't need to update the reserve
+            // With no liabilities there is no interest to accrue. Intentionally
+            // freeze ir_mod, but advance last_time so the idle interval is not
+            // applied retroactively when borrowing resumes.
             reserve.data.last_time = e.ledger().timestamp();
             return reserve;
         }
@@ -529,6 +531,79 @@ mod tests {
             assert_eq!(reserve.data.b_supply, reserve_data.b_supply);
             assert_eq!(reserve.data.backstop_credit, 0);
             assert_eq!(reserve.data.last_time, 617280);
+        });
+    }
+
+    #[test]
+    fn zero_utilization_freezes_modifier_without_replaying_idle_time() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set(LedgerInfo {
+            timestamp: 200,
+            protocol_version: 27,
+            sequence_number: 40,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+        let oracle = Address::generate(&e);
+        let (underlying, _) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.ir_mod = 2 * SCALAR_7;
+        reserve_data.d_supply = 80 * SCALAR_7;
+        reserve_data.b_supply = 100 * SCALAR_7;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &underlying, &reserve_config, &reserve_data);
+
+        let pool_config = PoolConfig {
+            oracle,
+            min_collateral: SCALAR_7,
+            bstop_rate: 0_2000000,
+            status: 0,
+            max_positions: 4,
+        };
+        e.as_contract(&pool, || {
+            storage::set_pool_config(&e, &pool_config);
+
+            // A repayment first accrues the active interval through its exact
+            // transaction timestamp, then leaves the reserve at zero utilization.
+            let mut repaid = Reserve::load(&e, &pool_config, &underlying);
+            assert!(repaid.data.d_rate > reserve_data.d_rate);
+            assert!(repaid.data.ir_mod > reserve_data.ir_mod);
+            repaid.data.d_supply = 0;
+            repaid.store(&e);
+            let frozen_ir_mod = repaid.data.ir_mod;
+            let frozen_d_rate = repaid.data.d_rate;
+
+            // Loading the idle reserve advances its checkpoint without changing
+            // either the debt index or the adaptive modifier.
+            e.ledger().set_timestamp(10_000);
+            let mut idle = Reserve::load(&e, &pool_config, &underlying);
+            assert_eq!(idle.data.ir_mod, frozen_ir_mod);
+            assert_eq!(idle.data.d_rate, frozen_d_rate);
+            assert_eq!(idle.data.last_time, 10_000);
+
+            // This models a borrow added after the zero-utilization load in the
+            // same transaction. Only time after this checkpoint may affect ir_mod.
+            idle.data.d_supply = 25 * SCALAR_7;
+            let resumed_util = idle.utilization(&e);
+            idle.store(&e);
+
+            e.ledger().set_timestamp(10_100);
+            let (_, expected_ir_mod) =
+                calc_accrual(&e, &reserve_config, resumed_util, frozen_ir_mod, 10_000);
+            let (_, retroactive_ir_mod) =
+                calc_accrual(&e, &reserve_config, resumed_util, frozen_ir_mod, 200);
+            let resumed = Reserve::load(&e, &pool_config, &underlying);
+
+            assert_eq!(resumed.data.ir_mod, expected_ir_mod);
+            assert_ne!(resumed.data.ir_mod, retroactive_ir_mod);
+            assert!(resumed.data.d_rate > frozen_d_rate);
         });
     }
 
