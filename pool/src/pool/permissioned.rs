@@ -26,7 +26,7 @@ pub fn execute_force_withdrawal(
     }
 
     let mut reserve = pool.load_reserve(e, asset, true);
-    require_reconciled(e, &reserve);
+    require_reconciled(e, &reserve, pool.protocol_fee_data(e, asset).credit);
     let supply_burned = user_state.get_supply(reserve.config.index);
     let collateral_burned = user_state.get_collateral(reserve.config.index);
     let total_burned = supply_burned

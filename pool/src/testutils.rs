@@ -225,7 +225,7 @@ pub(crate) fn create_backstop<'a>(
     (backstop_id.clone(), client)
 }
 
-/// Deploy a test Comet LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
+/// Deploy a test Comet v2 LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
 ///
 /// Initializes the pool with the following settings:
 /// - Swap fee: 0.3%

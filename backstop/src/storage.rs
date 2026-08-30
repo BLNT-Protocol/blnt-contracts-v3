@@ -3,7 +3,7 @@ use soroban_sdk::{
     TryFromVal, Val, Vec,
 };
 
-use crate::backstop::{BackstopAsset, BackstopTier, PoolBalance, UserBalance};
+use crate::backstop::{BackstopTier, PoolBalance, UserBalance};
 use crate::dependencies::BackstopTierConfig;
 use crate::BackstopError;
 
@@ -85,8 +85,6 @@ const BLNT_BINDING_VERIFIED_KEY: &str = "BlntBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
-const BUYBACK_USDC_PENDING_KEY: &str = "BuybackUSDC";
-const BUYBACK_XLM_PENDING_KEY: &str = "BuybackXLM";
 
 #[derive(Clone)]
 #[contracttype(export = false)]
@@ -122,7 +120,6 @@ pub enum BackstopDataKey {
     UEmisData(PoolUserTierKey),
     PoolOngoingEmissions(Address),
     PoolEmissionGulp(Address),
-    BuybackCarry(PoolTierKey),
     PoolBackstopConfig(Address),
 }
 
@@ -275,50 +272,6 @@ pub fn set_blnt_usdc_token(e: &Env, blnt_usdc_token_id: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, BLNT_USDC_TOKEN_KEY), blnt_usdc_token_id);
-}
-
-/// Return a canonical pair asset reserved for its next BLNT buy-and-burn.
-pub fn get_buyback_pending(e: &Env, asset: BackstopAsset) -> i128 {
-    e.storage()
-        .instance()
-        .get(&buyback_pending_key(e, asset))
-        .unwrap_or(0)
-}
-
-/// Store a canonical pair asset reserved for its next BLNT buy-and-burn.
-pub fn set_buyback_pending(e: &Env, asset: BackstopAsset, amount: i128) {
-    e.storage()
-        .instance()
-        .set(&buyback_pending_key(e, asset), &amount);
-}
-
-fn buyback_pending_key(e: &Env, asset: BackstopAsset) -> Symbol {
-    match asset {
-        BackstopAsset::Usdc => Symbol::new(e, BUYBACK_USDC_PENDING_KEY),
-        BackstopAsset::Xlm => Symbol::new(e, BUYBACK_XLM_PENDING_KEY),
-        _ => panic_with_error!(e, BackstopError::BadRequest),
-    }
-}
-
-/// Return the sub-stroop haircut remainder for one pool tier's auction proceeds.
-pub fn get_buyback_carry(e: &Env, pool: &Address, tier: BackstopTier) -> i128 {
-    let key = BackstopDataKey::BuybackCarry(PoolTierKey {
-        pool: pool.clone(),
-        tier,
-    });
-    get_persistent_default(e, &key, || 0, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED)
-}
-
-/// Store the sub-stroop haircut remainder for one pool tier's auction proceeds.
-pub fn set_buyback_carry(e: &Env, pool: &Address, tier: BackstopTier, carry: i128) {
-    let key = BackstopDataKey::BuybackCarry(PoolTierKey {
-        pool: pool.clone(),
-        tier,
-    });
-    e.storage().persistent().set(&key, &carry);
-    e.storage()
-        .persistent()
-        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
 /********** User Shares **********/

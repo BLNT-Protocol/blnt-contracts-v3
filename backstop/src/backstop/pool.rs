@@ -274,6 +274,7 @@ impl PoolBalance {
 const BLNT_WEIGHT: i128 = 8_000_000;
 const PAIR_WEIGHT: i128 = 2_000_000;
 const PAIR_VALUE_MULTIPLIER: i128 = 5;
+const BLNT_SPOT_VALUE_MULTIPLIER: i128 = 4;
 const TOKEN_DECIMALS: u32 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -438,6 +439,27 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         queued_values: ActivationValues { tiers: queued },
         total_values: ActivationValues { tiers: total },
     }
+}
+
+/// Return the seven-decimal USDC value of one BLNT implied by the canonical
+/// 80:20 BLNT:USDC Comet v2 pool's current reserves.
+pub fn quote_blnt_price(e: &Env) -> i128 {
+    let anchor = read_comet(
+        e,
+        &storage::get_blnt_usdc_token(e),
+        &storage::get_blnt_token(e),
+        &storage::get_usdc_token(e),
+    );
+    let price = mul_div_floor(
+        e,
+        SCALAR_7,
+        checked_mul(e, anchor.pair_reserve, BLNT_SPOT_VALUE_MULTIPLIER),
+        anchor.blnt_reserve,
+    );
+    if price <= 0 {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    price
 }
 
 fn quote_configured_tier(
@@ -1393,14 +1415,14 @@ mod valuation_tests {
         e.cost_estimate().budget().reset_unlimited();
         let backstop = create_backstop_with_real_comets(&e);
 
-        let (blnt_usdc, blnt_xlm) = e.as_contract(&backstop, || {
+        let (blnt_usdc, blnt_xlm, blnt_price) = e.as_contract(&backstop, || {
             set_test_valuation_override(&e, None);
             let (blnt_usdc, blnt_xlm) = quote_pool_lp_amounts(
                 &e,
                 (20 * SCALAR_7, 0, 20 * SCALAR_7),
                 (10 * SCALAR_7, 0, 10 * SCALAR_7),
             );
-            (blnt_usdc.total, blnt_xlm.total)
+            (blnt_usdc.total, blnt_xlm.total, quote_blnt_price(&e))
         });
 
         assert_eq!(
@@ -1415,6 +1437,7 @@ mod valuation_tests {
                 usdc_value: 125_000_000,
             }
         );
+        assert_eq!(blnt_price, 1_000_000);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::{
 };
 use soroban_sdk::{panic_with_error, Address, Env, String};
 
-use super::{pool::Pool, Reserve};
+use super::pool::Pool;
 
 /// Initialize the pool
 ///
@@ -52,10 +52,12 @@ pub fn execute_update_pool(
     let mut pool_config = storage::get_pool_config(e);
     let res_list = storage::get_res_list(e);
     if pool_config.bstop_rate != backstop_take_rate {
+        let mut pool = Pool::load(e);
         for res in res_list {
-            let reserve = Reserve::load(e, &pool_config, &res);
-            reserve.store(e);
+            let reserve = pool.load_reserve(e, &res, true);
+            pool.cache_reserve(reserve);
         }
+        pool.store_cached_reserves(e);
     }
     pool_config.bstop_rate = backstop_take_rate;
     pool_config.max_positions = max_positions;
@@ -120,7 +122,7 @@ fn initialize_reserve(e: &Env, asset: &Address, config: &ReserveConfig) -> u32 {
         // accrue and store reserve data to the ledger
         let mut pool = Pool::load(e);
         // @dev: Store the reserve to ledger manually
-        let mut reserve = pool.load_reserve(e, asset, false);
+        let mut reserve = pool.load_reserve(e, asset, true);
         index = reserve.config.index;
         let reserve_config = storage::get_res_config(e, asset);
         require_valid_reserve_metadata_changes(e, &reserve_config, config);
@@ -133,7 +135,8 @@ fn initialize_reserve(e: &Env, asset: &Address, config: &ReserveConfig) -> u32 {
         {
             reserve.data.ir_mod = SCALAR_7;
         }
-        reserve.store(e);
+        pool.cache_reserve(reserve);
+        pool.store_cached_reserves(e);
     } else {
         index = storage::push_res_list(e, asset);
         let init_data = ReserveData {
@@ -1058,6 +1061,7 @@ mod tests {
             let res_data = storage::get_res_data(&e, &underlying);
             assert!(res_data.d_rate > 1_000_000_000_000);
             assert!(res_data.backstop_credit > 0);
+            assert!(storage::get_protocol_fee_data(&e, &underlying).credit > 0);
             assert_eq!(res_data.last_time, 10000);
             assert!(res_data.ir_mod != 1_0000000);
         });

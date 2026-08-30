@@ -34,7 +34,7 @@ V2 MUST NOT be recompiled against the v3 SDK merely to share a crate graph.
 
 The baseline consists of:
 
-- One v2 backstop that accepts a single BLND:USDC Comet LP token.
+- One v2 backstop that accepts a single BLND:USDC Comet v1 LP token.
 - One pool factory bound to that backstop and one immutable pool WASM hash.
 - Isolated lending pools deployed by the factory.
 - One immutable SEP-40 oracle binding per pool.
@@ -52,7 +52,7 @@ not protocol governance.
 
 ### V2-BACKSTOP-001: Single accepted token
 
-The v2 backstop accepts one immutable BLND:USDC Comet LP token. Its BLND and
+The v2 backstop accepts one immutable BLND:USDC Comet v1 LP token. Its BLND and
 USDC assets, BLND token, and pool factory are immutable constructor bindings.
 
 An initial deposit for a pool MUST verify that the pool was deployed by the
@@ -96,7 +96,7 @@ V2 uses a bounded queue-for-withdrawal:
 
 ### V2-BACKSTOP-004: Activation threshold
 
-The backstop derives the pool's underlying BLND and USDC from current Comet
+The backstop derives the pool's underlying BLND and USDC from current Comet v1
 reserves and LP supply, rounds each underlying pool balance down to a whole
 token, and evaluates:
 
@@ -155,7 +155,7 @@ calculations.
 The owner-authorized `claim(from, pools, min_lp_out)` accepts a nonempty list
 of unique pool addresses, checkpoints each pool, and aggregates the owner's
 accrued backstop BLND. It deposits the aggregate BLND single-sided into the
-BLND:USDC Comet once and adds the resulting LP tokens proportionally to the
+BLND:USDC Comet v1 pool once and adds the resulting LP tokens proportionally to the
 owner's selected pool positions using floor rounding. V2 does not pay claimed
 backstop BLND directly to the owner's wallet and exposes no separate
 claimable-emissions view. Clients MAY estimate from pool, user, and emission

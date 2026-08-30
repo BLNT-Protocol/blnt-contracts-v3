@@ -31,6 +31,7 @@ pub enum RequestType {
     FillBadDebtAuction = 7,
     FillInterestAuction = 8,
     DeleteLiquidationAuction = 9,
+    FillProtocolFeeAuction = 10,
 }
 
 impl RequestType {
@@ -50,6 +51,7 @@ impl RequestType {
             7 => RequestType::FillBadDebtAuction,
             8 => RequestType::FillInterestAuction,
             9 => RequestType::DeleteLiquidationAuction,
+            10 => RequestType::FillProtocolFeeAuction,
             _ => panic_with_error!(e, PoolError::BadRequest),
         }
     }
@@ -255,6 +257,24 @@ pub fn build_actions_from_request(
                 PoolEvents::fill_auction(
                     e,
                     AuctionType::InterestAuction as u32,
+                    request.address.clone(),
+                    from_state.address.clone(),
+                    request.amount,
+                    filled_auction,
+                );
+            }
+            RequestType::FillProtocolFeeAuction => {
+                let filled_auction = auctions::fill(
+                    e,
+                    pool,
+                    AuctionType::ProtocolFeeAuction as u32,
+                    &request.address,
+                    from_state,
+                    u64::from(request_fill_percent(e, request.amount)),
+                );
+                PoolEvents::fill_auction(
+                    e,
+                    AuctionType::ProtocolFeeAuction as u32,
                     request.address.clone(),
                     from_state.address.clone(),
                     request.amount,

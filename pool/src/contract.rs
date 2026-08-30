@@ -175,9 +175,10 @@ pub trait Pool {
     fn clawback(e: Env, asset: Address, from: Address, amount: i128);
 
     /// Recognize a direct reserve-custody deficit against the affected
-    /// reserve's supplier rate and then its unpaid take-rate credit. The
-    /// operation is permissionless, leaves user bToken balances and borrower
-    /// liabilities unchanged, and creates no backstop debt.
+    /// reserve's unpaid protocol credit, supplier rate, and then unpaid
+    /// take-rate credit. The operation is permissionless, leaves user bToken
+    /// balances and borrower liabilities unchanged, and creates no backstop
+    /// debt. An affected protocol-fee auction is canceled.
     ///
     /// Returns the underlying deficit recognized, or zero when the reserve has
     /// no custody deficit.
@@ -284,7 +285,7 @@ pub trait Pool {
 
     /***** Auction / Liquidation Functions *****/
 
-    /// Create a liquidation, bad-debt, or interest auction.
+    /// Create a liquidation, bad-debt, interest, or protocol-fee auction.
     ///
     /// `bid` and `lot` have these auction-specific meanings:
     /// - Liquidation: both are required auction inputs; neither may be empty.
@@ -294,15 +295,19 @@ pub trait Pool {
     /// - Interest: `bid` may be `[]`, meaning the caller accepts the canonically selected tier
     ///   token, or nonempty to assert that exact token. `lot` is the required, nonempty list of
     ///   reserve assets to checkpoint and offer; `lot = []` is invalid.
+    /// - Protocol fee: `bid` may be `[]`, meaning the caller accepts canonical BLNT, or nonempty
+    ///   to assert that exact token. `lot` is the required, nonempty list of reserve assets to
+    ///   checkpoint and offer; `lot = []` is invalid.
     ///
     /// Assertions are order-independent and never choose a tier, set an amount, or affect pricing.
     /// A mismatch fails the transaction atomically.
     ///
     /// ### Arguments
-    /// * `auction_type` - 0 for liquidation, 1 for bad debt, or 2 for interest
+    /// * `auction_type` - 0 for liquidation, 1 for bad debt, 2 for interest,
+    ///   or 3 for protocol fee
     /// * `user` - The borrower for liquidation or the configured backstop otherwise
     /// * `bid` - Bid assets or optional backstop-auction asset assertion, as described above
-    /// * `lot` - Lot assets, optional bad-debt asset assertion, or interest reserve inputs
+    /// * `lot` - Lot assets, optional bad-debt asset assertion, or reserve inputs for type 2 or 3
     /// * `percent` - Liquidation percentage; exactly 100 otherwise
     ///
     /// A nonempty assertion that does not exactly match the canonical asset set fails with
@@ -536,8 +541,15 @@ impl Pool for PoolContract {
 
     fn reconcile_loss(e: Env, asset: Address) -> i128 {
         storage::extend_instance(&e);
-        let (loss, supplier_loss, backstop_credit_loss, b_rate_loss, auction_canceled) =
-            pool::execute_reconcile_loss(&e, &asset);
+        let (
+            loss,
+            protocol_credit_loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+            auction_canceled,
+            protocol_auction_canceled,
+        ) = pool::execute_reconcile_loss(&e, &asset);
 
         if auction_canceled {
             PoolEvents::delete_auction(
@@ -545,6 +557,16 @@ impl Pool for PoolContract {
                 auctions::AuctionType::InterestAuction as u32,
                 storage::get_backstop(&e),
             );
+        }
+        if protocol_auction_canceled {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::ProtocolFeeAuction as u32,
+                storage::get_backstop(&e),
+            );
+        }
+        if protocol_credit_loss > 0 {
+            PoolEvents::protocol_credit_loss(&e, asset.clone(), protocol_credit_loss);
         }
         PoolEvents::reconcile_loss(
             &e,

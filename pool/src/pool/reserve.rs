@@ -1,13 +1,13 @@
 use cast::i128;
 use sep_41_token::StellarAssetClient;
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use soroban_sdk::{contracttype, panic_with_error, Address, Env, I256};
 
 use crate::{
-    constants::{MIN_OPERATIONAL_B_RATE, SCALAR_12, SCALAR_7},
+    constants::{MIN_OPERATIONAL_B_RATE, PROTOCOL_INTEREST_FEE_RATE, SCALAR_12, SCALAR_7},
     errors::PoolError,
     pool::actions::RequestType,
-    storage::{self, PoolConfig, ReserveConfig, ReserveData},
+    storage::{self, PoolConfig, ProtocolFeeData, ReserveConfig, ReserveData},
 };
 
 use super::interest::calc_accrual;
@@ -34,8 +34,34 @@ impl Reserve {
     /// Panics if the asset is not supported, if emissions cannot be updated, or if the reserve
     /// cannot be updated to the current ledger timestamp.
     pub fn load(e: &Env, pool_config: &PoolConfig, asset: &Address) -> Reserve {
+        Self::load_with_protocol_fee(e, pool_config, asset).0
+    }
+
+    /// Load a reserve together with its additive protocol-fee sidecar. Internal
+    /// state-changing callers persist both values atomically; public reserve
+    /// previews discard the sidecar just as they discard the previewed reserve.
+    pub(crate) fn load_with_protocol_fee(
+        e: &Env,
+        pool_config: &PoolConfig,
+        asset: &Address,
+    ) -> (Reserve, ProtocolFeeData, bool) {
+        Self::load_with_protocol_fee_data(
+            e,
+            pool_config,
+            asset,
+            storage::get_protocol_fee_data(e, asset),
+        )
+    }
+
+    pub(crate) fn load_with_protocol_fee_data(
+        e: &Env,
+        pool_config: &PoolConfig,
+        asset: &Address,
+        mut protocol_fee: ProtocolFeeData,
+    ) -> (Reserve, ProtocolFeeData, bool) {
         let reserve_config = storage::get_res_config(e, asset);
         let reserve_data = storage::get_res_data(e, asset);
+        let initial_protocol_fee = protocol_fee.clone();
         let mut reserve = Reserve {
             asset: asset.clone(),
             scalar: 10i128.pow(reserve_config.decimals),
@@ -45,7 +71,7 @@ impl Reserve {
 
         // short circuit if the reserve has already been updated this ledger
         if e.ledger().timestamp() == reserve.data.last_time {
-            return reserve;
+            return (reserve, protocol_fee, false);
         }
 
         let cur_util = reserve.utilization(e);
@@ -54,7 +80,7 @@ impl Reserve {
             // freeze ir_mod, but advance last_time so the idle interval is not
             // applied retroactively when borrowing resumes.
             reserve.data.last_time = e.ledger().timestamp();
-            return reserve;
+            return (reserve, protocol_fee, false);
         }
 
         let (loan_accrual, new_ir_mod) = calc_accrual(
@@ -68,12 +94,21 @@ impl Reserve {
 
         let pre_update_liabilities = reserve.total_liabilities(e);
         reserve.data.d_rate = loan_accrual.fixed_mul_ceil(e, &reserve.data.d_rate, &SCALAR_12);
-        let accrued_interest = reserve.total_liabilities(e) - pre_update_liabilities;
+        let accrued_interest = reserve
+            .total_liabilities(e)
+            .checked_sub(pre_update_liabilities)
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
 
-        reserve.accrue(e, pool_config.bstop_rate, accrued_interest);
+        reserve.accrue(
+            e,
+            &mut protocol_fee,
+            pool_config.bstop_rate,
+            accrued_interest,
+        );
 
         reserve.data.last_time = e.ledger().timestamp();
-        reserve
+        let protocol_fee_changed = protocol_fee != initial_protocol_fee;
+        (reserve, protocol_fee, protocol_fee_changed)
     }
 
     /// Store the updated reserve to the ledger.
@@ -81,22 +116,32 @@ impl Reserve {
         storage::set_res_data(e, &self.asset, &self.data);
     }
 
-    /// Accrue interest to suppliers and the backstop. With no bTokens, the
-    /// entire accrual is credited to the backstop because there is no supplier
-    /// exchange-rate denominator.
+    /// Accrue the protocol fee first, then split remaining interest between
+    /// suppliers and the backstop. With no bTokens, the entire remainder is
+    /// credited to the backstop because there is no supplier denominator.
     ///
     /// ### Arguments
     /// * bstop_rate - The backstop take rate for the pool
     /// * accrued - The amount of additional underlying tokens
-    fn accrue(&mut self, e: &Env, bstop_rate: u32, accrued: i128) {
+    fn accrue(
+        &mut self,
+        e: &Env,
+        protocol_fee_data: &mut ProtocolFeeData,
+        bstop_rate: u32,
+        accrued: i128,
+    ) {
         let pre_update_supply = self.total_supply(e);
 
         if accrued > 0 {
+            let protocol_fee = accrue_protocol_fee(e, protocol_fee_data, accrued);
+            let remaining_accrual = accrued
+                .checked_sub(protocol_fee)
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
             if self.data.b_supply == 0 {
                 self.data.backstop_credit = self
                     .data
                     .backstop_credit
-                    .checked_add(accrued)
+                    .checked_add(remaining_accrual)
                     .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
                 return;
             }
@@ -105,14 +150,19 @@ impl Reserve {
             // update the accrued interest to reflect the amount the pool accrued
             let mut new_backstop_credit: i128 = 0;
             if bstop_rate > 0 {
-                new_backstop_credit = accrued.fixed_mul_floor(e, &i128(bstop_rate), &SCALAR_7);
-                self.data.backstop_credit += new_backstop_credit;
+                new_backstop_credit =
+                    remaining_accrual.fixed_mul_floor(e, &i128(bstop_rate), &SCALAR_7);
+                self.data.backstop_credit = self
+                    .data
+                    .backstop_credit
+                    .checked_add(new_backstop_credit)
+                    .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
             }
-            self.data.b_rate = (pre_update_supply + accrued - new_backstop_credit).fixed_div_floor(
-                e,
-                &self.data.b_supply,
-                &SCALAR_12,
-            );
+            let supplier_claim = pre_update_supply
+                .checked_add(remaining_accrual)
+                .and_then(|value| value.checked_sub(new_backstop_credit))
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+            self.data.b_rate = supplier_claim.fixed_div_floor(e, &self.data.b_supply, &SCALAR_12);
         }
     }
 
@@ -253,6 +303,32 @@ impl Reserve {
     }
 }
 
+fn accrue_protocol_fee(e: &Env, data: &mut ProtocolFeeData, accrued: i128) -> i128 {
+    if data.credit < 0 || !(0..SCALAR_7).contains(&data.carry) {
+        panic_with_error!(e, PoolError::BalanceError);
+    }
+    let numerator = I256::from_i128(e, accrued)
+        .mul(&I256::from_i128(e, PROTOCOL_INTEREST_FEE_RATE))
+        .add(&I256::from_i128(e, data.carry));
+    let fee = numerator
+        .div(&I256::from_i128(e, SCALAR_7))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let carry = numerator
+        .sub(&I256::from_i128(e, fee).mul(&I256::from_i128(e, SCALAR_7)))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    if fee < 0 || fee > accrued || !(0..SCALAR_7).contains(&carry) {
+        panic_with_error!(e, PoolError::BalanceError);
+    }
+    data.credit = data
+        .credit
+        .checked_add(fee)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    data.carry = carry;
+    fee
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,15 +394,18 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
 
             // (accrual: 1_002_957_375_248, util: .7864353)
             assert_eq!(reserve.data.d_rate, 1_349_657_798_173);
-            assert_eq!(reserve.data.b_rate, 1_125_547_124_242);
+            assert_eq!(reserve.data.b_rate, 1_125_542_943_434);
             assert_eq!(reserve.data.ir_mod, 1_0449815);
             assert_eq!(reserve.data.d_supply, 65_0000000);
             assert_eq!(reserve.data.b_supply, 99_0000000);
-            assert_eq!(reserve.data.backstop_credit, 0_0517357);
+            assert_eq!(reserve.data.backstop_credit, 0_0516323);
+            assert_eq!(protocol_fee.credit, 0_0005173);
+            assert_eq!(protocol_fee.carry, 5_780_000);
             assert_eq!(reserve.data.last_time, 617280);
         });
     }
@@ -374,14 +453,17 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
 
             // validate that b and d rates are updated
             assert_eq!(reserve.data.last_time, 1000);
             assert_eq!(reserve.data.b_rate, 1_300_000_000_020);
             assert_eq!(reserve.data.d_rate, 1_500_000_002_562);
             assert_eq!(reserve.data.ir_mod, 9999927);
-            assert_eq!(reserve.data.backstop_credit, 0_051240000_000000000);
+            assert_eq!(reserve.data.backstop_credit, 0_051137520_000000000);
+            assert_eq!(protocol_fee.credit, 0_000512400_000000000);
+            assert_eq!(protocol_fee.carry, 0);
         });
     }
 
@@ -422,7 +504,8 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
 
             assert_eq!(reserve.data.d_rate, 0);
             assert_eq!(reserve.data.b_rate, 0);
@@ -430,6 +513,8 @@ mod tests {
             assert_eq!(reserve.data.d_supply, 0);
             assert_eq!(reserve.data.b_supply, 0);
             assert_eq!(reserve.data.backstop_credit, 0);
+            assert_eq!(protocol_fee.credit, 0);
+            assert_eq!(protocol_fee.carry, 0);
             assert_eq!(reserve.data.last_time, 617280);
         });
     }
@@ -471,7 +556,8 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
             let accrued_interest = reserve.total_liabilities(&e) - 50 * SCALAR_7;
 
             assert_eq!(reserve.data.b_rate, 0);
@@ -481,8 +567,10 @@ mod tests {
             assert!(accrued_interest > 0);
             assert_eq!(
                 reserve.data.backstop_credit,
-                60 * SCALAR_7 + accrued_interest
+                60 * SCALAR_7 + accrued_interest - protocol_fee.credit
             );
+            assert_eq!(protocol_fee.credit, 58);
+            assert_eq!(protocol_fee.carry, 7_900_000);
             assert_eq!(reserve.data.last_time, 1_000);
         });
     }
@@ -522,7 +610,8 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
 
             assert_eq!(reserve.data.d_rate, 0);
             assert_eq!(reserve.data.b_rate, reserve_data.b_rate);
@@ -530,6 +619,8 @@ mod tests {
             assert_eq!(reserve.data.d_supply, 0);
             assert_eq!(reserve.data.b_supply, reserve_data.b_supply);
             assert_eq!(reserve.data.backstop_credit, 0);
+            assert_eq!(protocol_fee.credit, 0);
+            assert_eq!(protocol_fee.carry, 0);
             assert_eq!(reserve.data.last_time, 617280);
         });
     }
@@ -644,15 +735,18 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
 
             // (accrual: 1_002_957_375_248, util: .7864353)
             assert_eq!(reserve.data.d_rate, 1_349_657_798_173);
-            assert_eq!(reserve.data.b_rate, 1_126_069_707_070);
+            assert_eq!(reserve.data.b_rate, 1_126_064_481_818);
             assert_eq!(reserve.data.ir_mod, 1_0449815);
             assert_eq!(reserve.data.d_supply, 65_0000000);
             assert_eq!(reserve.data.b_supply, 99_0000000);
             assert_eq!(reserve.data.backstop_credit, 0);
+            assert_eq!(protocol_fee.credit, 0_0005173);
+            assert_eq!(protocol_fee.carry, 5_780_000);
             assert_eq!(reserve.data.last_time, 617280);
         });
     }
@@ -694,18 +788,24 @@ mod tests {
         };
         e.as_contract(&pool, || {
             storage::set_pool_config(&e, &pool_config);
-            let reserve = Reserve::load(&e, &pool_config, &underlying);
+            let (reserve, protocol_fee, _) =
+                Reserve::load_with_protocol_fee(&e, &pool_config, &underlying);
             reserve.store(&e);
+            storage::set_protocol_fee_data(&e, &underlying, &protocol_fee);
 
             let reserve_data = storage::get_res_data(&e, &underlying);
 
             // (accrual: 1_002_957_375_248, util: .7864353)
             assert_eq!(reserve_data.d_rate, 1_349_657_798_173);
-            assert_eq!(reserve_data.b_rate, 1_125_547_124_242);
+            assert_eq!(reserve_data.b_rate, 1_125_542_943_434);
             assert_eq!(reserve_data.ir_mod, 1_0449815);
             assert_eq!(reserve_data.d_supply, 65_0000000);
             assert_eq!(reserve_data.b_supply, 99_0000000);
-            assert_eq!(reserve_data.backstop_credit, 0_0517357);
+            assert_eq!(reserve_data.backstop_credit, 0_0516323);
+            assert_eq!(
+                storage::get_protocol_fee_data(&e, &underlying),
+                protocol_fee
+            );
             assert_eq!(reserve_data.last_time, 617280);
         });
     }
@@ -1066,14 +1166,19 @@ mod tests {
     fn test_accrued_interest_reopens_reserve_at_operational_floor() {
         let e = Env::default();
         let mut reserve = testutils::default_reserve(&e);
+        let mut protocol_fee = ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        };
         reserve.data.b_supply = 100 * SCALAR_7;
         reserve.data.b_rate = 0;
         reserve.data.backstop_credit = 0;
 
-        reserve.accrue(&e, 0_2000000, 12_5000000);
+        reserve.accrue(&e, &mut protocol_fee, 0_2000000, 12_5250502);
 
         assert_eq!(reserve.data.backstop_credit, 2_5000000);
-        assert_eq!(reserve.data.b_rate, MIN_OPERATIONAL_B_RATE);
+        assert_eq!(protocol_fee.credit, 0_0250501);
+        assert!(reserve.data.b_rate >= MIN_OPERATIONAL_B_RATE);
         reserve.require_action_allowed(&e, RequestType::Supply as u32);
         reserve.require_action_allowed(&e, RequestType::SupplyCollateral as u32);
         reserve.require_action_allowed(&e, RequestType::Borrow as u32);
@@ -1096,11 +1201,16 @@ mod tests {
         });
 
         let mut reserve = testutils::default_reserve(&e);
+        let mut protocol_fee = ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        };
         reserve.data.backstop_credit = 0_1234567;
 
-        reserve.accrue(&e, 0_2000000, 100_0000000);
-        assert_eq!(reserve.data.backstop_credit, 20_0000000 + 0_1234567);
-        assert_eq!(reserve.data.b_rate, 1_800_000_000_000);
+        reserve.accrue(&e, &mut protocol_fee, 0_2000000, 100_0000000);
+        assert_eq!(protocol_fee.credit, 0_2000000);
+        assert_eq!(reserve.data.backstop_credit, 19_9600000 + 0_1234567);
+        assert_eq!(reserve.data.b_rate, 1_798_400_000_000);
         assert_eq!(reserve.data.last_time, 0);
     }
 
@@ -1121,11 +1231,35 @@ mod tests {
         });
 
         let mut reserve = testutils::default_reserve(&e);
+        let mut protocol_fee = ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        };
         reserve.data.backstop_credit = 0_1234567;
 
-        reserve.accrue(&e, 0_2000000, -10_0000000);
+        reserve.accrue(&e, &mut protocol_fee, 0_2000000, -10_0000000);
         assert_eq!(reserve.data.backstop_credit, 0_1234567);
+        assert_eq!(protocol_fee.credit, 0);
+        assert_eq!(protocol_fee.carry, 0);
         assert_eq!(reserve.data.b_rate, 1_000_000_000_000);
         assert_eq!(reserve.data.last_time, 0);
+    }
+
+    #[test]
+    fn protocol_fee_carry_conserves_sub_base_unit_accrual() {
+        let e = Env::default();
+        let mut reserve = testutils::default_reserve(&e);
+        let mut protocol_fee = ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        };
+
+        reserve.accrue(&e, &mut protocol_fee, 0, 250);
+        assert_eq!(protocol_fee.credit, 0);
+        assert_eq!(protocol_fee.carry, 5_000_000);
+
+        reserve.accrue(&e, &mut protocol_fee, 0, 250);
+        assert_eq!(protocol_fee.credit, 1);
+        assert_eq!(protocol_fee.carry, 0);
     }
 }

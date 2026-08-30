@@ -78,6 +78,17 @@ pub struct ReserveData {
     pub last_time: u64, // the last block the data was updated
 }
 
+/// Additive protocol-fee accounting kept outside the v2-compatible
+/// `ReserveData` encoding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub struct ProtocolFeeData {
+    /// Underlying reserve tokens owed to the protocol-fee auction lane.
+    pub credit: i128,
+    /// Fixed-point numerator remainder retained across borrower-interest accruals.
+    pub carry: i128,
+}
+
 /// The emission data for the reserve b or d token
 #[derive(Clone)]
 #[contracttype]
@@ -173,6 +184,8 @@ pub enum PoolDataKey {
     Auction(AuctionKey),
     // Marks a user-liquidation auction created by permission revocation.
     BorrowExit(Address),
+    // Reserve-addressed additive protocol-interest fee data, separate from ReserveData.
+    ProtocolFees,
 }
 
 /********** Storage **********/
@@ -505,6 +518,65 @@ pub fn set_res_data(e: &Env, asset: &Address, data: &ReserveData) {
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Return additive protocol-fee accounting for one reserve.
+pub fn get_protocol_fee_data(e: &Env, asset: &Address) -> ProtocolFeeData {
+    get_protocol_fee_map(e)
+        .get(asset.clone())
+        .unwrap_or(ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        })
+}
+
+/// Return the bounded reserve-addressed protocol-fee map.
+pub(crate) fn get_protocol_fee_map(e: &Env) -> Map<Address, ProtocolFeeData> {
+    let key = PoolDataKey::ProtocolFees;
+    get_persistent_default(
+        e,
+        &key,
+        || Map::new(e),
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Store additive protocol-fee accounting for one reserve.
+#[cfg(test)]
+pub fn set_protocol_fee_data(e: &Env, asset: &Address, data: &ProtocolFeeData) {
+    if data.credit < 0 || !(0..crate::constants::SCALAR_7).contains(&data.carry) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let mut protocol_fees = get_protocol_fee_map(e);
+    if data.credit == 0 && data.carry == 0 {
+        protocol_fees.remove(asset.clone());
+    } else {
+        protocol_fees.set(asset.clone(), data.clone());
+    }
+    set_protocol_fee_map(e, &protocol_fees);
+}
+
+/// Store the complete bounded protocol-fee map in one ledger entry.
+pub(crate) fn set_protocol_fee_map(e: &Env, protocol_fees: &Map<Address, ProtocolFeeData>) {
+    let key = PoolDataKey::ProtocolFees;
+    let mut nonzero = Map::new(e);
+    for (asset, data) in protocol_fees.iter() {
+        if data.credit < 0 || !(0..crate::constants::SCALAR_7).contains(&data.carry) {
+            panic_with_error!(e, PoolError::BadRequest);
+        }
+        if data.credit != 0 || data.carry != 0 {
+            nonzero.set(asset, data);
+        }
+    }
+    if nonzero.is_empty() {
+        e.storage().persistent().remove(&key);
+    } else {
+        e.storage().persistent().set(&key, &nonzero);
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+    }
 }
 
 /********** Reserve List (ResList) **********/

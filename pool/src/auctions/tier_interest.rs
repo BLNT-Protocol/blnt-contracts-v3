@@ -737,6 +737,14 @@ mod tests {
         let asset = Address::generate(&e);
         let bid_token = Address::generate(&e);
         e.as_contract(&contract, || {
+            storage::set_protocol_fee_data(
+                &e,
+                &asset,
+                &storage::ProtocolFeeData {
+                    credit: 50,
+                    carry: 7,
+                },
+            );
             set_interest_reserve_state(
                 &e,
                 &asset,
@@ -769,6 +777,13 @@ mod tests {
                     first_loss: 10,
                     second_loss: 15,
                     third_loss: 20,
+                }
+            );
+            assert_eq!(
+                storage::get_protocol_fee_data(&e, &asset),
+                storage::ProtocolFeeData {
+                    credit: 50,
+                    carry: 7,
                 }
             );
         });

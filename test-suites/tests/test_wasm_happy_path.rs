@@ -7,10 +7,55 @@ use sep_40_oracle::testutils::Asset;
 use sep_41_token::StellarAssetClient;
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    map,
+    contracttype, map,
     testutils::{Address as _, Ledger},
     vec, Address, String, Symbol,
 };
+
+const PROTOCOL_INTEREST_FEE_RATE: i128 = 20_000;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct ProtocolFeeDataView {
+    credit: i128,
+    carry: i128,
+}
+
+fn protocol_fee_data(fixture: &TestFixture, asset: &Address) -> ProtocolFeeDataView {
+    let pool = &fixture.pools[0].pool.address;
+    fixture.env.as_contract(pool, || {
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .get::<PoolDataKey, soroban_sdk::Map<Address, ProtocolFeeDataView>>(
+                &PoolDataKey::ProtocolFees,
+            )
+            .and_then(|data| data.get(asset.clone()))
+            .unwrap_or(ProtocolFeeDataView {
+                credit: 0,
+                carry: 0,
+            })
+    })
+}
+
+fn preview_protocol_fee_credit(
+    stored: &ReserveData,
+    preview: &ReserveData,
+    stored_fee: &ProtocolFeeDataView,
+) -> i128 {
+    let stored_liabilities = stored
+        .d_supply
+        .fixed_mul_ceil(stored.d_rate, SCALAR_12)
+        .unwrap();
+    let preview_liabilities = preview
+        .d_supply
+        .fixed_mul_ceil(preview.d_rate, SCALAR_12)
+        .unwrap();
+    let accrued_interest = preview_liabilities - stored_liabilities;
+    let new_fee = (accrued_interest * PROTOCOL_INTEREST_FEE_RATE + stored_fee.carry) / SCALAR_7;
+    stored_fee.credit + new_fee
+}
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
     create_fixture_with_data,
@@ -102,9 +147,15 @@ fn test_wasm_reconciles_direct_reserve_custody_loss() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];
     let stable = &fixture.tokens[TokenIndex::STABLE];
+    let stored = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    let stored_fee = protocol_fee_data(&fixture, &stable.address);
     let accrued = pool_fixture.pool.get_reserve(&stable.address).data;
     let loss = 100_000_i128;
-    let expected_b_rate_loss = loss.fixed_div_ceil(accrued.b_supply, SCALAR_12).unwrap();
+    let protocol_credit = preview_protocol_fee_credit(&stored, &accrued, &stored_fee);
+    let supplier_loss = loss - core::cmp::min(loss, protocol_credit);
+    let expected_b_rate_loss = supplier_loss
+        .fixed_div_ceil(accrued.b_supply, SCALAR_12)
+        .unwrap();
 
     stable.burn(&pool_fixture.pool.address, &loss);
     assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), loss);
@@ -114,6 +165,7 @@ fn test_wasm_reconciles_direct_reserve_custody_loss() {
     assert_eq!(reconciled.b_supply, accrued.b_supply);
     assert_eq!(reconciled.d_supply, accrued.d_supply);
     assert_eq!(reconciled.backstop_credit, accrued.backstop_credit);
+    assert_eq!(protocol_fee_data(&fixture, &stable.address).credit, 0);
     assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), 0);
 }
 
@@ -168,6 +220,7 @@ fn test_wasm_zero_supply_debt_interest_accrues_to_backstop() {
     let debt = 50 * SCALAR_7;
     let initial_credit = 60 * SCALAR_7;
     let now = fixture.env.ledger().timestamp();
+    let stored_fee = protocol_fee_data(&fixture, &stable.address);
 
     fixture.env.as_contract(&pool_fixture.pool.address, || {
         let key = PoolDataKey::ResData(stable.address.clone());
@@ -191,7 +244,11 @@ fn test_wasm_zero_supply_debt_interest_accrues_to_backstop() {
     assert_eq!(accrued.b_supply, 0);
     assert!(accrued.d_rate > SCALAR_12);
     assert!(interest > 0);
-    assert_eq!(accrued.backstop_credit, initial_credit + interest);
+    let protocol_fee = (interest * PROTOCOL_INTEREST_FEE_RATE + stored_fee.carry) / SCALAR_7;
+    assert_eq!(
+        accrued.backstop_credit,
+        initial_credit + interest - protocol_fee
+    );
 }
 
 #[test]
@@ -1003,7 +1060,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 4665_6412730);
+    assert_eq!(claim_amount, 4665_6412283);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance
@@ -1019,7 +1076,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 730943587268);
+    assert_eq!(claim_amount, 730943587715);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance
@@ -1166,7 +1223,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 11673_1666150);
+    assert_eq!(claim_amount, 11673_1727237);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance
@@ -1199,7 +1256,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 90908_8333850);
+    assert_eq!(claim_amount, 90908_8272763);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance
@@ -1247,7 +1304,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 1073628_1826494);
+    assert_eq!(claim_amount, 1073628_7444890);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance
@@ -1258,7 +1315,7 @@ fn test_wasm_happy_path() {
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
     backstop_blnt_balance -= claim_amount;
-    assert_eq!(claim_amount, 8361251_8173506);
+    assert_eq!(claim_amount, 8361251_2555110);
     assert_eq!(
         fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
         backstop_blnt_balance

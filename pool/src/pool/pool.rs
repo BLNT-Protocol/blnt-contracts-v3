@@ -4,7 +4,7 @@ use sep_40_oracle::{Asset, PriceFeedClient};
 
 use crate::{
     errors::PoolError,
-    storage::{self, PoolConfig},
+    storage::{self, PoolConfig, ProtocolFeeData},
     Positions,
 };
 
@@ -13,7 +13,10 @@ use super::reserve::Reserve;
 pub struct Pool {
     pub config: PoolConfig,
     pub reserves: Map<Address, Reserve>,
+    protocol_fees: Map<Address, ProtocolFeeData>,
+    stored_protocol_fees: Map<Address, ProtocolFeeData>,
     reserves_to_store: Vec<Address>,
+    protocol_fees_to_store: Vec<Address>,
     price_decimals: Option<u32>,
     prices: Map<Address, i128>,
     price_valid_until: Map<Address, u64>,
@@ -23,10 +26,14 @@ impl Pool {
     /// Load the Pool from the ledger
     pub fn load(e: &Env) -> Self {
         let pool_config = storage::get_pool_config(e);
+        let protocol_fees = storage::get_protocol_fee_map(e);
         Pool {
             config: pool_config,
             reserves: map![e],
+            protocol_fees: protocol_fees.clone(),
+            stored_protocol_fees: protocol_fees,
             reserves_to_store: vec![e],
+            protocol_fees_to_store: vec![e],
             price_decimals: None,
             prices: map![e],
             price_valid_until: map![e],
@@ -40,14 +47,33 @@ impl Pool {
     /// * asset - The address of the underlying asset
     /// * store - If the reserve is expected to be stored to the ledger
     pub fn load_reserve(&mut self, e: &Env, asset: &Address, store: bool) -> Reserve {
-        if store && !self.reserves_to_store.contains(asset) {
-            self.reserves_to_store.push_back(asset.clone());
-        }
-
         if let Some(reserve) = self.reserves.get(asset.clone()) {
-            return reserve;
+            if store {
+                self.mark_reserve_for_storage(asset);
+                let protocol_fee = self.protocol_fee_data(e, asset);
+                if protocol_fee != self.stored_protocol_fee_data(asset) {
+                    self.mark_protocol_fee_for_storage(asset);
+                }
+            }
+            reserve
         } else {
-            Reserve::load(e, &self.config, asset)
+            let initial_protocol_fee =
+                self.protocol_fees
+                    .get(asset.clone())
+                    .unwrap_or(ProtocolFeeData {
+                        credit: 0,
+                        carry: 0,
+                    });
+            let (reserve, protocol_fee, protocol_fee_changed) =
+                Reserve::load_with_protocol_fee_data(e, &self.config, asset, initial_protocol_fee);
+            self.protocol_fees.set(asset.clone(), protocol_fee);
+            if store {
+                self.mark_reserve_for_storage(asset);
+                if protocol_fee_changed {
+                    self.mark_protocol_fee_for_storage(asset);
+                }
+            }
+            reserve
         }
     }
 
@@ -59,14 +85,60 @@ impl Pool {
         self.reserves.set(reserve.asset.clone(), reserve);
     }
 
+    /// Return the protocol-fee sidecar loaded alongside a cached reserve.
+    pub(crate) fn protocol_fee_data(&self, e: &Env, asset: &Address) -> ProtocolFeeData {
+        self.protocol_fees
+            .get(asset.clone())
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::InternalReserveNotFound))
+    }
+
+    /// Cache updated protocol-fee accounting for a loaded reserve.
+    pub(crate) fn cache_protocol_fee_data(&mut self, asset: &Address, data: ProtocolFeeData) {
+        self.protocol_fees.set(asset.clone(), data);
+        self.mark_protocol_fee_for_storage(asset);
+    }
+
     /// Store the cached reserves to the ledger that need to be written.
     pub fn store_cached_reserves(&self, e: &Env) {
         for address in self.reserves_to_store.iter() {
             let reserve = self
                 .reserves
-                .get(address)
+                .get(address.clone())
                 .unwrap_or_else(|| panic_with_error!(e, PoolError::InternalReserveNotFound));
             reserve.store(e);
+        }
+        if !self.protocol_fees_to_store.is_empty() {
+            let mut protocol_fees = self.stored_protocol_fees.clone();
+            for asset in self.protocol_fees_to_store.iter() {
+                let data = self.protocol_fee_data(e, &asset);
+                if data.credit == 0 && data.carry == 0 {
+                    protocol_fees.remove(asset);
+                } else {
+                    protocol_fees.set(asset, data);
+                }
+            }
+            storage::set_protocol_fee_map(e, &protocol_fees);
+        }
+    }
+
+    fn stored_protocol_fee_data(&self, asset: &Address) -> ProtocolFeeData {
+        self.stored_protocol_fees
+            .get(asset.clone())
+            .unwrap_or(ProtocolFeeData {
+                credit: 0,
+                carry: 0,
+            })
+    }
+
+    fn mark_reserve_for_storage(&mut self, asset: &Address) {
+        if !self.reserves_to_store.contains(asset) {
+            self.reserves_to_store.push_back(asset.clone());
+        }
+    }
+
+    fn mark_protocol_fee_for_storage(&mut self, asset: &Address) {
+        if !self.protocol_fees_to_store.contains(asset) {
+            self.protocol_fees_to_store.push_back(asset.clone());
         }
     }
 
@@ -362,6 +434,58 @@ mod tests {
             assert_eq!(new_reserve_data.d_rate, reserve_data_0.d_rate);
             let new_reserve_data = storage::get_res_data(&e, &underlying_1);
             assert_eq!(new_reserve_data.d_rate, reserve_data_1.d_rate);
+        });
+    }
+
+    #[test]
+    fn test_protocol_fee_store_excludes_unmarked_previews() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let pool = testutils::create_pool(&e);
+        let stored_asset = Address::generate(&e);
+        let previewed_asset = Address::generate(&e);
+
+        e.as_contract(&pool, || {
+            storage::set_protocol_fee_data(
+                &e,
+                &stored_asset,
+                &ProtocolFeeData {
+                    credit: 10,
+                    carry: 20,
+                },
+            );
+            let mut pool = Pool::load(&e);
+            pool.protocol_fees.set(
+                previewed_asset.clone(),
+                ProtocolFeeData {
+                    credit: 30,
+                    carry: 40,
+                },
+            );
+            pool.cache_protocol_fee_data(
+                &stored_asset,
+                ProtocolFeeData {
+                    credit: 50,
+                    carry: 60,
+                },
+            );
+
+            pool.store_cached_reserves(&e);
+
+            assert_eq!(
+                storage::get_protocol_fee_data(&e, &stored_asset),
+                ProtocolFeeData {
+                    credit: 50,
+                    carry: 60,
+                }
+            );
+            assert_eq!(
+                storage::get_protocol_fee_data(&e, &previewed_asset),
+                ProtocolFeeData {
+                    credit: 0,
+                    carry: 0,
+                }
+            );
         });
     }
 

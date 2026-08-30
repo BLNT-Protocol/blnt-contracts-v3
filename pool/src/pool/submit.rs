@@ -175,11 +175,12 @@ fn require_reconciled_reserves(
             Some(flash_loan) if flash_loan.asset == asset => flash_loan.amount,
             _ => 0,
         };
-        let projected_delta = reserve_balance_delta(e, &reserve)
-            .checked_add(tokens_in)
-            .and_then(|value| value.checked_sub(tokens_out))
-            .and_then(|value| value.checked_sub(flash_out))
-            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        let projected_delta =
+            reserve_balance_delta(e, &reserve, pool.protocol_fee_data(e, &asset).credit)
+                .checked_add(tokens_in)
+                .and_then(|value| value.checked_sub(tokens_out))
+                .and_then(|value| value.checked_sub(flash_out))
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
         if projected_delta < 0 {
             panic_with_error!(e, PoolError::UnreconciledReserveLoss);
         }
@@ -1777,7 +1778,7 @@ mod tests {
             assert_eq!(positions.collateral.len(), 1);
             assert_eq!(positions.supply.len(), 1);
             let b_tokens_0 = positions.collateral.get_unchecked(0);
-            assert_eq!(b_tokens_0, 5_0000312);
+            assert_eq!(b_tokens_0, 5_0000311);
             let b_tokens_1 = positions.supply.get_unchecked(1);
             assert_eq!(b_tokens_1, 2_5000063);
 

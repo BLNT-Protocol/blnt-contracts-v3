@@ -54,12 +54,12 @@ waterfall order. The factory stores this immutable configuration with the pool
 registration, and the backstop verifies and caches it before accepting the pool.
 
 The candidate also immutably binds the canonical BLNT:USDC and BLNT:XLM 80:20
-Comets and canonical BLNT, USDC, and XLM assets. No other backstop asset is
+Comet v2 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is
 accepted and no backstop tier has an oracle configuration. Each canonical
-Comet MUST be initialized unfrozen and then bound to a classic-account
+Comet v2 pool MUST be initialized unfrozen and then bound to a classic-account
 controller whose signer weights are all zero and whose authorization
 thresholds are positive. Deployment verification MUST reject any other
-controller state. This makes the Comet's controller-only freeze and controller-
+controller state. This makes the Comet v2 pool's controller-only freeze and controller-
 replacement operations permanently unreachable.
 
 Every transferable tier counts equally per verified USDC for activation,
@@ -67,9 +67,11 @@ participates in take-rate allocation using its configured weight, and absorbs
 loss in configured order without a protocol-level haircut or concentration
 limit. A deauthorized plain-USDC tier has zero transferable value under
 Section 4 until the issuer reauthorizes the backstop balance.
-Only exact canonical BLNT:USDC and BLNT:XLM Comet tiers are BLNT-emission
+Only exact canonical BLNT:USDC and BLNT:XLM Comet v2 tiers are BLNT-emission
 eligible. A pool with neither receives no BLNT emissions. Plain-USDC and
-plain-XLM interest proceeds have the buy-and-burn haircut in Section 5.3.
+plain-XLM interest-auction proceeds, like canonical-LP proceeds, are donated
+in full. The protocol-interest fee and independent buy-and-burn auction are
+specified in Sections 4.8 and 5.4.
 
 ### 3.2 Position accounting
 
@@ -114,10 +116,10 @@ that every relevant issuer-controlled contract balance was created
 non-clawbackable before accepting the deployment:
 
 - the shared backstop's plain-USDC balance;
-- each BLNT and paired-asset SAC balance held by the canonical Comets; and
+- each BLNT and paired-asset SAC balance held by the canonical Comet v2 pools; and
 - any issued-XLM backstop balance used by a non-production fixture.
 
-Native XLM has no issuer clawback, and the canonical Comet LP contracts expose
+Native XLM has no issuer clawback, and the canonical Comet v2 LP contracts expose
 no issuer-clawback operation. Because a SAC does not expose its stored contract-
 balance clawback flag through a public method, deployment verification MUST
 read the exact persistent balance entry and fail closed unless it exists, is
@@ -146,11 +148,11 @@ Equality qualifies. Falling below the threshold deactivates a pool, and
 reactivation uses the same threshold.
 
 The backstop immutably binds distinct BLNT, USDC, and XLM tokens and the exact
-BLNT:USDC and BLNT:XLM Comets. All five token interfaces MUST use seven
-decimals. Construction rejects a Comet unless it contains exactly its expected
+BLNT:USDC and BLNT:XLM Comet v2 pools. All five token interfaces MUST use seven
+decimals. Construction rejects a Comet v2 pool unless it contains exactly its expected
 pair at normalized weights 80% BLNT and 20% paired asset.
 
-Let the BLNT:USDC Comet hold BLNT reserve \(B_u\), USDC reserve \(U\), and LP
+Let the BLNT:USDC Comet v2 pool hold BLNT reserve \(B_u\), USDC reserve \(U\), and LP
 supply \(S_u\). Its current reserve composition implies total USDC value
 \(T_u=5U\). For BLNT:USDC LP amount \(A_u\):
 
@@ -158,7 +160,7 @@ supply \(S_u\). Its current reserve composition implies total USDC value
 V_u(A_u)=\left\lfloor A_u\frac{5U}{S_u}\right\rfloor
 \]
 
-The same Comet implies a BLNT price of \(4U/B_u\). Let the BLNT:XLM Comet hold
+The same Comet v2 pool implies a BLNT price of \(4U/B_u\). Let the BLNT:XLM Comet v2 pool hold
 BLNT reserve \(B_x\), XLM reserve \(X\), and LP supply \(S_x\). Its implied
 total USDC value and the value of BLNT:XLM LP amount \(A_x\) are:
 
@@ -168,12 +170,12 @@ T_x=\left\lfloor\frac{5B_xU}{B_u}\right\rfloor,
 V_x(A_x)=\left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
 \]
 
-For either Comet, underlying BLNT is
+For either Comet v2 pool, underlying BLNT is
 \(B(A)=\lfloor AR_b/S\rfloor\). Every quote rechecks positive LP supply and
 reserves and the immutable weights. Canonical USDC is valued one-for-one only
 while the USDC SAC reports the backstop contract as authorized. A deauthorized
 plain-USDC tier has zero value without changing its token, share, queue, or
-pending-interest accounting. The same two Comets imply the USDC-equivalent
+pending-interest accounting. The same two Comet v2 pools imply the USDC-equivalent
 value of plain-XLM amount \(A\):
 
 \[
@@ -183,14 +185,14 @@ A\frac{UB_x}{B_uX}
 \]
 
 Active and queued amounts are quoted separately. A zero amount has zero value
-without reading an otherwise unnecessary Comet. No backstop valuation uses a
+without reading an otherwise unnecessary Comet v2 pool. No backstop valuation uses a
 pool oracle, separate oracle, or caller-supplied price.
 
 Each operation MUST obtain all backstop values it consumes from one canonical
 snapshot. A verified zero is the only skippable result; unavailable,
 incompatible, negative, inconsistent, or overflowing inputs fail atomically.
 
-Canonical LP values deliberately reflect current Comet composition rather
+Canonical LP values deliberately reflect current Comet v2 composition rather
 than an external fair-market price. Swaps, one-sided liquidity changes, and
 donations can change them; BLNT:USDC remains the USDC and BLNT-price anchor.
 Plain-USDC authorization is read directly from its SAC on every valuation. A
@@ -243,14 +245,17 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
   renewal.
 - Auction creation, lookup, and stale deletion retain the v2
   `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
-  discriminator. All three fill types use the inherited `submit` request
-  discriminants; tier selection and settlement metadata remain private.
-  Vector semantics for the two extended auction types are:
+  discriminator. All auction fills use `submit` request discriminants; tier
+  selection and settlement metadata remain private. Vector semantics for the
+  extended and added backstop auction types are:
   - For bad debt, `bid = []` or `lot = []` means no caller assertion. A nonempty
     vector MUST exactly match the canonical debt-asset or selected-tier-token
     set, respectively.
   - For interest, `bid = []` means no caller assertion and a nonempty `bid` MUST
     contain exactly the selected tier token. `lot` remains a required, nonempty
+    reserve-asset input; `lot = []` is invalid.
+  - For protocol fee, `bid = []` means no caller assertion and a nonempty `bid`
+    MUST contain exactly canonical BLNT. `lot` remains a required, nonempty
     reserve-asset input; `lot = []` is invalid.
   Assertions are order-independent and MUST NOT influence selection, amounts,
   or pricing. A mismatch fails atomically.
@@ -363,25 +368,29 @@ or zero when custody has no deficit.
 Reconciliation MUST:
 
 - Accrue the reserve before comparing its actual token balance with
-  `total_supply + backstop_credit - total_liabilities`.
+  `total_supply + backstop_credit + protocol_credit - total_liabilities`.
 - Ignore a zero or positive balance delta; positive deltas remain available to
   the inherited `gulp` operation.
-- Apply the deficit directly to that reserve's suppliers using the inherited
-  ceiling-rounded `b_rate` loss calculation, leaving every user's bToken
-  balance and every borrower liability unchanged.
-- Cap the supplier attribution at the reserve's aggregate supplier claim and
-  set `b_rate` exactly to zero when that claim is exhausted. Any remaining
-  deficit MUST reduce only that reserve's unpaid `backstop_credit`. It MUST
+- Reduce that reserve's unpaid `protocol_credit` first, leaving its fractional
+  fee carry unchanged. If an active type-3 auction contains the reserve, it
+  MUST be canceled before committing the reduction.
+- Apply any remaining deficit directly to that reserve's suppliers using the
+  inherited ceiling-rounded `b_rate` loss calculation, leaving every user's
+  bToken balance and every borrower liability unchanged. Cap the supplier
+  attribution at the reserve's aggregate supplier claim and set `b_rate`
+  exactly to zero when that claim is exhausted.
+- Any deficit remaining after protocol credit and suppliers MUST reduce only
+  that reserve's unpaid `backstop_credit`. It MUST
   proportionally reduce the reserve's pending tier allocations and carry, and
   MUST cancel an active interest auction whose lot contains the affected
   reserve before committing that reduction. Reconciliation MUST NOT create
   backstop liabilities, draw deposited backstop capital, or change another
   reserve.
-- Emit the recognized deficit, supplier attribution, backstop-credit
-  attribution, and applied `b_rate` reduction. Cancellation of an affected
-  interest auction emits the inherited deletion event first. Repeated
-  reconciliation without another custody loss MUST return zero and make no
-  further accounting reduction.
+- Emit the recognized deficit, protocol-credit attribution, supplier
+  attribution, backstop-credit attribution, and applied `b_rate` reduction.
+  Cancellation of an affected interest or protocol-fee auction emits the
+  inherited deletion event first. Repeated reconciliation without another
+  custody loss MUST return zero and make no further accounting reduction.
 
 Any reserve mutation that could let an existing or new position escape or
 absorb an unreconciled deficit MUST fail until `reconcile_loss` succeeds. A
@@ -413,10 +422,12 @@ later rate recovery.
 If forfeiture removes the final bToken, `b_rate` remains zero and the reserve
 cannot accept new risk. Existing liabilities remain repayable or liquidatable
 and MUST continue accruing under the ordinary interest curve at 100%
-utilization. Because no supplier denominator remains, the entire resulting
-interest accrual MUST increase `backstop_credit`, independently of the ordinary
-take-rate split. Existing take-rate credit remains realizable. Positive custody
-surplus with zero supply is also added to `backstop_credit` by `gulp`. Removing
+utilization. Every positive borrower-interest accrual first applies the
+protocol-interest fee below. Because no supplier denominator remains, the
+remainder MUST increase `backstop_credit`, independently of the ordinary
+take-rate split. Existing take-rate and protocol credit remain realizable.
+Positive custody surplus with zero supply is also added to `backstop_credit`
+by `gulp`. Removing
 an individually zero-valued collateral position can reduce the aggregate
 supplier claim by at most one underlying base unit because of fixed-point
 rounding; any resulting positive custody dust follows that `gulp` rule.
@@ -511,6 +522,33 @@ auction or Q4W entry already created under a valid prior controller response.
 The controller is pool-local policy, not protocol governance or an alternate
 protocol-upgrade path.
 
+### 4.8 Protocol-interest fee — **Added**
+
+Every positive borrower-interest accrual applies an immutable 0.2% protocol
+fee before the pool's configured backstop take rate. For gross reserve-asset
+interest \(I\), prior reserve-local fee carry \(C_p\), and seven-decimal fee
+rate \(f=20{,}000\):
+
+\[
+N_p=If+C_p,\qquad
+P=\left\lfloor\frac{N_p}{10^7}\right\rfloor,\qquad
+C_p'=N_p-P10^7.
+\]
+
+The reserve adds \(P\) to separate `protocol_credit`. With positive bToken
+supply, the pool applies its configured take rate \(t\) to the remaining
+interest \(I-P\); suppliers receive the residual. With zero bToken supply,
+all \(I-P\) joins `backstop_credit`. The fee does not increase borrower debt
+or alter the interest curve; it allocates part of already accrued interest.
+
+Protocol credit and carry use additive reserve-addressed storage and do not
+change the inherited serialized `ReserveData`. They are nonnegative, use
+checked arithmetic, and are included in the reserve-custody invariant. An
+unexplained custody deficit reduces unpaid protocol credit first, canceling a
+type-3 auction containing the affected reserve, before applying Section 4.6's
+supplier and take-rate-credit loss order. A zero or failed accrual does not
+change protocol accounting.
+
 ## 5. Loss waterfall — **Replaced**
 
 This replaces the single-token realization in `V2-AUCTION-003` and
@@ -521,7 +559,8 @@ inherited.
 
 `V2-AUCTION-001` applies. Each pool retains at most one active auction of each
 backstop type under the inherited public key and privately binds its selected
-tier and settlement metadata. Private metadata has a 46-day temporary
+tier and settlement metadata. It may independently retain one protocol-fee
+auction under public auction type 3. Private metadata has a 46-day temporary
 lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
 
 Each tier uses Section 4 valuation and `V2-AUCTION-004`'s inclusive 200-USDC
@@ -622,44 +661,62 @@ immediately rather than waiting for ordinary staleness. Selected amounts remain
 pending so expiry cannot lose or reweight them; ordinary share operations
 remain available. A partial fill releases its base-lot discount,
 and only reserve assets actually transferred reduce pending amounts and
-accrued credit. BLNT:XLM and BLNT:USDC bids are donated in full. Donation mints
+accrued credit. Every selected-tier bid is donated in full. Donation mints
 no shares or user claim but appreciates active and queued shares and assumes
 the tier's protocol roles. Configured weights govern credit allocation, not
 necessarily the timing of realized donations.
 
-For each plain-USDC or plain-XLM bid \(B\), the backstop transfers the full
-amount from the filler but credits only 99% to the pool tier. It carries
-fractional haircut dust per pool-tier in raw seven-decimal units:
+No type-2 settlement haircut, pending buyback balance, or legacy backstop
+buy-and-burn entry point exists. Protocol-fee auctions are the sole BLNT
+buy-and-burn mechanism.
+
+### 5.4 Protocol-fee auction — **Added**
+
+Public auction type 3 is an independent protocol-fee auction. A pool may have
+one active type-2 auction and one active type-3 auction simultaneously. Any
+caller MAY invoke `new_auction(3, backstop, [], reserve_assets, 100)` with one
+to `min(max_positions - 1, 4)` unique configured reserves. A nonempty `bid`
+MUST contain exactly canonical BLNT. The supplied reserves are checkpointed,
+and each authorized reserve contributes its complete currently unpaid
+`protocol_credit`; omitted and deauthorized reserves remain pending. The
+combined lot MUST meet the inclusive 200-USDC reserve-oracle minimum.
+
+The backstop exposes the seven-decimal current BLNT price implied by the
+canonical 80:20 BLNT:USDC Comet v2 pool. For positive BLNT reserve \(B_u\) and USDC
+reserve \(U\):
 
 \[
-H=\left\lfloor\frac{B+C_h}{100}\right\rfloor,
-\qquad C_h'=(B+C_h)\bmod 100,
-\qquad B_{\mathrm{tier}}=B-H.
+p_{BLNT}=\left\lfloor\frac{4U10^7}{B_u}\right\rfloor.
 \]
 
-The haircut \(H\) joins the global pending balance for its asset. Pending
-USDC or XLM mints no shares, has no activation, loss, take-rate, or emission
-role, and is not created by an unsolicited token transfer.
+No oracle, TWAP, caller value, or liquidity-relative maximum lot supplements
+that current-reserve price. Creation fails on a nonpositive or invalid quote.
+For reserve-oracle-valued lot \(V\), the base BLNT bid is:
 
-Any caller MAY invoke `buy_and_burn(asset)` for USDC or XLM. One call processes
-\(X=\min(P,\lfloor R/200\rfloor)\), where \(P\) is that asset's pending balance
-and \(R\) is its reserve in the matching canonical BLNT Comet. The backstop
-reads that Comet's fee-inclusive paired-asset-per-BLNT spot price \(p\), sets
-the maximum final price to \(\lceil1.01p\rceil\), and requires at least
-\(\lfloor X10^7/p_{max}\rfloor\) BLNT from an exact-input swap. It verifies the
-exact USDC decrease, exact BLNT receipt, reported final price, and exact BLNT
-burn before reducing pending balance. A zero-work call returns zero. Any swap,
-authorization, balance, or burn failure rolls back without changing pending
-balance or the prior interest-auction settlement. No oracle or TWAP supplements
-the canonical Comet spot; the reserve-fraction limit bounds one call's
-exposure to current-spot manipulation.
+\[
+Q=\left\lceil\frac{(6V/5)10^7}{p_{BLNT}}\right\rceil.
+\]
+
+The auction starts next ledger and uses the inherited interest-auction curve:
+the BLNT bid remains at its base amount while the transferable lot rises to
+100% over 200 ledgers, then the full lot remains while the bid falls to zero
+over the next 200 ledgers. Submit request discriminator 10 fills type 3;
+inherited discriminator 8 continues to fill only type 2. The authenticated
+filler cannot be the pool or backstop. Each fill transfers only its time-scaled
+reserve lot, reduces only the corresponding protocol credit actually
+transferred, transfers the exact time-scaled BLNT bid from the filler, and
+burns that BLNT atomically. Partial-fill base amounts not transferred because
+of the auction curve return to pending protocol credit. Stale deletion changes
+no credit. Reserve deauthorization permits immediate deletion, and a custody
+reconciliation that reduces included protocol credit cancels the auction. Type
+2 and type 3 never consume or rewrite each other's accounting.
 
 ## 6. BLNT emissions — **Extended**
 
 ### 6.1 V3 emitter launch and replacement — **Replaced and extended**
 
 `V2-EMISSIONS-004` is replaced for the initial v3 launch. V3 deploys a new
-emitter already configured for the v3 backstop and canonical BLNT:USDC Comet
+emitter already configured for the v3 backstop and canonical BLNT:USDC Comet v2
 LP. It does not replace, reconfigure, or depend on any earlier emitter.
 
 The v3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
@@ -734,7 +791,7 @@ The inherited reward zone changes as follows:
 
 A pool without either canonical BLNT LP may activate and enter an open
 reward-zone slot but cannot earn backstop BLNT. For active canonical LP amount \(A_t\),
-current Comet BLNT reserve \(R_t\), and LP supply \(S_t\), post-activation
+current Comet v2 BLNT reserve \(R_t\), and LP supply \(S_t\), post-activation
 weight is:
 
 \[
@@ -794,7 +851,7 @@ only `claim` is authoritative. Plain-USDC and plain-XLM tiers are ineligible.
 
 The inherited owner-authorized claim selects one eligible tier and a nonempty
 unique pool list. It aggregates that tier's accrual, performs one single-sided
-BLNT Comet deposit, and credits the resulting LP proportionally to the same
+BLNT Comet v2 deposit, and credits the resulting LP proportionally to the same
 owner and pool positions using v2 rounding. Exact BLNT and LP balance deltas
 govern settlement; zero output or a mismatch fails atomically. A successful
 claim increments the backstop-claimed BLNT counter. Compounded shares are

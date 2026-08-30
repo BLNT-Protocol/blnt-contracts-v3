@@ -52,6 +52,7 @@ pub fn request_permissions(e: &Env, requests: &Vec<Request>) -> u32 {
             | RequestType::Repay
             | RequestType::FillBadDebtAuction
             | RequestType::FillInterestAuction
+            | RequestType::FillProtocolFeeAuction
             | RequestType::DeleteLiquidationAuction => {}
         }
     }

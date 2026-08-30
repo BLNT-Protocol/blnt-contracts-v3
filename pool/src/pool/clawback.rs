@@ -27,7 +27,7 @@ pub fn execute_clawback(
 
     let mut pool = Pool::load(e);
     let mut reserve = pool.load_reserve(e, asset, true);
-    require_reconciled(e, &reserve);
+    require_reconciled(e, &reserve, pool.protocol_fee_data(e, asset).credit);
     let mut user = User::load(e, from);
     let reserve_index = reserve.config.index;
     let b_tokens = reserve.to_b_token_up(e, amount);

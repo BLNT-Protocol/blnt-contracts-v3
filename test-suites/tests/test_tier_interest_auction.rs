@@ -2,7 +2,7 @@
 #![allow(clippy::zero_prefixed_literal)]
 
 use backstop::BackstopTier;
-use pool::{AuctionType, PoolClient, Request, RequestType, ReserveConfig};
+use pool::{AuctionType, PoolClient, PoolDataKey, Request, RequestType, ReserveConfig};
 use pool_factory::{BackstopAsset as FactoryBackstopAsset, BackstopTierConfig};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, testutils::Ledger, vec, Address, Env, String};
@@ -28,6 +28,13 @@ struct InterestReserveState {
     third_loss: i128,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct ProtocolFeeDataView {
+    credit: i128,
+    carry: i128,
+}
+
 fn interest_reserve_state(e: &Env, pool: &Address, asset: &Address) -> InterestReserveState {
     e.as_contract(pool, || {
         e.storage()
@@ -40,6 +47,41 @@ fn interest_reserve_state(e: &Env, pool: &Address, asset: &Address) -> InterestR
                 third_loss: 0,
             })
     })
+}
+
+fn protocol_fee_data(e: &Env, pool: &Address, asset: &Address) -> ProtocolFeeDataView {
+    e.as_contract(pool, || {
+        e.storage()
+            .persistent()
+            .get::<PoolDataKey, soroban_sdk::Map<Address, ProtocolFeeDataView>>(
+                &PoolDataKey::ProtocolFees,
+            )
+            .and_then(|data| data.get(asset.clone()))
+            .unwrap_or(ProtocolFeeDataView {
+                credit: 0,
+                carry: 0,
+            })
+    })
+}
+
+fn protocol_fee_credit(e: &Env, pool: &Address, asset: &Address) -> i128 {
+    protocol_fee_data(e, pool, asset).credit
+}
+
+fn set_protocol_fee_data(e: &Env, pool: &Address, asset: &Address, data: ProtocolFeeDataView) {
+    e.as_contract(pool, || {
+        let mut fees = e
+            .storage()
+            .persistent()
+            .get::<PoolDataKey, soroban_sdk::Map<Address, ProtocolFeeDataView>>(
+                &PoolDataKey::ProtocolFees,
+            )
+            .unwrap_or_else(|| soroban_sdk::Map::new(e));
+        fees.set(asset.clone(), data);
+        e.storage()
+            .persistent()
+            .set(&PoolDataKey::ProtocolFees, &fees);
+    });
 }
 
 fn fill_interest(e: &Env, pool: &PoolClient, backstop: &Address, filler: &Address, percent: i128) {
@@ -198,6 +240,7 @@ fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm()
     assert!(auction.lot.get(stable_address.clone()).unwrap() >= 200 * 10i128.pow(6));
 
     let before = pool.get_reserve(&stable_address).data;
+    let protocol_credit_loss = protocol_fee_credit(&e, &pool.address, &stable_address);
     let supplier_claim = before
         .b_supply
         .fixed_mul_floor(before.b_rate, SCALAR_12)
@@ -208,7 +251,12 @@ fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm()
 
     stable.burn(&pool.address, &loss);
     assert_eq!(pool.reconcile_loss(&stable_address), loss);
-    let reconcile_events = vec![&e, event_from_end(&e, 2), event_from_end(&e, 1)];
+    let reconcile_events = vec![
+        &e,
+        event_from_end(&e, 3),
+        event_from_end(&e, 2),
+        event_from_end(&e, 1),
+    ];
 
     let after = pool.get_reserve(&stable_address).data;
     assert_eq!(after.b_rate, 0);
@@ -216,7 +264,7 @@ fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm()
     assert_eq!(after.d_supply, before.d_supply);
     assert_eq!(
         after.backstop_credit,
-        before.backstop_credit - backstop_credit_loss
+        before.backstop_credit - backstop_credit_loss + protocol_credit_loss
     );
     assert!(pool
         .try_get_auction(
@@ -246,12 +294,93 @@ fn reserve_loss_exhausts_suppliers_and_cancels_interest_auction_optimized_wasm()
             ),
             (
                 pool.address.clone(),
+                (
+                    Symbol::new(&e, "protocol_credit_loss"),
+                    stable_address.clone(),
+                )
+                    .into_val(&e),
+                protocol_credit_loss.into_val(&e),
+            ),
+            (
+                pool.address.clone(),
                 (Symbol::new(&e, "reconcile_loss"), stable_address.clone()).into_val(&e),
-                (loss, supplier_claim, backstop_credit_loss, before.b_rate,).into_val(&e),
+                (
+                    loss,
+                    supplier_claim,
+                    backstop_credit_loss - protocol_credit_loss,
+                    before.b_rate,
+                )
+                    .into_val(&e),
             ),
         ]
     );
     assert_eq!(pool.reconcile_loss(&stable_address), 0);
+}
+
+#[test]
+fn protocol_fee_auction_burns_blnt_optimized_wasm() {
+    let fixture = create_fixture_with_data(true);
+    let e = fixture.env.clone();
+    let pool = &fixture.pools[0].pool;
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let stable_address = stable.address.clone();
+    let filler = fixture.users[0].clone();
+
+    // Checkpoint both halves of reserve accounting before installing an exact
+    // $200 protocol-credit boundary for this optimized-WASM settlement test.
+    stable.mint(&pool.address, &1);
+    assert_eq!(pool.gulp(&stable_address), 1);
+    let mut fee = protocol_fee_data(&e, &pool.address, &stable_address);
+    let target_credit = 200 * 10i128.pow(6);
+    assert!(fee.credit <= target_credit);
+    stable.mint(&pool.address, &(target_credit - fee.credit));
+    fee.credit = target_credit;
+    set_protocol_fee_data(&e, &pool.address, &stable_address, fee);
+
+    fixture
+        .oracle
+        .set_price_stable(&vec![&e, 2000_0000000, 1_0000000, 0_1000000, 1_0000000]);
+    let auction = pool.new_auction(
+        &(AuctionType::ProtocolFeeAuction as u32),
+        &fixture.backstop.address,
+        &vec![&e],
+        &vec![&e, stable_address.clone()],
+        &100,
+    );
+    assert_eq!(auction.lot.get(stable_address.clone()), Some(target_credit));
+    let blnt = &fixture.tokens[TokenIndex::BLNT];
+    let bid = auction.bid.get(blnt.address.clone()).unwrap();
+    let filler_blnt_before = blnt.balance(&filler);
+    let filler_stable_before = stable.balance(&filler);
+    blnt.mint(&filler, &bid);
+
+    e.ledger().set_sequence_number(auction.block + 200);
+    pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &e,
+            Request {
+                request_type: RequestType::FillProtocolFeeAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
+    );
+
+    assert_eq!(
+        stable.balance(&filler) - filler_stable_before,
+        target_credit
+    );
+    assert_eq!(blnt.balance(&filler), filler_blnt_before);
+    assert_eq!(protocol_fee_credit(&e, &pool.address, &stable_address), 0);
+    assert!(pool
+        .try_get_auction(
+            &(AuctionType::ProtocolFeeAuction as u32),
+            &fixture.backstop.address,
+        )
+        .is_err());
 }
 
 fn exercise_tier_interest_auctions(wasm: bool) {
@@ -361,14 +490,9 @@ fn exercise_tier_interest_auctions(wasm: bool) {
     let expected_lots = [800 * SCALAR_7, 600 * SCALAR_7, 400 * SCALAR_7];
     let expected_bids = [768 * SCALAR_7, 576 * SCALAR_7, 480 * SCALAR_7];
     // The BLNT:USDC auction fills 300 ledgers into the declining-bid half of
-    // the v2 curve. The USDC tier transfers its full bid but credits 99% and
-    // reserves 1% for the independent BLNT buy-and-burn.
+    // the v2 curve. Every selected tier credits the realized bid in full.
     let realized_payments = [768 * SCALAR_7, 288 * SCALAR_7, 480 * SCALAR_7];
-    let realized_tier_gains = [
-        realized_payments[0],
-        realized_payments[1],
-        realized_payments[2] * 99 / 100,
-    ];
+    let realized_tier_gains = realized_payments;
 
     let lot_assets = vec![&e, fixture.tokens[TokenIndex::USDC].address.clone()];
     let blnt_usdc_token = fixture
@@ -811,18 +935,6 @@ fn exercise_tier_interest_auctions(wasm: bool) {
         &(AuctionType::InterestAuction as u32),
         &fixture.backstop.address,
     );
-    assert!(
-        fixture
-            .backstop
-            .buy_and_burn(&backstop::BackstopAsset::Usdc)
-            > 0
-    );
-    assert_eq!(
-        fixture
-            .backstop
-            .buy_and_burn(&backstop::BackstopAsset::Usdc),
-        0
-    );
 }
 
 #[test]
@@ -836,7 +948,7 @@ fn tier_interest_auctions_cover_all_tiers_optimized_wasm() {
 }
 
 #[test]
-fn xlm_interest_haircut_uses_blnt_xlm_comet_optimized_wasm() {
+fn xlm_interest_donation_credits_full_payment_optimized_wasm() {
     let mut fixture = TestFixture::create(true);
     let e = fixture.env.clone();
     let operator = fixture.users.first().unwrap().clone();
@@ -895,8 +1007,25 @@ fn xlm_interest_haircut_uses_blnt_xlm_comet_optimized_wasm() {
     );
     assert_eq!(auction.bid.get(xlm.address.clone()), Some(240 * SCALAR_7));
 
+    let tier_tokens_before = fixture
+        .backstop
+        .pool_data(&pool_address)
+        .tiers
+        .get(0)
+        .unwrap()
+        .tokens;
     e.ledger()
         .set_sequence_number(auction.block.saturating_add(200));
     fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
-    assert!(fixture.backstop.buy_and_burn(&backstop::BackstopAsset::Xlm) > 0);
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_data(&pool_address)
+            .tiers
+            .get(0)
+            .unwrap()
+            .tokens
+            - tier_tokens_before,
+        240 * SCALAR_7
+    );
 }

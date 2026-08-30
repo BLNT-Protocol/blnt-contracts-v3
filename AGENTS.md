@@ -80,13 +80,13 @@ first:
   the loss waterfall use the same authorization-aware transferable values.
   Deauthorized plain USDC has zero value until reauthorized, while its shares,
   queues, and pending interest remain accounted for.
-- Plain-USDC and plain-XLM interest-auction payments credit 99% to their tier
-  and reserve an exact cumulative 1% for bounded swaps through the matching
-  canonical BLND Comet followed by an exact BLND burn. Buyback failure must
-  not unwind or block the completed interest settlement.
+- Every positive borrower-interest accrual reserves an immutable 0.2% of gross
+  interest as separate protocol credit before applying the pool take rate.
+  Protocol credit is sold for BLNT and the exact bid burned in an independent
+  type-3 auction; one type-2 and one type-3 auction may coexist.
 - A maximum-30-pool permissionless reward zone and a 70/30 BLND split.
 - Ongoing BLND weight only for active, nonqueued underlying BLND held in the
-  exact canonical BLND:USDC or BLND:XLM Comet LPs, regardless of tier position.
+  exact canonical BLND:USDC or BLND:XLM Comet v2 LPs, regardless of tier position.
 - Migration backfill starts with the first pre-replacement `distribute`, not
   with an emitter queue, and remains capped at 10 million BLND.
 - A compatible BLND:XLM emitter queue must be attested no earlier than its
@@ -94,15 +94,15 @@ first:
   unlock.
 - Backstop BLND claims compound into the originating canonical BLND-bearing
   tier and credit active shares to the same user and pool.
-- Backstop value comes only from current canonical Comet reserves. BLND:USDC
+- Backstop value comes only from current canonical Comet v2 reserves. BLND:USDC
   is the USDC anchor, canonical USDC is one-for-one, and canonical XLM is
-  priced by the BLND reserve ratio between the two Comets. Backstop valuation
+  priced by the BLND reserve ratio between the two Comet v2 pools. Backstop valuation
   has no oracle input.
-- Exact canonical BLND LP interest-auction bids donate 100%. Plain-USDC and
-  plain-XLM bids apply the failure-isolated 1% buy-and-burn rule above.
+- Every interest-auction bid is donated in full. Protocol-fee auctions are the
+  sole BLNT buy-and-burn path; no legacy pending-balance accounting remains.
 - A direct lending-reserve custody deficit is reconciled against that
-  reserve's supplier rate and then its unpaid take-rate credit without
-  creating backstop debt or touching another reserve. Complete supplier-value
+  reserve's unpaid protocol credit, supplier rate, and then unpaid take-rate
+  credit without creating backstop debt or touching another reserve. Complete supplier-value
   exhaustion sets the bToken exchange rate exactly to zero. New supply,
   collateral supply, borrowing, and flash loans stop below a 0.1 b_rate and
   resume once accrued interest restores at least that rate. Zero b_supply

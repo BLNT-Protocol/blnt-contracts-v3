@@ -8,12 +8,16 @@ use super::{Pool, RequestType, Reserve};
 
 /// Return the pool's actual token balance less the reserve's accrued expected
 /// cash. A negative value is an unreconciled custody loss.
-pub(crate) fn reserve_balance_delta(e: &Env, reserve: &Reserve) -> i128 {
+pub(crate) fn reserve_balance_delta(e: &Env, reserve: &Reserve, protocol_credit: i128) -> i128 {
+    if protocol_credit < 0 {
+        panic_with_error!(e, PoolError::BalanceError);
+    }
     let pool_token_balance =
         TokenClient::new(e, &reserve.asset).balance(&e.current_contract_address());
     let reserve_token_balance = reserve
         .total_supply(e)
         .checked_add(reserve.data.backstop_credit)
+        .and_then(|value| value.checked_add(protocol_credit))
         .and_then(|value| value.checked_sub(reserve.total_liabilities(e)))
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
     pool_token_balance
@@ -22,8 +26,8 @@ pub(crate) fn reserve_balance_delta(e: &Env, reserve: &Reserve) -> i128 {
 }
 
 /// Require that a reserve has no unrecognized custody deficit.
-pub(crate) fn require_reconciled(e: &Env, reserve: &Reserve) {
-    if reserve_balance_delta(e, reserve) < 0 {
+pub(crate) fn require_reconciled(e: &Env, reserve: &Reserve, protocol_credit: i128) {
+    if reserve_balance_delta(e, reserve, protocol_credit) < 0 {
         panic_with_error!(e, PoolError::UnreconciledReserveLoss);
     }
 }
@@ -41,13 +45,14 @@ pub(crate) fn require_reconciled(e: &Env, reserve: &Reserve) {
 /// * If borrowing is not enabled on the pool. This ensures that the backstop can safely process
 /// interest auctions.
 pub fn execute_gulp(e: &Env, asset: &Address) -> i128 {
-    let pool = Pool::load(e);
+    let mut pool = Pool::load(e);
 
     // ensure the backstop can safely accept new interest
     pool.require_action_allowed(e, RequestType::Borrow as u32);
 
-    let mut reserve = Reserve::load(e, &pool.config, asset);
-    let token_balance_delta = reserve_balance_delta(e, &reserve);
+    let mut reserve = pool.load_reserve(e, asset, true);
+    let protocol_credit = pool.protocol_fee_data(e, asset).credit;
+    let token_balance_delta = reserve_balance_delta(e, &reserve, protocol_credit);
     if token_balance_delta <= 0 {
         return 0;
     }
@@ -57,33 +62,60 @@ pub fn execute_gulp(e: &Env, asset: &Address) -> i128 {
         .backstop_credit
         .checked_add(token_balance_delta)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
-    reserve.store(e);
+    pool.cache_reserve(reserve);
+    pool.store_cached_reserves(e);
 
     return token_balance_delta;
 }
 
-/// Recognize an unexplained reserve-custody deficit as a proportional loss to
-/// the affected reserve's suppliers and then its unpaid take-rate credit.
+/// Recognize an unexplained reserve-custody deficit against unpaid protocol
+/// credit first, then the affected reserve's suppliers and take-rate credit.
 ///
-/// Returns `(underlying_loss, supplier_loss, backstop_credit_loss,
-/// b_rate_loss, interest_auction_canceled)`. The operation is permissionless,
-/// does not change bToken balances or borrower liabilities, and creates no
-/// backstop debt.
-pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i128, bool) {
+/// Returns `(underlying_loss, protocol_credit_loss, supplier_loss,
+/// backstop_credit_loss, b_rate_loss, interest_auction_canceled,
+/// protocol_auction_canceled)`. The operation is permissionless and creates
+/// no backstop debt.
+pub fn execute_reconcile_loss(
+    e: &Env,
+    asset: &Address,
+) -> (i128, i128, i128, i128, i128, bool, bool) {
     let mut pool = Pool::load(e);
     let mut reserve = pool.load_reserve(e, asset, true);
-    let balance_delta = reserve_balance_delta(e, &reserve);
+    let mut protocol_fee = pool.protocol_fee_data(e, asset);
+    let balance_delta = reserve_balance_delta(e, &reserve, protocol_fee.credit);
     if balance_delta >= 0 {
         pool.cache_reserve(reserve);
         pool.store_cached_reserves(e);
-        return (0, 0, 0, 0, false);
+        return (0, 0, 0, 0, 0, false, false);
     }
 
     let loss = balance_delta
         .checked_neg()
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+    let protocol_credit_loss = core::cmp::min(loss, protocol_fee.credit);
+    let protocol_auction_canceled = if protocol_credit_loss > 0 {
+        protocol_fee.credit = protocol_fee
+            .credit
+            .checked_sub(protocol_credit_loss)
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        crate::auctions::reconcile_protocol_credit(e, asset)
+    } else {
+        false
+    };
+    pool.cache_protocol_fee_data(asset, protocol_fee.clone());
+
+    let remaining_after_protocol = reserve_balance_delta(e, &reserve, protocol_fee.credit);
     let supplier_claim = reserve.total_supply(e);
-    let supplier_loss = core::cmp::min(loss, supplier_claim);
+    let supplier_loss = if remaining_after_protocol < 0 {
+        core::cmp::min(
+            remaining_after_protocol
+                .checked_neg()
+                .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError)),
+            supplier_claim,
+        )
+    } else {
+        0
+    };
 
     let previous_b_rate = reserve.data.b_rate;
     if reserve.data.b_supply > 0 && supplier_loss == supplier_claim {
@@ -105,7 +137,7 @@ pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i1
         .checked_sub(reserve.data.b_rate)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
 
-    let remaining_delta = reserve_balance_delta(e, &reserve);
+    let remaining_delta = reserve_balance_delta(e, &reserve, protocol_fee.credit);
     let mut backstop_credit_loss = 0_i128;
     let mut interest_auction_canceled = false;
     if remaining_delta < 0 {
@@ -127,7 +159,7 @@ pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i1
     // Ceiling rounding may leave a positive dust delta, but reconciliation
     // must eliminate the complete deficit without touching other reserves or
     // creating backstop liabilities.
-    if reserve_balance_delta(e, &reserve) < 0 {
+    if reserve_balance_delta(e, &reserve, protocol_fee.credit) < 0 {
         panic_with_error!(e, PoolError::BalanceError);
     }
 
@@ -135,18 +167,21 @@ pub fn execute_reconcile_loss(e: &Env, asset: &Address) -> (i128, i128, i128, i1
     pool.store_cached_reserves(e);
     (
         loss,
+        protocol_credit_loss,
         supplier_loss,
         backstop_credit_loss,
         applied_b_rate_loss,
         interest_auction_canceled,
+        protocol_auction_canceled,
     )
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::auctions::{AuctionData, AuctionType};
     use crate::constants::{SCALAR_12, SCALAR_7};
     use crate::pool::{execute_gulp, Positions, Request, RequestType};
-    use crate::storage::{self, PoolConfig};
+    use crate::storage::{self, PoolConfig, ProtocolFeeData};
     use crate::testutils;
     use crate::PoolClient;
     use soroban_sdk::{
@@ -302,13 +337,14 @@ mod tests {
             assert_eq!(token_delta_result, additional_tokens);
 
             let new_reserve_data = storage::get_res_data(&e, &underlying);
-            assert_eq!(new_reserve_data.b_rate, 1_000_000_000_000 + 62000);
+            assert_eq!(new_reserve_data.b_rate, 1_000_000_000_000 + 61900);
             assert_eq!(new_reserve_data.last_time, 100);
             // 68 is the backstop credit due to the interest accrued
             assert_eq!(
                 new_reserve_data.backstop_credit,
                 additional_tokens + initial_backstop_credit + 68
             );
+            assert_eq!(storage::get_protocol_fee_data(&e, &underlying).credit, 1);
         });
     }
 
@@ -610,6 +646,87 @@ mod tests {
         assert_eq!(reserve.data.b_rate, 0);
         assert_eq!(reserve.data.backstop_credit, 30 * SCALAR_7);
         assert_eq!(client.reconcile_loss(&asset), 0);
+    }
+
+    #[test]
+    fn reconcile_loss_consumes_protocol_credit_first_and_cancels_its_auction() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.ledger().set(LedgerInfo {
+            timestamp: 100,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+        let admin = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (asset, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.b_supply = 100 * SCALAR_7;
+        reserve_data.d_supply = 0;
+        reserve_data.backstop_credit = 20 * SCALAR_7;
+        reserve_data.last_time = 100;
+        testutils::create_reserve(&e, &pool, &asset, &reserve_config, &reserve_data);
+        token.mint(&pool, &(30 * SCALAR_7));
+
+        e.as_contract(&pool, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_2000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+            storage::set_protocol_fee_data(
+                &e,
+                &asset,
+                &ProtocolFeeData {
+                    credit: 30 * SCALAR_7,
+                    carry: 0,
+                },
+            );
+            let backstop = storage::get_backstop(&e);
+            let auction_type = AuctionType::ProtocolFeeAuction as u32;
+            storage::set_auction(
+                &e,
+                &auction_type,
+                &backstop,
+                &AuctionData {
+                    bid: map![&e, (Address::generate(&e), 36 * SCALAR_7)],
+                    lot: map![&e, (asset.clone(), 30 * SCALAR_7)],
+                    block: 1235,
+                },
+            );
+
+            token.burn(&pool, &(35 * SCALAR_7));
+            assert_eq!(
+                super::execute_reconcile_loss(&e, &asset),
+                (
+                    35 * SCALAR_7,
+                    30 * SCALAR_7,
+                    5 * SCALAR_7,
+                    0,
+                    0_050_000_000_000,
+                    false,
+                    true,
+                )
+            );
+            assert_eq!(storage::get_protocol_fee_data(&e, &asset).credit, 0);
+            assert_eq!(storage::get_res_data(&e, &asset).b_rate, 0_950_000_000_000);
+            assert_eq!(
+                storage::get_res_data(&e, &asset).backstop_credit,
+                20 * SCALAR_7
+            );
+            assert!(!storage::has_auction(&e, &auction_type, &backstop));
+        });
     }
 
     #[test]

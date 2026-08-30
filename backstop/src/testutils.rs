@@ -102,8 +102,8 @@ impl MockAccessController {
 /// Create a backstop contract.
 ///
 /// Unit tests use an explicit one-to-one valuation override after the
-/// constructor validates two minimal 80:20 Comet interfaces. Dedicated
-/// valuation tests exercise the real Comet WASM and reserve formulas.
+/// constructor validates two minimal 80:20 Comet v2 interfaces. Dedicated
+/// valuation tests exercise the real Comet v2 WASM and reserve formulas.
 pub(crate) fn create_backstop(e: &Env) -> Address {
     let admin = Address::generate(e);
     let (blnt, _) = create_token(e, &admin);
@@ -315,7 +315,7 @@ pub(crate) fn create_emitter<'a>(
     (contract_address.clone(), client)
 }
 
-/// Deploy a test Comet LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
+/// Deploy a test Comet v2 LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
 ///
 /// Initializes the pool with the following settings:
 /// - Swap fee: 0.3%

@@ -13,6 +13,10 @@ use super::{
     },
     bad_debt_auction::{create_bad_debt_auction_data, fill_bad_debt_auction, get_bad_debt_auction},
     math::{auction_modifiers, scale_bid_amount, scale_lot_amount},
+    protocol_fee_auction::{
+        create_protocol_fee_auction_data, delete_protocol_fee_auction, fill_protocol_fee_auction,
+        get_protocol_fee_auction,
+    },
     user_liquidation_auction::{
         create_borrower_exit_auction_data, create_user_liq_auction_data, fill_user_liq_auction,
     },
@@ -24,6 +28,7 @@ pub enum AuctionType {
     UserLiquidation = 0,
     BadDebtAuction = 1,
     InterestAuction = 2,
+    ProtocolFeeAuction = 3,
 }
 
 impl AuctionType {
@@ -32,6 +37,7 @@ impl AuctionType {
             0 => Self::UserLiquidation,
             1 => Self::BadDebtAuction,
             2 => Self::InterestAuction,
+            3 => Self::ProtocolFeeAuction,
             _ => panic_with_error!(e, PoolError::BadRequest),
         }
     }
@@ -47,6 +53,7 @@ pub struct AuctionData {
     /// - UserLiquidation: dTokens
     /// - BadDebtAuction: dTokens
     /// - InterestAuction: The selected backstop token
+    /// - ProtocolFeeAuction: BLNT
     pub bid: Map<Address, i128>,
     /// A map of the assets being auctioned off and the amount being auctioned. These are tokens
     /// received by the filler of the auction.
@@ -55,6 +62,7 @@ pub struct AuctionData {
     /// - UserLiquidation: bTokens
     /// - BadDebtAuction: Underlying assets (backstop token)
     /// - InterestAuction: Underlying assets
+    /// - ProtocolFeeAuction: Underlying reserve assets recognized as protocol credit
     pub lot: Map<Address, i128>,
     /// The block the auction begins on. This is used to determine how the auction
     /// should be scaled based on the number of blocks that have passed since the auction began.
@@ -114,6 +122,12 @@ pub fn create_auction(
             require_optional_asset_match(e, bid, &auction.bid, PoolError::InvalidBid);
             auction
         }
+        AuctionType::ProtocolFeeAuction => {
+            require_backstop_auction_args(e, user, percent);
+            let auction = create_protocol_fee_auction_data(e, lot);
+            require_optional_asset_match(e, bid, &auction.bid, PoolError::InvalidBid);
+            auction
+        }
     }
 }
 
@@ -138,6 +152,10 @@ pub fn get_auction(e: &Env, auction_type: u32, user: &Address) -> AuctionData {
             require_backstop_auction_user(e, user);
             get_interest_auction(e).auction
         }
+        AuctionType::ProtocolFeeAuction => {
+            require_backstop_auction_user(e, user);
+            get_protocol_fee_auction(e)
+        }
     }
 }
 
@@ -157,6 +175,10 @@ pub fn delete_stale_auction(e: &Env, auction_type: u32, user: &Address) {
         kind @ (AuctionType::BadDebtAuction | AuctionType::InterestAuction) => {
             require_backstop_auction_user(e, user);
             del_tier_auction(e, kind);
+        }
+        AuctionType::ProtocolFeeAuction => {
+            require_backstop_auction_user(e, user);
+            delete_protocol_fee_auction(e);
         }
     }
 }
@@ -231,6 +253,9 @@ pub fn fill(
         }
         AuctionType::InterestAuction => {
             fill_interest_auction(e, pool, user, filler_state, fill_percent(e, percent_filled))
+        }
+        AuctionType::ProtocolFeeAuction => {
+            fill_protocol_fee_auction(e, pool, user, filler_state, fill_percent(e, percent_filled))
         }
     }
 }

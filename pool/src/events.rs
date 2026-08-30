@@ -202,6 +202,12 @@ vec_event!(
         b_rate_loss: i128
     ]
 );
+single_value_event!(
+    ProtocolCreditLossEvent,
+    "protocol_credit_loss",
+    [asset: Address],
+    amount: i128
+);
 vec_event!(
     NewAuctionEvent,
     "new_auction",
@@ -632,6 +638,11 @@ impl PoolEvents {
             b_rate_loss,
         }
         .publish(e);
+    }
+
+    /// Emitted when custody reconciliation consumes unpaid protocol credit.
+    pub fn protocol_credit_loss(e: &Env, asset: Address, amount: i128) {
+        ProtocolCreditLossEvent { asset, amount }.publish(e);
     }
 
     /// Emitted when a new auction is created

@@ -1,6 +1,6 @@
 use soroban_sdk::{contractevent, Address, Env};
 
-use crate::backstop::{BackstopAsset, BackstopTier};
+use crate::backstop::BackstopTier;
 
 macro_rules! single_value_event {
     (
@@ -51,18 +51,6 @@ single_value_event!(
     "backfill_funded",
     [],
     amount: i128
-);
-vec_event!(
-    BuybackAccruedEvent,
-    "buyback_accrued",
-    [asset: BackstopAsset, pool_address: Address],
-    [amount: i128, pending: i128]
-);
-vec_event!(
-    BuyAndBurnEvent,
-    "buy_and_burn",
-    [asset: BackstopAsset],
-    [amount: i128, blnt_burned: i128, pending: i128]
 );
 vec_event!(
     TierDepositEvent,
@@ -335,38 +323,6 @@ impl BackstopEvents {
         }
         .publish(e);
     }
-
-    pub fn buyback_accrued(
-        e: &Env,
-        asset: BackstopAsset,
-        pool_address: Address,
-        amount: i128,
-        pending: i128,
-    ) {
-        BuybackAccruedEvent {
-            asset,
-            pool_address,
-            amount,
-            pending,
-        }
-        .publish(e);
-    }
-
-    pub fn buy_and_burn(
-        e: &Env,
-        asset: BackstopAsset,
-        amount: i128,
-        blnt_burned: i128,
-        pending: i128,
-    ) {
-        BuyAndBurnEvent {
-            asset,
-            amount,
-            blnt_burned,
-            pending,
-        }
-        .publish(e);
-    }
 }
 
 #[cfg(test)]
@@ -426,35 +382,6 @@ mod tests {
             &BackfillFundedEvent { amount: 100 },
             (Symbol::new(&e, "backfill_funded"),).into_val(&e),
             100_i128.into_val(&e),
-        );
-
-        assert_legacy_shape(
-            &e,
-            &BuybackAccruedEvent {
-                asset: BackstopAsset::Usdc,
-                pool_address: pool.clone(),
-                amount: 10,
-                pending: 30,
-            },
-            (
-                Symbol::new(&e, "buyback_accrued"),
-                BackstopAsset::Usdc,
-                pool,
-            )
-                .into_val(&e),
-            (10_i128, 30_i128).into_val(&e),
-        );
-
-        assert_legacy_shape(
-            &e,
-            &BuyAndBurnEvent {
-                asset: BackstopAsset::Xlm,
-                amount: 20,
-                blnt_burned: 200,
-                pending: 10,
-            },
-            (Symbol::new(&e, "buy_and_burn"), BackstopAsset::Xlm).into_val(&e),
-            (20_i128, 200_i128, 10_i128).into_val(&e),
         );
     }
 }

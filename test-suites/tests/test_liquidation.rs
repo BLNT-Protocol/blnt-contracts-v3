@@ -212,7 +212,7 @@ fn test_liquidations() {
     let weth_lot_amount = auction_data
         .lot
         .get_unchecked(fixture.tokens[TokenIndex::WETH].address.clone());
-    assert_approx_eq_abs(weth_lot_amount, 4_260750195, 1000);
+    assert_approx_eq_abs(weth_lot_amount, 4_260773114, 1000);
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
@@ -721,7 +721,7 @@ fn test_liquidations() {
         .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
     // bad debt event occurs before the auction fill event
     let event = vec![&fixture.env, event_from_end(&fixture.env, 2)];
-    let bad_debt: i128 = 9_2903008;
+    let bad_debt: i128 = 9_2902973;
     assert_eq!(
         event,
         vec![

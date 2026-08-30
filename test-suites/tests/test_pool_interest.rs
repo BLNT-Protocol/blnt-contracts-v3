@@ -193,9 +193,11 @@ fn test_pool_interest() {
 
     let expected_backstop_credit_xlm = (xlm_reserve_data_1.total_liabilities(&fixture.env)
         - xlm_reserve_data_0.total_liabilities(&fixture.env))
+    .fixed_mul_floor(&fixture.env, &0_9980000, &SCALAR_7)
     .fixed_mul_floor(&fixture.env, &(SCALAR_7 / 10), &SCALAR_7);
     let expected_backstop_credit_stable = (stable_reserve_data_1.total_liabilities(&fixture.env)
         - stable_reserve_data_0.total_liabilities(&fixture.env))
+    .fixed_mul_floor(&fixture.env, &0_9980000, &SCALAR_7)
     .fixed_mul_floor(&fixture.env, &(SCALAR_7 / 10), &SCALAR_7);
 
     let actual_b_rate_gain_xlm =

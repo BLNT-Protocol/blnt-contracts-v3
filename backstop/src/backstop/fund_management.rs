@@ -1,19 +1,8 @@
-use crate::{
-    constants::{BUYBACK_HAIRCUT_DENOMINATOR, BUYBACK_HAIRCUT_NUMERATOR},
-    contract::require_nonnegative,
-    emissions, storage, BackstopError,
-};
+use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::{require_is_from_pool_factory, tier_asset, tier_token, BackstopAsset, BackstopTier};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DonationResult {
-    pub credited: i128,
-    pub buyback: i128,
-    pub pending_buyback: i128,
-}
+use super::{require_is_from_pool_factory, tier_token, BackstopTier};
 
 /// Perform a draw from a pool's backstop
 ///
@@ -51,7 +40,7 @@ pub fn execute_donate(
     from: &Address,
     pool_address: &Address,
     amount: i128,
-) -> DonationResult {
+) {
     require_nonnegative(e, amount);
     if from == pool_address || from == &e.current_contract_address() {
         panic_with_error!(e, &BackstopError::BadRequest)
@@ -68,38 +57,9 @@ pub fn execute_donate(
         &amount,
     );
 
-    let asset = tier_asset(e, pool_address, tier);
-    let (credited, buyback, pending_buyback) =
-        if matches!(asset, BackstopAsset::Usdc | BackstopAsset::Xlm) {
-            let carry = storage::get_buyback_carry(e, pool_address, tier);
-            let haircut_numerator = amount
-                .checked_mul(BUYBACK_HAIRCUT_NUMERATOR)
-                .and_then(|value| value.checked_add(carry))
-                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-            let buyback = haircut_numerator / BUYBACK_HAIRCUT_DENOMINATOR;
-            let next_carry = haircut_numerator % BUYBACK_HAIRCUT_DENOMINATOR;
-            let credited = amount
-                .checked_sub(buyback)
-                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-            let pending = storage::get_buyback_pending(e, asset)
-                .checked_add(buyback)
-                .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
-            storage::set_buyback_carry(e, pool_address, tier, next_carry);
-            storage::set_buyback_pending(e, asset, pending);
-            (credited, buyback, pending)
-        } else {
-            (amount, 0, 0)
-        };
-
-    pool_balance.deposit(credited, 0);
+    pool_balance.deposit(amount, 0);
     storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
     emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
-
-    DonationResult {
-        credited,
-        buyback,
-        pending_buyback,
-    }
 }
 
 #[cfg(test)]
@@ -153,13 +113,11 @@ mod tests {
                 storage::get_pool_balance_for_tier(&e, BackstopTier::FirstLoss, &pool_0_id);
             assert_eq!(new_pool_balance.shares, 25_0000000);
             assert_eq!(new_pool_balance.tokens, 55_0000000);
-            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Usdc), 0);
-            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Xlm), 0);
         });
     }
 
     #[test]
-    fn test_execute_usdc_donate_retains_one_percent_buyback_with_carry() {
+    fn test_execute_usdc_donate_credits_full_amount() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited();
@@ -184,28 +142,12 @@ mod tests {
         e.as_contract(&backstop_id, || {
             execute_deposit(&e, BackstopTier::ThirdLoss, &depositor, &pool, 1_000);
 
-            let first = execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 150);
-            assert_eq!(first.credited, 149);
-            assert_eq!(first.buyback, 1);
-            assert_eq!(first.pending_buyback, 1);
-            assert_eq!(
-                storage::get_buyback_carry(&e, &pool, BackstopTier::ThirdLoss),
-                50
-            );
-
-            let second = execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 50);
-            assert_eq!(second.credited, 49);
-            assert_eq!(second.buyback, 1);
-            assert_eq!(second.pending_buyback, 2);
-            assert_eq!(
-                storage::get_buyback_carry(&e, &pool, BackstopTier::ThirdLoss),
-                0
-            );
-            assert_eq!(storage::get_buyback_pending(&e, BackstopAsset::Usdc), 2);
+            execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 150);
+            execute_donate(&e, BackstopTier::ThirdLoss, &donor, &pool, 50);
 
             let balance = storage::get_pool_balance_for_tier(&e, BackstopTier::ThirdLoss, &pool);
             assert_eq!(balance.shares, 1_000);
-            assert_eq!(balance.tokens, 1_198);
+            assert_eq!(balance.tokens, 1_200);
         });
         assert_eq!(usdc.balance(&backstop_id), 1_200);
     }
