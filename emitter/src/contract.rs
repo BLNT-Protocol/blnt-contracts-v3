@@ -28,7 +28,10 @@ pub trait Emitter {
 
     /// Distributes BLNT tokens to the listed backstop module
     ///
-    /// Returns the amount of BLNT tokens distributed
+    /// Only the current backstop may call this entry point. Its own
+    /// `distribute` entry point remains permissionless.
+    ///
+    /// Returns the amount of BLNT tokens distributed.
     fn distribute(e: Env) -> i128;
 
     /// Fetch the last time the Emitter distributed to the backstop module
@@ -54,18 +57,18 @@ pub trait Emitter {
     /// Fetch the queued backstop swap, or None if nothing is queued.
     fn get_queued_swap(e: Env) -> Option<backstop_manager::Swap>;
 
-    /// Verifies that a queued swap still meets the requirements to be executed. If not,
-    /// the queued swap is cancelled and must be recreated.
+    /// Verifies that a queued swap still meets the requirements to be executed. Expired
+    /// swaps may always be cancelled. If cancelled, the swap must be recreated.
     ///
     /// ### Errors
-    /// If the queued swap is still valid.
+    /// If the queued swap is still valid and unexpired.
     fn cancel_swap_backstop(e: Env);
 
     /// Executes a queued swap of the listed backstop module to one with more effective backstop deposits
     ///
     /// ### Errors
     /// If the input contract does not have more backstop deposits than the listed backstop module,
-    /// or if the queued swap has not been unlocked.
+    /// if the queued swap has not been unlocked, or if its seven-day execution window expired.
     fn swap_backstop(e: Env);
 
     /// (Backstop only) Distributes an initial BLNT allocation after a new backstop is set
@@ -141,6 +144,7 @@ impl Emitter for EmitterContract {
     fn distribute(e: Env) -> i128 {
         storage::extend_instance(&e);
         let backstop_address = storage::get_backstop(&e);
+        backstop_address.require_auth();
 
         let distribution_amount = emitter::execute_distribute(&e, &backstop_address);
 
@@ -216,7 +220,42 @@ impl Emitter for EmitterContract {
 #[cfg(test)]
 mod tests {
     use super::{EmitterClient, EmitterContract};
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use soroban_sdk::{
+        contract, contractimpl,
+        testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+        Address, Env, IntoVal, Map,
+    };
+
+    #[contract]
+    struct DistributionBackstop;
+
+    #[contractimpl]
+    impl DistributionBackstop {
+        pub fn distribute(e: Env, emitter: Address) -> i128 {
+            EmitterClient::new(&e, &emitter).distribute()
+        }
+    }
+
+    #[contract]
+    struct ComparisonToken;
+
+    #[contractimpl]
+    impl ComparisonToken {
+        pub fn set_balance(e: Env, address: Address, amount: i128) {
+            let mut balances: Map<Address, i128> =
+                e.storage().instance().get(&0_u32).unwrap_or(Map::new(&e));
+            balances.set(address, amount);
+            e.storage().instance().set(&0_u32, &balances);
+        }
+
+        pub fn balance(e: Env, address: Address) -> i128 {
+            e.storage()
+                .instance()
+                .get::<_, Map<Address, i128>>(&0_u32)
+                .and_then(|balances| balances.get(address))
+                .unwrap_or(0)
+        }
+    }
 
     #[test]
     fn initialize_requires_the_constructor_bound_authority() {
@@ -242,5 +281,91 @@ mod tests {
         assert!(client
             .try_initialize(&blnt, &Address::generate(&e), &backstop_token)
             .is_err());
+    }
+
+    #[test]
+    fn distribution_requires_the_current_backstop() {
+        let e = Env::default();
+        let initializer = Address::generate(&e);
+        let legacy_admin = Address::generate(&e);
+        let legacy_blnd = e.register_stellar_asset_contract_v2(legacy_admin).address();
+        let emitter = e.register(EmitterContract, (&legacy_blnd, &initializer));
+        let blnt = e
+            .register_stellar_asset_contract_v2(emitter.clone())
+            .address();
+        let backstop = e.register(DistributionBackstop, ());
+        let backstop_token = Address::generate(&e);
+        let client = EmitterClient::new(&e, &emitter);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &initializer,
+                invoke: &MockAuthInvoke {
+                    contract: &emitter,
+                    fn_name: "initialize",
+                    args: (&blnt, &backstop, &backstop_token).into_val(&e),
+                    sub_invokes: &[],
+                },
+            }])
+            .initialize(&blnt, &backstop, &backstop_token);
+        e.ledger().set_timestamp(100);
+
+        assert!(client.try_distribute().is_err());
+        assert_eq!(client.get_last_distro(&backstop), 0);
+        assert_eq!(
+            DistributionBackstopClient::new(&e, &backstop).distribute(&emitter),
+            100 * crate::constants::SCALAR_7
+        );
+        assert_eq!(client.get_last_distro(&backstop), 100);
+        e.ledger().set_timestamp(110);
+        assert!(client.try_distribute().is_err());
+        assert_eq!(client.get_last_distro(&backstop), 100);
+    }
+
+    #[test]
+    fn replacement_remains_permissionless_without_recipient_distribution() {
+        const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
+
+        let e = Env::default();
+        let initializer = Address::generate(&e);
+        let legacy_admin = Address::generate(&e);
+        let legacy_blnd = e.register_stellar_asset_contract_v2(legacy_admin).address();
+        let emitter = e.register(EmitterContract, (&legacy_blnd, &initializer));
+        let blnt = e
+            .register_stellar_asset_contract_v2(emitter.clone())
+            .address();
+        let comparison_token = e.register(ComparisonToken, ());
+        let comparison = ComparisonTokenClient::new(&e, &comparison_token);
+        let incumbent = Address::generate(&e);
+        let first_candidate = Address::generate(&e);
+        let second_candidate = Address::generate(&e);
+        let client = EmitterClient::new(&e, &emitter);
+
+        client
+            .mock_auths(&[MockAuth {
+                address: &initializer,
+                invoke: &MockAuthInvoke {
+                    contract: &emitter,
+                    fn_name: "initialize",
+                    args: (&blnt, &incumbent, &comparison_token).into_val(&e),
+                    sub_invokes: &[],
+                },
+            }])
+            .initialize(&blnt, &incumbent, &comparison_token);
+        comparison.set_balance(&incumbent, &1);
+        comparison.set_balance(&first_candidate, &2);
+        comparison.set_balance(&second_candidate, &3);
+
+        client.queue_swap_backstop(&first_candidate, &comparison_token);
+        e.ledger().set_timestamp(QUEUE_SECONDS);
+        client.swap_backstop();
+        assert_eq!(client.get_backstop(), first_candidate);
+
+        // The first candidate never calls `distribute`, but that does not gate
+        // the established queue and replacement path.
+        client.queue_swap_backstop(&second_candidate, &comparison_token);
+        e.ledger().set_timestamp(2 * QUEUE_SECONDS);
+        client.swap_backstop();
+        assert_eq!(client.get_backstop(), second_candidate);
     }
 }

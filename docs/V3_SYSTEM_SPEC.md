@@ -670,7 +670,11 @@ named `blnd_token` MUST contain BLNT in a v3 deployment. Initialization MUST
 reject a token equal to legacy BLND, either token using decimals other than
 seven, or a BLNT Stellar Asset Contract whose administrator is not the v3
 emitter. After initialization, `distribute` mints BLNT to the current backstop
-at one token per elapsed second.
+at one token per elapsed second. As a safety fix, only the current backstop may
+invoke the emitter's `distribute`; callers retain permissionless access through
+the backstop's own `distribute` entry point. The emitter's internal final
+distribution during recipient replacement is not subject to that external
+authorization gate.
 
 The emitter constructor immutably binds legacy BLND, records a one-time
 initialization authority, and fixes an exclusive swap deadline exactly 60 days
@@ -699,10 +703,20 @@ Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
 the current designated token than the incumbent; for the initial v3 binding,
 that token is canonical BLNT:USDC LP. Equality is insufficient. The existing
-31-day queue, cancellation, revalidation, final incumbent distribution,
-recipient switch, and caller-selected next designated-token behavior remain
-unchanged. This is the only protocol-upgrade route retained by the emitter;
-v3 introduces no administrator or privileged replacement entry point.
+31-day queue remains unchanged. Finalization is available from the unlock
+through exactly seven days after it and revalidates the strict balance before
+the final incumbent distribution, recipient switch, new-recipient checkpoint,
+and caller-selected next designated-token update. Before expiration, the
+existing cancellation rule still requires the candidate to lose its strict
+balance qualification. After expiration, anyone may use the same
+`cancel_swap_backstop` entry point regardless of balance and may then create a
+fresh queue through the same `queue_swap_backstop` entry point. The stored
+`Swap` shape and all existing method encodings remain unchanged. Recipient
+activation remains a separate permissionless backstop checkpoint; the emitter
+stores no activation or pause state, and an inactive recipient does not gate a
+later qualified queue or replacement. This is the only protocol-upgrade route
+retained by the emitter; v3 introduces no administrator or privileged
+replacement entry point.
 
 ### 6.2 Backstop-depositor emissions — **Extended**
 
@@ -710,10 +724,10 @@ v3 introduces no administrator or privileged replacement entry point.
 `V2-EMISSIONS-002` apply with the tier-aware, carry-conserving pipeline below.
 
 After activation, each checkpoint verifies the emitter's returned one-BLNT-
-per-second mint against its preceding checkpoint. A prior direct emitter call
-is allocated once by the candidate's next call, while unrelated BLNT transfers
-create no entitlement. The first positive call also verifies the exact BLNT
-balance increase.
+per-second mint against its preceding checkpoint. Permissionless callers use
+the backstop checkpoint, which invokes the emitter as the authorized current
+recipient; unrelated BLNT transfers create no entitlement. The first positive
+call also verifies the exact BLNT balance increase.
 
 The inherited reward zone changes as follows:
 

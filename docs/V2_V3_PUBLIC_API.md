@@ -34,13 +34,13 @@ the v3 emitter adds only the constructor and one-way conversion surface below.
 | --- | --- | --- | --- |
 | No constructor | `__constructor(legacy_blnd_token, initializer)` | Added | Binds the only token accepted by conversion, fixes the exclusive 60-day deadline, and prevents first-call initialization races. |
 | `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:USDC as the initial designated token. |
-| `distribute() -> i128` | Same | Extended | Mints BLNT rather than BLND at the inherited one-token-per-second rate. |
+| `distribute() -> i128` | Same | Extended | Mints BLNT at the inherited one-token-per-second rate and requires the current backstop; callers use the backstop's permissionless checkpoint. |
 | `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
 | `get_backstop() -> Address` | Same | Unchanged | Returns the current BLNT recipient backstop. |
 | `queue_swap_backstop(new_backstop, new_backstop_token)` | Same | Unchanged | Preserves strict raw-balance qualification and the 31-day future-upgrade queue. |
 | `get_queued_swap() -> Option<Swap>` | Same | Unchanged | Preserves the queued-swap view. |
-| `cancel_swap_backstop()` | Same | Unchanged | Preserves permissionless invalid-queue cancellation. |
-| `swap_backstop()` | Same | Unchanged | Preserves final distribution, revalidation, and recipient replacement. |
+| `cancel_swap_backstop()` | Same | Extended | Preserves invalid-queue cancellation and also permits cancellation through the same entry point after the seven-day execution window expires. |
+| `swap_backstop()` | Same | Extended | Preserves final distribution, revalidation, and recipient replacement while limiting execution to the seven days after unlock. |
 | `drop(list)` | Same | Extended | Mints the initial BLNT allocation under the inherited one-call, 50-million-token ceiling. |
 | — | `swap_blnd_for_blnt(from, to, amount) -> i128` | Added | Before the exclusive deadline, burns exact legacy BLND receipts and mints BLNT 1:1 in raw seven-decimal units. |
 | — | `get_swap_deadline() -> u64` | Added | Returns the immutable exclusive conversion deadline. |

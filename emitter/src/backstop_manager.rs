@@ -3,12 +3,21 @@ use soroban_sdk::{contracttype, panic_with_error, Address, Env};
 
 use crate::{emitter, storage, EmitterError};
 
+const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
+const SWAP_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
+
 #[derive(Clone)]
 #[contracttype]
 pub struct Swap {
     pub new_backstop: Address,
     pub new_backstop_token: Address,
     pub unlock_time: u64,
+}
+
+fn swap_deadline(e: &Env, swap: &Swap) -> u64 {
+    swap.unlock_time
+        .checked_add(SWAP_GRACE_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(e, EmitterError::OverflowError))
 }
 
 /// Require that the new backstop is larger than the backstop
@@ -39,22 +48,32 @@ pub fn execute_queue_swap_backstop(
         panic_with_error!(e, EmitterError::InsufficientBackstopSize);
     }
 
+    let unlock_time = e
+        .ledger()
+        .timestamp()
+        .checked_add(QUEUE_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(e, EmitterError::OverflowError));
     let swap = Swap {
         new_backstop: new_backstop.clone(),
         new_backstop_token: new_backstop_token.clone(),
-        unlock_time: e.ledger().timestamp() + 31 * 24 * 60 * 60,
+        unlock_time,
     };
+    // Ensure the complete execution window is representable when the queue is
+    // created rather than leaving an unexecutable swap in storage.
+    swap_deadline(e, &swap);
     storage::set_queued_swap(e, &swap);
     swap
 }
 
-/// Cancel a backstop swap if it has not maintained a higher balance than the current backstop
+/// Cancel a backstop swap if it has not maintained a higher balance than the
+/// current backstop or its execution window has expired.
 pub fn execute_cancel_swap_backstop(e: &Env) -> Swap {
     let swap = storage::get_queued_swap(e)
         .unwrap_or_else(|| panic_with_error!(e, EmitterError::SwapNotQueued));
 
+    let expired = e.ledger().timestamp() > swap_deadline(e, &swap);
     let backstop = storage::get_backstop(e);
-    if is_new_backstop_is_larger(e, &swap.new_backstop, &backstop) {
+    if !expired && is_new_backstop_is_larger(e, &swap.new_backstop, &backstop) {
         panic_with_error!(e, EmitterError::SwapCannotBeCanceled);
     }
 
@@ -69,6 +88,9 @@ pub fn execute_swap_backstop(e: &Env) -> Swap {
 
     if swap.unlock_time > e.ledger().timestamp() {
         panic_with_error!(e, EmitterError::SwapNotUnlocked);
+    }
+    if e.ledger().timestamp() > swap_deadline(e, &swap) {
+        panic_with_error!(e, EmitterError::SwapExpired);
     }
 
     let backstop = storage::get_backstop(e);
@@ -244,6 +266,35 @@ mod tests {
         });
     }
 
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1112)")]
+    fn test_execute_queue_swap_backstop_rejects_unrepresentable_window() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set_timestamp(
+            u64::MAX
+                .checked_sub(QUEUE_SECONDS + SWAP_GRACE_SECONDS)
+                .unwrap()
+                + 1,
+        );
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let new_backstop = Address::generate(&e);
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+
+        backstop_token_client.mint(&backstop, &1);
+        backstop_token_client.mint(&new_backstop, &2);
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            execute_queue_swap_backstop(&e, &new_backstop, &Address::generate(&e));
+        });
+    }
+
     /********** execute_cancel_swap_backstop **********/
 
     #[test]
@@ -391,15 +442,54 @@ mod tests {
         });
     }
 
+    #[test]
+    fn test_execute_cancel_swap_backstop_expired_and_requeue() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set_timestamp(SWAP_GRACE_SECONDS + 2);
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let new_backstop = Address::generate(&e);
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        let new_backstop_token = Address::generate(&e);
+
+        backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
+        backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
+        let expired_swap = Swap {
+            new_backstop: new_backstop.clone(),
+            new_backstop_token: new_backstop_token.clone(),
+            unlock_time: 1,
+        };
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            storage::set_queued_swap(&e, &expired_swap);
+
+            execute_cancel_swap_backstop(&e);
+            assert!(storage::get_queued_swap(&e).is_none());
+
+            let replacement = execute_queue_swap_backstop(&e, &new_backstop, &new_backstop_token);
+            assert_eq!(
+                replacement.unlock_time,
+                e.ledger().timestamp() + QUEUE_SECONDS
+            );
+        });
+    }
+
     /********** execute_swap_backstop **********/
 
     #[test]
-    fn test_execute_swap_backstop() {
+    fn test_execute_swap_backstop_at_deadline() {
         let e = Env::default();
         e.mock_all_auths();
+        let now = SWAP_GRACE_SECONDS + 12345;
 
         e.ledger().set(LedgerInfo {
-            timestamp: 12345,
+            timestamp: now,
             protocol_version: 27,
             sequence_number: 500,
             network_id: Default::default(),
@@ -454,9 +544,12 @@ mod tests {
             assert!(swap.is_none());
 
             // verify old backstop was distributed and new backstop distribution begins
-            assert_eq!(storage::get_last_distro_time(&e, &backstop), 12345);
-            assert_eq!(storage::get_last_distro_time(&e, &new_backstop), 12345);
-            assert_eq!(blnd_token_client.balance(&backstop), 2345 * SCALAR_7);
+            assert_eq!(storage::get_last_distro_time(&e, &backstop), now);
+            assert_eq!(storage::get_last_distro_time(&e, &new_backstop), now);
+            assert_eq!(
+                blnd_token_client.balance(&backstop),
+                i128::from(now - 10000) * SCALAR_7
+            );
             assert_eq!(blnd_token_client.balance(&new_backstop), 0);
         });
     }
@@ -512,6 +605,26 @@ mod tests {
 
             execute_swap_backstop(&e);
             panic!("should panic");
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1113)")]
+    fn test_execute_swap_backstop_expired() {
+        let e = Env::default();
+        e.mock_all_auths();
+        e.ledger().set_timestamp(SWAP_GRACE_SECONDS + 2);
+
+        let emitter = create_emitter(&e);
+        let swap = Swap {
+            new_backstop: Address::generate(&e),
+            new_backstop_token: Address::generate(&e),
+            unlock_time: 1,
+        };
+
+        e.as_contract(&emitter, || {
+            storage::set_queued_swap(&e, &swap);
+            execute_swap_backstop(&e);
         });
     }
 

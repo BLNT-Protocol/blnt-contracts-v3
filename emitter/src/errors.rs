@@ -26,4 +26,5 @@ pub enum EmitterError {
     ReentrantSwap = 1110,
     NotInitialized = 1111,
     OverflowError = 1112,
+    SwapExpired = 1113,
 }

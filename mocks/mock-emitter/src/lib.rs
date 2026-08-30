@@ -9,6 +9,7 @@ use soroban_sdk::{
 const SCALAR_7: i128 = 10_000_000;
 const MAX_DROP: i128 = 50_000_000 * SCALAR_7;
 const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
+const SWAP_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -20,6 +21,8 @@ enum EmitterError {
     SwapAlreadyExists = 1103,
     SwapNotUnlocked = 1104,
     SwapCannotBeCanceled = 1105,
+    OverflowError = 1112,
+    SwapExpired = 1113,
 }
 
 #[derive(Clone)]
@@ -62,13 +65,8 @@ impl MockEmitter {
 
     pub fn distribute(env: Env) -> i128 {
         let backstop = Self::get_backstop(env.clone());
-        let last_distro = Self::get_last_distro(env.clone(), backstop.clone());
-        let elapsed = env.ledger().timestamp() - last_distro;
-        let amount = i128::from(elapsed) * SCALAR_7;
-        set_last_distro(&env, &backstop, env.ledger().timestamp());
-        let blnt: Address = env.storage().instance().get(&DataKey::BlntToken).unwrap();
-        StellarAssetClient::new(&env, &blnt).mint(&backstop, &amount);
-        amount
+        backstop.require_auth();
+        distribute_to(&env, &backstop)
     }
 
     pub fn get_last_distro(env: Env, backstop_id: Address) -> u64 {
@@ -87,11 +85,17 @@ impl MockEmitter {
             panic_with_error!(&env, EmitterError::SwapAlreadyExists);
         }
         require_larger_backstop(&env, &new_backstop);
+        let unlock_time = env
+            .ledger()
+            .timestamp()
+            .checked_add(QUEUE_SECONDS)
+            .unwrap_or_else(|| panic_with_error!(&env, EmitterError::OverflowError));
         let swap = Swap {
             new_backstop,
             new_backstop_token,
-            unlock_time: env.ledger().timestamp().checked_add(QUEUE_SECONDS).unwrap(),
+            unlock_time,
         };
+        swap_deadline(&env, &swap);
         env.storage().persistent().set(&DataKey::Swap, &swap);
     }
 
@@ -105,7 +109,8 @@ impl MockEmitter {
             .persistent()
             .get(&DataKey::Swap)
             .unwrap_or_else(|| panic_with_error!(&env, EmitterError::SwapNotQueued));
-        if is_larger_backstop(&env, &swap.new_backstop) {
+        let expired = env.ledger().timestamp() > swap_deadline(&env, &swap);
+        if !expired && is_larger_backstop(&env, &swap.new_backstop) {
             panic_with_error!(&env, EmitterError::SwapCannotBeCanceled);
         }
         env.storage().persistent().remove(&DataKey::Swap);
@@ -120,9 +125,13 @@ impl MockEmitter {
         if env.ledger().timestamp() < swap.unlock_time {
             panic_with_error!(&env, EmitterError::SwapNotUnlocked);
         }
+        if env.ledger().timestamp() > swap_deadline(&env, &swap) {
+            panic_with_error!(&env, EmitterError::SwapExpired);
+        }
         require_larger_backstop(&env, &swap.new_backstop);
 
-        Self::distribute(env.clone());
+        let incumbent = Self::get_backstop(env.clone());
+        distribute_to(&env, &incumbent);
         env.storage().persistent().remove(&DataKey::Swap);
         env.storage()
             .instance()
@@ -177,6 +186,22 @@ fn require_larger_backstop(env: &Env, candidate: &Address) {
     if !is_larger_backstop(env, candidate) {
         panic_with_error!(env, EmitterError::InsufficientBackstopSize);
     }
+}
+
+fn swap_deadline(env: &Env, swap: &Swap) -> u64 {
+    swap.unlock_time
+        .checked_add(SWAP_GRACE_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(env, EmitterError::OverflowError))
+}
+
+fn distribute_to(env: &Env, backstop: &Address) -> i128 {
+    let last_distro = MockEmitter::get_last_distro(env.clone(), backstop.clone());
+    let elapsed = env.ledger().timestamp() - last_distro;
+    let amount = i128::from(elapsed) * SCALAR_7;
+    set_last_distro(env, backstop, env.ledger().timestamp());
+    let blnt: Address = env.storage().instance().get(&DataKey::BlntToken).unwrap();
+    StellarAssetClient::new(env, &blnt).mint(backstop, &amount);
+    amount
 }
 
 fn set_last_distro(env: &Env, backstop: &Address, timestamp: u64) {
