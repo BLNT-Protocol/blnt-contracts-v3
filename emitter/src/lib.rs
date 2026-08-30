@@ -6,7 +6,6 @@ extern crate std;
 mod backstop_manager;
 mod constants;
 mod contract;
-mod conversion;
 mod emitter;
 mod errors;
 mod storage;

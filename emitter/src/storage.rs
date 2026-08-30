@@ -6,8 +6,7 @@ use crate::backstop_manager::Swap;
 
 const ONE_DAY_LEDGERS: u32 = 17280; // assumes 5s a ledger
 
-// The immutable conversion window lasts 60 days. Keep the constructor state
-// live beyond the complete window even before the first keeper invocation.
+// Keep constructor and emitter state live across extended operational gaps.
 const LEDGER_THRESHOLD_INSTANCE: u32 = ONE_DAY_LEDGERS * 90; // ~ 90 days
 const LEDGER_BUMP_INSTANCE: u32 = LEDGER_THRESHOLD_INSTANCE + ONE_DAY_LEDGERS; // ~ 31 days
 
@@ -23,11 +22,7 @@ const BACKSTOP_TOKEN_KEY: &str = "BToken";
 // as the configured emission token (BLNT for the v3 deployment).
 const EMISSION_TOKEN_KEY: &str = "BLNDTkn";
 const SWAP_KEY: &str = "Swap";
-const LEGACY_BLND_TOKEN_KEY: &str = "OldBLND";
 const INITIALIZER_KEY: &str = "InitAuth";
-const SWAP_DEADLINE_KEY: &str = "SwapEnd";
-const TOTAL_SWAPPED_KEY: &str = "Swapped";
-const SWAP_LOCK_KEY: &str = "SwapLock";
 
 // Emitter Data Keys
 #[derive(Clone)]
@@ -77,60 +72,6 @@ pub fn set_is_init(e: &Env) {
     e.storage()
         .instance()
         .set::<Symbol, bool>(&Symbol::new(e, IS_INIT_KEY), &true);
-}
-
-/********** BLND to BLNT Conversion **********/
-
-pub fn get_legacy_blnd_token(e: &Env) -> Address {
-    e.storage()
-        .instance()
-        .get(&Symbol::new(e, LEGACY_BLND_TOKEN_KEY))
-        .unwrap_optimized()
-}
-
-pub fn set_legacy_blnd_token(e: &Env, token: &Address) {
-    e.storage()
-        .instance()
-        .set(&Symbol::new(e, LEGACY_BLND_TOKEN_KEY), token);
-}
-
-pub fn get_swap_deadline(e: &Env) -> u64 {
-    e.storage()
-        .instance()
-        .get(&Symbol::new(e, SWAP_DEADLINE_KEY))
-        .unwrap_optimized()
-}
-
-pub fn set_swap_deadline(e: &Env, deadline: u64) {
-    e.storage()
-        .instance()
-        .set(&Symbol::new(e, SWAP_DEADLINE_KEY), &deadline);
-}
-
-pub fn get_total_swapped(e: &Env) -> i128 {
-    e.storage()
-        .instance()
-        .get(&Symbol::new(e, TOTAL_SWAPPED_KEY))
-        .unwrap_or(0)
-}
-
-pub fn set_total_swapped(e: &Env, total: i128) {
-    e.storage()
-        .instance()
-        .set(&Symbol::new(e, TOTAL_SWAPPED_KEY), &total);
-}
-
-pub fn get_swap_lock(e: &Env) -> bool {
-    e.storage()
-        .instance()
-        .get(&Symbol::new(e, SWAP_LOCK_KEY))
-        .unwrap_or(false)
-}
-
-pub fn set_swap_lock(e: &Env, locked: bool) {
-    e.storage()
-        .instance()
-        .set(&Symbol::new(e, SWAP_LOCK_KEY), &locked);
 }
 
 /********** Backstop **********/

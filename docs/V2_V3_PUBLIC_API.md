@@ -28,11 +28,11 @@ Private storage-only types are excluded.
 
 V3 deploys a separate emitter for BLNT while the legacy emitter and BLND remain
 with v1/v2. The established emitter entry points and encodings are retained;
-the v3 emitter adds only the constructor and one-way conversion surface below.
+the v3 emitter adds only constructor-bound initialization authority.
 
 | Legacy entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| No constructor | `__constructor(legacy_blnd_token, initializer)` | Added | Binds the only token accepted by conversion, fixes the exclusive 60-day deadline, and prevents first-call initialization races. |
+| No constructor | `__constructor(initializer)` | Added | Prevents first-call initialization races without creating an ongoing administrator. |
 | `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:USDC as the initial designated token. |
 | `distribute() -> i128` | Same | Extended | Mints BLNT at the inherited one-token-per-second rate and requires the current backstop; callers use the backstop's permissionless checkpoint. |
 | `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
@@ -42,10 +42,6 @@ the v3 emitter adds only the constructor and one-way conversion surface below.
 | `cancel_swap_backstop()` | Same | Extended | Preserves invalid-queue cancellation and also permits cancellation through the same entry point after the seven-day execution window expires. |
 | `swap_backstop()` | Same | Extended | Preserves final distribution, revalidation, and recipient replacement while limiting execution to the seven days after unlock. |
 | `drop(list)` | Same | Extended | Mints the initial BLNT allocation under the inherited one-call, 50-million-token ceiling. |
-| — | `swap_blnd_for_blnt(from, to, amount) -> i128` | Added | Before the exclusive deadline, burns exact legacy BLND receipts and mints BLNT 1:1 in raw seven-decimal units. |
-| — | `get_swap_deadline() -> u64` | Added | Returns the immutable exclusive conversion deadline. |
-| — | `get_legacy_blnd_token() -> Address` | Added | Returns the immutable legacy BLND input token. |
-| — | `get_total_swapped() -> i128` | Added | Returns cumulative successfully burned BLND. |
 
 ## Backstop
 
@@ -64,12 +60,12 @@ the v3 emitter adds only the constructor and one-way conversion surface below.
 | `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with an ordered one-to-three-tier vector, aggregate transferable active USDC-equivalent value, and transferable-value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; membership uses v3 activation value while allocation and full-zone replacement use eligible underlying BLNT. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh v3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-conversion-and-replacement--replaced-and-extended) |
+| `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh v3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | `gulp_emissions(pool) -> i128` | Same | Extended | Retains the 70/30 gulp while scheduling the eligible tier streams. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `add_reward(to_add, to_remove)` | Same | Extended | Admission uses v3 activation; full-zone replacement remains strictly underlying-BLNT weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation valuation and otherwise preserves the v2 threshold and checkpoint rules. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLNT-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `drop()` | Same | Extended | Keeps the one-call drop surface for the immutable BLNT allocation and migration backfill. V3 launch may use the full 50-million-BLNT list because it schedules no backfill; a future migration combines its at-most-40-million list with at most 10 million of backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-conversion-and-replacement--replaced-and-extended) |
+| `drop()` | Same | Extended | Keeps the one-call drop surface for the immutable BLNT allocation and migration backfill. V3 launch may use the full 50-million-BLNT list because it schedules no backfill; a future migration combines its at-most-40-million list with at most 10 million of backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | — | `buy_and_burn(asset) -> i128` | Added | Permissionlessly swaps one bounded pending USDC or XLM haircut batch through its canonical BLNT Comet and burns the exact BLNT output. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 | `draw(pool, amount, to)` | `draw(tier, pool, amount, to)` | Extended | A pool draws loss capital from the tier selected by the waterfall. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
 | `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits the full BLNT-LP-tier payment or 99% of a plain-USDC/plain-XLM payment after its buyback haircut. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |

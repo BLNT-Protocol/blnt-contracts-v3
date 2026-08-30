@@ -2,7 +2,7 @@
 // the SDK 27 typed-event API.
 #![allow(deprecated)]
 
-use crate::{backstop_manager, conversion, emitter, errors::EmitterError, storage};
+use crate::{backstop_manager, emitter, errors::EmitterError, storage};
 use sep_41_token::{StellarAssetClient, TokenClient};
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Env, Executable, Symbol, Vec,
@@ -10,11 +10,9 @@ use soroban_sdk::{
 
 /// ### Emitter
 ///
-/// Emits BLNT to the v3 backstop and offers a time-limited legacy BLND conversion.
+/// Emits BLNT to the v3 backstop.
 #[contract]
 pub struct EmitterContract;
-
-pub const SWAP_WINDOW_SECONDS: u64 = 60 * 24 * 60 * 60;
 
 #[contractclient(name = "EmitterClient")]
 pub trait Emitter {
@@ -80,34 +78,12 @@ pub trait Emitter {
     /// If drop has already been called for the backstop, the backstop is not the caller,
     /// or the list exceeds the drop amount maximum.
     fn drop(e: Env, list: Vec<(Address, i128)>);
-
-    /// Irreversibly exchange legacy BLND for the configured emission token.
-    ///
-    /// The exchange is available only during the first 60 days after this
-    /// emitter contract is instantiated.
-    fn swap_blnd_for_blnt(e: Env, from: Address, to: Address, amount: i128) -> i128;
-
-    /// Fetch the immutable exclusive BLND-to-BLNT swap deadline.
-    fn get_swap_deadline(e: Env) -> u64;
-
-    /// Fetch the legacy BLND token accepted by the swap.
-    fn get_legacy_blnd_token(e: Env) -> Address;
-
-    /// Fetch the cumulative BLND burned through the swap.
-    fn get_total_swapped(e: Env) -> i128;
 }
 
 #[contractimpl]
 impl EmitterContract {
-    pub fn __constructor(e: Env, legacy_blnd_token: Address, initializer: Address) {
-        storage::set_legacy_blnd_token(&e, &legacy_blnd_token);
+    pub fn __constructor(e: Env, initializer: Address) {
         storage::set_initializer(&e, &initializer);
-        let deadline = e
-            .ledger()
-            .timestamp()
-            .checked_add(SWAP_WINDOW_SECONDS)
-            .unwrap_or_else(|| panic_with_error!(&e, EmitterError::OverflowError));
-        storage::set_swap_deadline(&e, deadline);
         storage::extend_instance(&e);
     }
 }
@@ -120,16 +96,12 @@ impl Emitter for EmitterContract {
             panic_with_error!(&e, EmitterError::AlreadyInitializedError)
         }
         storage::get_initializer(&e).require_auth();
-        let legacy_blnd_token = storage::get_legacy_blnd_token(&e);
         let emitter = e.current_contract_address();
-        if blnd_token == legacy_blnd_token
-            || blnd_token.executable() != Some(Executable::StellarAsset)
-            || legacy_blnd_token.executable() != Some(Executable::StellarAsset)
+        if blnd_token.executable() != Some(Executable::StellarAsset)
             || TokenClient::new(&e, &blnd_token).decimals() != 7
-            || TokenClient::new(&e, &legacy_blnd_token).decimals() != 7
             || StellarAssetClient::new(&e, &blnd_token).admin() != emitter
         {
-            panic_with_error!(&e, EmitterError::InvalidSwapToken);
+            panic_with_error!(&e, EmitterError::InvalidEmissionToken);
         }
 
         storage::set_emission_token(&e, &blnd_token);
@@ -195,26 +167,6 @@ impl Emitter for EmitterContract {
 
         e.events().publish((Symbol::new(&e, "drop"),), list);
     }
-
-    fn swap_blnd_for_blnt(e: Env, from: Address, to: Address, amount: i128) -> i128 {
-        storage::extend_instance(&e);
-        let total = conversion::execute_swap_blnd_for_blnt(&e, &from, &to, amount);
-        e.events()
-            .publish((Symbol::new(&e, "swap_blnd"), from, to), (amount, total));
-        total
-    }
-
-    fn get_swap_deadline(e: Env) -> u64 {
-        storage::get_swap_deadline(&e)
-    }
-
-    fn get_legacy_blnd_token(e: Env) -> Address {
-        storage::get_legacy_blnd_token(&e)
-    }
-
-    fn get_total_swapped(e: Env) -> i128 {
-        storage::get_total_swapped(&e)
-    }
 }
 
 #[cfg(test)]
@@ -261,9 +213,7 @@ mod tests {
     fn initialize_requires_the_constructor_bound_authority() {
         let e = Env::default();
         let initializer = Address::generate(&e);
-        let legacy_admin = Address::generate(&e);
-        let legacy_blnd = e.register_stellar_asset_contract_v2(legacy_admin).address();
-        let emitter = e.register(EmitterContract, (&legacy_blnd, &initializer));
+        let emitter = e.register(EmitterContract, (&initializer,));
         let blnt = e
             .register_stellar_asset_contract_v2(emitter.clone())
             .address();
@@ -284,12 +234,36 @@ mod tests {
     }
 
     #[test]
+    fn initialization_rejects_an_invalid_emission_token() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let initializer = Address::generate(&e);
+        let emitter = e.register(EmitterContract, (&initializer,));
+        let wrong_admin = Address::generate(&e);
+        let wrong_admin_token = e.register_stellar_asset_contract_v2(wrong_admin).address();
+        let client = EmitterClient::new(&e, &emitter);
+
+        assert!(client
+            .try_initialize(
+                &wrong_admin_token,
+                &Address::generate(&e),
+                &Address::generate(&e),
+            )
+            .is_err());
+        assert!(client
+            .try_initialize(
+                &Address::generate(&e),
+                &Address::generate(&e),
+                &Address::generate(&e),
+            )
+            .is_err());
+    }
+
+    #[test]
     fn distribution_requires_the_current_backstop() {
         let e = Env::default();
         let initializer = Address::generate(&e);
-        let legacy_admin = Address::generate(&e);
-        let legacy_blnd = e.register_stellar_asset_contract_v2(legacy_admin).address();
-        let emitter = e.register(EmitterContract, (&legacy_blnd, &initializer));
+        let emitter = e.register(EmitterContract, (&initializer,));
         let blnt = e
             .register_stellar_asset_contract_v2(emitter.clone())
             .address();
@@ -328,9 +302,7 @@ mod tests {
 
         let e = Env::default();
         let initializer = Address::generate(&e);
-        let legacy_admin = Address::generate(&e);
-        let legacy_blnd = e.register_stellar_asset_contract_v2(legacy_admin).address();
-        let emitter = e.register(EmitterContract, (&legacy_blnd, &initializer));
+        let emitter = e.register(EmitterContract, (&initializer,));
         let blnt = e
             .register_stellar_asset_contract_v2(emitter.clone())
             .address();

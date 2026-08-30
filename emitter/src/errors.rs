@@ -19,12 +19,7 @@ pub enum EmitterError {
     SwapAlreadyExists = 1103,
     SwapNotUnlocked = 1104,
     SwapCannotBeCanceled = 1105,
-    InvalidSwapAmount = 1106,
-    SwapWindowClosed = 1107,
-    InvalidSwapToken = 1108,
-    SwapBalanceError = 1109,
-    ReentrantSwap = 1110,
-    NotInitialized = 1111,
+    InvalidEmissionToken = 1108,
     OverflowError = 1112,
     SwapExpired = 1113,
 }

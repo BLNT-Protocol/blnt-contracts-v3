@@ -656,39 +656,26 @@ exposure to current-spot manipulation.
 
 ## 6. BLNT emissions — **Extended**
 
-### 6.1 V3 emitter launch, conversion, and replacement — **Replaced and extended**
+### 6.1 V3 emitter launch and replacement — **Replaced and extended**
 
 `V2-EMISSIONS-004` is replaced for the initial v3 launch. V3 deploys a new
 emitter already configured for the v3 backstop and canonical BLNT:USDC Comet
-LP. It does not replace, reconfigure, or depend on the legacy BLND emitter,
-which may continue serving v1 and v2 independently.
+LP. It does not replace, reconfigure, or depend on any earlier emitter.
 
 The v3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
 `get_last_distro`, `get_backstop`, and backstop-swap entry points and their
-existing argument and return encodings. The legacy `initialize` parameter
-named `blnd_token` MUST contain BLNT in a v3 deployment. Initialization MUST
-reject a token equal to legacy BLND, either token using decimals other than
-seven, or a BLNT Stellar Asset Contract whose administrator is not the v3
-emitter. After initialization, `distribute` mints BLNT to the current backstop
-at one token per elapsed second. As a safety fix, only the current backstop may
-invoke the emitter's `distribute`; callers retain permissionless access through
-the backstop's own `distribute` entry point. The emitter's internal final
-distribution during recipient replacement is not subject to that external
-authorization gate.
-
-The emitter constructor immutably binds legacy BLND, records a one-time
-initialization authority, and fixes an exclusive swap deadline exactly 60 days
-after instantiation. `initialize` MUST require that authority and permanently
-discard it on success so deployment cannot be front-run and no ongoing emitter
-administrator remains. Before the deadline,
-`swap_blnd_for_blnt(from, to, amount)` MUST require `from` authorization and a
-positive amount, transfer exactly that many legacy BLND to the emitter, burn
-the complete receipt, and mint the same raw seven-decimal amount of BLNT to
-`to`. It MUST fail atomically on any balance mismatch, repeated entry,
-overflow, identical token binding, or call at or after the deadline. The
-deadline cannot be extended. `get_swap_deadline`, `get_legacy_blnd_token`, and
-`get_total_swapped` expose the immutable deadline, legacy token, and cumulative
-successful burn-and-mint amount. No BLNT-to-BLND path exists.
+existing argument and return encodings. The first `initialize` parameter MUST
+contain BLNT in a v3 deployment. Initialization MUST
+reject a token using decimals other than seven or a BLNT Stellar Asset Contract
+whose administrator is not the v3 emitter. The emitter constructor records a
+one-time initialization authority. `initialize` MUST require that authority
+and permanently discard it on success so deployment cannot be front-run and no
+ongoing emitter administrator remains. After initialization, `distribute`
+mints BLNT to the current backstop at one token per elapsed second. As a safety
+fix, only the current backstop may invoke the emitter's `distribute`; callers
+retain permissionless access through the backstop's own `distribute` entry
+point. The emitter's internal final distribution during recipient replacement
+is not subject to that external authorization gate.
 
 Because the v3 emitter recognizes the v3 backstop from its first checkpoint,
 the backstop's first `distribute` activates ongoing accounting directly when
@@ -697,12 +684,13 @@ strict-balance contest, backfill interval, or legacy-emitter switch is required
 for v3 launch. `drop` retains the existing one-call emitter lifecycle and may
 mint an immutable deployment-selected initial BLNT allocation whose aggregate
 does not exceed 50 million BLNT. Recipient selection, including an empty list,
-remains deployment policy. The backstop constructor identifies this launch
-case from the emitter's existing recipient binding. A future migration
-candidate is instead limited to a 40-million-BLNT immutable list, reserving up
-to 10 million BLNT for migration backfill while keeping the emitter's combined
-one-call ceiling at 50 million BLNT. Every list amount MUST be nonnegative and
-all list and combined-backfill sums MUST use checked arithmetic.
+remains deployment policy outside this contract repository. The backstop
+constructor identifies this launch case from the emitter's existing recipient
+binding. A future migration candidate is instead limited to a 40-million-BLNT
+immutable list, reserving up to 10 million BLNT for migration backfill while
+keeping the emitter's combined one-call ceiling at 50 million BLNT. Every list
+amount MUST be nonnegative and all list and combined-backfill sums MUST use
+checked arithmetic.
 
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
