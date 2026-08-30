@@ -9,6 +9,7 @@ use soroban_sdk::{
 use test_suites::{
     assertions::event_from_end,
     create_fixture_with_data,
+    emitter::create_emitter,
     liquidity_pool::create_lp_pool,
     test_fixture::{TokenIndex, SCALAR_7},
     token::create_stellar_token,
@@ -703,6 +704,76 @@ fn test_backstop_constructor_rejects_drop_list_over_cap() {
             blnt_usdc,
             blnt_xlm,
             Address::generate(&e),
+            blnt,
+            usdc,
+            xlm,
+            pool_factory,
+            drop_list,
+        ),
+    );
+}
+
+#[test]
+fn test_initial_backstop_constructor_allows_full_drop_list() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = Address::generate(&e);
+    let (blnt, usdc, xlm, blnt_usdc, blnt_xlm) = create_backstop_assets(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnt_id: blnt.clone(),
+        },),
+    );
+    let (emitter, emitter_client) = create_emitter(&e);
+    emitter_client.initialize(&blnt, &contract_id, &blnt_usdc);
+    let drop_list = vec![&e, (Address::generate(&e), 50_000_000 * SCALAR_7)];
+
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            blnt_usdc,
+            blnt_xlm,
+            emitter,
+            blnt,
+            usdc,
+            xlm,
+            pool_factory,
+            drop_list,
+        ),
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1000)")]
+fn test_migration_backstop_constructor_rejects_drop_list_over_40m() {
+    let e = Env::default();
+    e.mock_all_auths();
+    let contract_id = Address::generate(&e);
+    let incumbent = Address::generate(&e);
+    let (blnt, usdc, xlm, blnt_usdc, blnt_xlm) = create_backstop_assets(&e);
+    let pool_factory = e.register(
+        MockPoolFactory {},
+        (PoolInitMeta {
+            backstop: contract_id.clone(),
+            pool_hash: BytesN::from_array(&e, &[0; 32]),
+            blnt_id: blnt.clone(),
+        },),
+    );
+    let (emitter, emitter_client) = create_emitter(&e);
+    emitter_client.initialize(&blnt, &incumbent, &blnt_usdc);
+    let drop_list = vec![&e, (Address::generate(&e), 40_000_000 * SCALAR_7 + 1)];
+
+    e.register_at(
+        &contract_id,
+        BackstopContract {},
+        (
+            blnt_usdc,
+            blnt_xlm,
+            emitter,
             blnt,
             usdc,
             xlm,

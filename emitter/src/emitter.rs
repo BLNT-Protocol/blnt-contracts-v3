@@ -26,13 +26,18 @@ pub fn execute_drop(e: &Env, list: &Vec<(Address, i128)>) {
         panic_with_error!(e, EmitterError::BadDrop);
     }
 
-    let mut drop_amount = 0;
+    let mut drop_amount = 0_i128;
     for (_, amt) in list.iter() {
-        drop_amount += amt;
-    }
-    // drop cannot be more than 50 million tokens
-    if drop_amount > 50_000_000 * SCALAR_7 {
-        panic_with_error!(e, EmitterError::BadDrop);
+        if amt.is_negative() {
+            panic_with_error!(e, EmitterError::BadDrop);
+        }
+        drop_amount = drop_amount
+            .checked_add(amt)
+            .unwrap_or_else(|| panic_with_error!(e, EmitterError::OverflowError));
+        // The initial list and any migration backfill share this ceiling.
+        if drop_amount > 50_000_000 * SCALAR_7 {
+            panic_with_error!(e, EmitterError::BadDrop);
+        }
     }
 
     let blnt_id = storage::get_emission_token(e);
@@ -214,6 +219,49 @@ mod tests {
 
             execute_drop(&e, &drop_list);
             assert!(!storage::get_drop_status(&e, &backstop));
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1101)")]
+    fn test_drop_rejects_negative_amount() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let blnt_id = e
+            .register_stellar_asset_contract_v2(emitter.clone())
+            .address();
+        let drop_list = vec![&e, (recipient, -1)];
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_emission_token(&e, &blnt_id);
+            execute_drop(&e, &drop_list);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1101)")]
+    fn test_drop_negative_amount_cannot_bypass_cap() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let frodo = Address::generate(&e);
+        let samwise = Address::generate(&e);
+        let blnt_id = e
+            .register_stellar_asset_contract_v2(emitter.clone())
+            .address();
+        let drop_list = vec![&e, (frodo, 50_000_001 * SCALAR_7), (samwise, -SCALAR_7)];
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_emission_token(&e, &blnt_id);
+            execute_drop(&e, &drop_list);
         });
     }
 }

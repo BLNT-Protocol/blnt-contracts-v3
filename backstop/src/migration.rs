@@ -2,7 +2,7 @@ use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Env};
 
 use crate::{
-    constants::MAX_BACKFILLED_EMISSIONS,
+    constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
     dependencies::{EmitterClient, Swap},
     errors::BackstopError,
     events::BackstopEvents,
@@ -189,21 +189,32 @@ pub(crate) fn drop(e: &Env) {
         panic_with_error!(e, BackstopError::InvalidBackfillFunding);
     }
 
-    // Persist before the external call so reentrancy or repetition cannot
-    // create two obligations. A later failure rolls this marker back.
-    storage::set_backfill_funded_amount(e, scheduled);
     let candidate = e.current_contract_address();
-    let blnt = TokenClient::new(e, &storage::get_blnt_token(e));
-    let balance_before = blnt.balance(&candidate);
     let mut recipients = storage::get_drop_list(e);
     let mut expected_candidate_delta = scheduled;
+    let mut drop_total = scheduled;
     for (recipient, amount) in recipients.iter() {
+        if amount.is_negative() {
+            panic_with_error!(e, BackstopError::InvalidBackfillFunding);
+        }
+        drop_total = drop_total
+            .checked_add(amount)
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
         if recipient == candidate {
             expected_candidate_delta = expected_candidate_delta
                 .checked_add(amount)
                 .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
         }
     }
+    if drop_total > MAX_INITIAL_DROP {
+        panic_with_error!(e, BackstopError::InvalidBackfillFunding);
+    }
+
+    // Persist before the external calls so reentrancy or repetition cannot
+    // create two obligations. A later failure rolls this marker back.
+    storage::set_backfill_funded_amount(e, scheduled);
+    let blnt = TokenClient::new(e, &storage::get_blnt_token(e));
+    let balance_before = blnt.balance(&candidate);
     if scheduled > 0 {
         recipients.push_back((candidate.clone(), scheduled));
     }
@@ -893,6 +904,20 @@ mod tests {
     #[test]
     fn delayed_queue_reaches_the_full_backfill_cap() {
         let fixture = Fixture::create();
+        let discretionary_recipient = Address::generate(&fixture.e);
+        let discretionary_amount = MAX_INITIAL_DROP - MAX_BACKFILLED_EMISSIONS;
+        fixture.e.as_contract(&fixture.backstop, || {
+            storage::set_drop_list(
+                &fixture.e,
+                &vec![
+                    &fixture.e,
+                    (discretionary_recipient.clone(), discretionary_amount),
+                ],
+            );
+        });
+        let blnt = TokenClient::new(&fixture.e, &fixture.blnt);
+        let backstop_balance_before = blnt.balance(&fixture.backstop);
+        let recipient_balance_before = blnt.balance(&discretionary_recipient);
         let epoch_start = fixture.e.ledger().timestamp();
         assert_eq!(fixture.client().distribute(), 0);
 
@@ -916,6 +941,37 @@ mod tests {
             fixture.migration_state().funded_backfill,
             Some(MAX_BACKFILLED_EMISSIONS)
         );
+        assert_eq!(
+            blnt.balance(&fixture.backstop) - backstop_balance_before,
+            MAX_BACKFILLED_EMISSIONS
+        );
+        assert_eq!(
+            blnt.balance(&discretionary_recipient) - recipient_balance_before,
+            discretionary_amount
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1052)")]
+    fn drop_rejects_list_and_backfill_over_emitter_cap() {
+        let fixture = Fixture::create();
+        fixture.e.as_contract(&fixture.backstop, || {
+            storage::set_drop_list(
+                &fixture.e,
+                &vec![
+                    &fixture.e,
+                    (Address::generate(&fixture.e), MAX_INITIAL_DROP),
+                ],
+            );
+            fixture
+                .e
+                .storage()
+                .instance()
+                .set(&MigrationDataKey::ScheduledBackfill, &1_i128);
+            activate_for_test(&fixture.e, fixture.e.ledger().timestamp());
+        });
+
+        fixture.client().drop();
     }
 
     #[test]

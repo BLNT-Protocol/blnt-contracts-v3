@@ -155,10 +155,15 @@ impl MockEmitter {
         }
         let mut total = 0_i128;
         for (_, amount) in list.iter() {
-            total += amount;
-        }
-        if total > MAX_DROP {
-            panic_with_error!(&env, EmitterError::BadDrop);
+            if amount.is_negative() {
+                panic_with_error!(&env, EmitterError::BadDrop);
+            }
+            total = total
+                .checked_add(amount)
+                .unwrap_or_else(|| panic_with_error!(&env, EmitterError::OverflowError));
+            if total > MAX_DROP {
+                panic_with_error!(&env, EmitterError::BadDrop);
+            }
         }
         let blnt: Address = env.storage().instance().get(&DataKey::BlntToken).unwrap();
         let token = StellarAssetClient::new(&env, &blnt);

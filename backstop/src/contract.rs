@@ -3,7 +3,8 @@ use crate::{
         self, load_pool_backstop_data, tier_token, validate_backstop_assets, BackstopAsset,
         BackstopTier, PoolBackstopData, UserBalance, Q4W,
     },
-    constants::MAX_INITIAL_DROP,
+    constants::{MAX_INITIAL_DROP, MAX_MIGRATION_DROP_LIST},
+    dependencies::EmitterClient,
     emissions,
     errors::BackstopError,
     events::BackstopEvents,
@@ -177,7 +178,9 @@ impl BackstopContract {
     /// * `usdc_token` - The USDC token ID
     /// * `xlm_token` - The XLM token ID
     /// * `pool_factory` - The pool factory ID
-    /// * `drop_list` - Immutable discretionary recipient addresses and BLNT amounts
+    /// * `drop_list` - Immutable discretionary recipient addresses and BLNT amounts. The initial
+    ///   emitter recipient may allocate up to 50 million BLNT; migration candidates may allocate
+    ///   up to 40 million BLNT so the emitter's remaining allowance can fund migration backfill.
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
         e: Env,
@@ -206,6 +209,11 @@ impl BackstopContract {
                 .unwrap_or_else(|| panic_with_error!(&e, BackstopError::OverflowError));
         }
         if drop_total > MAX_INITIAL_DROP {
+            panic_with_error!(&e, BackstopError::BadRequest);
+        }
+        if drop_total > MAX_MIGRATION_DROP_LIST
+            && EmitterClient::new(&e, &emitter).get_backstop() != e.current_contract_address()
+        {
             panic_with_error!(&e, BackstopError::BadRequest);
         }
         storage::set_blnt_usdc_token(&e, &blnt_usdc_token);

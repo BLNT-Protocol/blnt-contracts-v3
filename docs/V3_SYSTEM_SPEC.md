@@ -697,7 +697,12 @@ strict-balance contest, backfill interval, or legacy-emitter switch is required
 for v3 launch. `drop` retains the existing one-call emitter lifecycle and may
 mint an immutable deployment-selected initial BLNT allocation whose aggregate
 does not exceed 50 million BLNT. Recipient selection, including an empty list,
-remains deployment policy.
+remains deployment policy. The backstop constructor identifies this launch
+case from the emitter's existing recipient binding. A future migration
+candidate is instead limited to a 40-million-BLNT immutable list, reserving up
+to 10 million BLNT for migration backfill while keeping the emitter's combined
+one-call ceiling at 50 million BLNT. Every list amount MUST be nonnegative and
+all list and combined-backfill sums MUST use checked arithmetic.
 
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
