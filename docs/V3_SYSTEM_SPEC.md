@@ -738,16 +738,18 @@ Because the v3 emitter recognizes the v3 backstop from its first checkpoint,
 the backstop's first `distribute` activates ongoing accounting directly when
 no earlier migration epoch or queue attestation exists. No emitter queue,
 strict-balance contest, backfill interval, or legacy-emitter switch is required
-for v3 launch. `drop` retains the existing one-call emitter lifecycle and may
-mint an immutable deployment-selected initial BLNT allocation whose aggregate
-does not exceed 50 million BLNT. Recipient selection, including an empty list,
-remains deployment policy outside this contract repository. The backstop
-constructor identifies this launch case from the emitter's existing recipient
-binding. A future migration candidate is instead limited to a 40-million-BLNT
-immutable list, reserving up to 10 million BLNT for migration backfill while
-keeping the emitter's combined one-call ceiling at 50 million BLNT. Every list
-amount MUST be nonnegative and all list and combined-backfill sums MUST use
-checked arithmetic.
+for v3 launch. `drop` retains the existing one-call emitter lifecycle.
+Initialization MUST immutably record the initial backstop so its one-time
+launch drop may mint an immutable deployment-selected allocation whose
+aggregate does not exceed 150 million BLNT. Recipient selection, including an
+empty list, remains deployment policy outside this contract repository. The
+backstop constructor identifies this launch case from the emitter's existing
+recipient binding. Every later migration candidate remains limited to a
+40-million-BLNT immutable list, reserving up to 10 million BLNT for migration
+backfill and retaining the emitter's 50-million-BLNT combined migration
+ceiling. Returning to the initial backstop MUST NOT restore its drop
+eligibility. Every list amount MUST be nonnegative and all list and
+combined-backfill sums MUST use checked arithmetic.
 
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of

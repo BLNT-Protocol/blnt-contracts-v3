@@ -17,13 +17,16 @@ pub const Q4W_LOCK_TIME: u64 = 17 * 24 * 60 * 60;
 /// Represents between 3-4 months worth of token emissions.
 pub const MAX_BACKFILLED_EMISSIONS: i128 = 10_000_000 * SCALAR_7;
 
-/// The emitter's maximum one-time initial drop.
-pub const MAX_INITIAL_DROP: i128 = 50_000_000 * SCALAR_7;
+/// The emitter's maximum one-time launch drop.
+pub const MAX_INITIAL_DROP: i128 = 150_000_000 * SCALAR_7;
+
+/// The emitter's maximum combined drop for a later migration backstop.
+pub const MAX_MIGRATION_DROP: i128 = 50_000_000 * SCALAR_7;
 
 /// The maximum discretionary drop for a backstop that is not the emitter's
 /// initial recipient. The remaining allowance is reserved for migration
 /// backfill in the same emitter `drop` call.
-pub const MAX_MIGRATION_DROP_LIST: i128 = MAX_INITIAL_DROP - MAX_BACKFILLED_EMISSIONS;
+pub const MAX_MIGRATION_DROP_LIST: i128 = MAX_MIGRATION_DROP - MAX_BACKFILLED_EMISSIONS;
 
 /// The verified USDC value required for pool activation.
 pub const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;

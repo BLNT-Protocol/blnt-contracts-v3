@@ -106,6 +106,7 @@ impl Emitter for EmitterContract {
 
         storage::set_emission_token(&e, &blnd_token);
         storage::set_backstop(&e, &backstop);
+        storage::set_initial_backstop(&e, &backstop);
         storage::set_backstop_token(&e, &backstop_token);
         storage::set_last_distro_time(&e, &backstop, e.ledger().timestamp());
 

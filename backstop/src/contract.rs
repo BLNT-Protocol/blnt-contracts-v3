@@ -179,7 +179,7 @@ impl BackstopContract {
     /// * `xlm_token` - The XLM token ID
     /// * `pool_factory` - The pool factory ID
     /// * `drop_list` - Immutable discretionary recipient addresses and BLNT amounts. The initial
-    ///   emitter recipient may allocate up to 50 million BLNT; migration candidates may allocate
+    ///   emitter recipient may allocate up to 150 million BLNT; migration candidates may allocate
     ///   up to 40 million BLNT so the emitter's remaining allowance can fund migration backfill.
     #[allow(clippy::too_many_arguments)]
     pub fn __constructor(
@@ -211,7 +211,8 @@ impl BackstopContract {
         if drop_total > MAX_INITIAL_DROP {
             panic_with_error!(&e, BackstopError::BadRequest);
         }
-        if drop_total > MAX_MIGRATION_DROP_LIST
+        let extended_initial_drop = drop_total > MAX_MIGRATION_DROP_LIST;
+        if extended_initial_drop
             && EmitterClient::new(&e, &emitter).get_backstop() != e.current_contract_address()
         {
             panic_with_error!(&e, BackstopError::BadRequest);
@@ -224,6 +225,7 @@ impl BackstopContract {
         storage::set_pool_factory(&e, &pool_factory);
         storage::set_emitter(&e, &emitter);
         storage::set_drop_list(&e, &drop_list);
+        storage::set_extended_initial_drop(&e, extended_initial_drop);
         storage::extend_instance(&e);
     }
 }

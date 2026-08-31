@@ -696,7 +696,7 @@ fn test_backstop_constructor_rejects_drop_list_over_cap() {
             blnt_id: blnt.clone(),
         },),
     );
-    let drop_list = vec![&e, (Address::generate(&e), 50_000_000 * SCALAR_7 + 1)];
+    let drop_list = vec![&e, (Address::generate(&e), 150_000_000 * SCALAR_7 + 1)];
     e.register_at(
         &contract_id,
         BackstopContract {},
@@ -729,7 +729,7 @@ fn test_initial_backstop_constructor_allows_full_drop_list() {
     );
     let (emitter, emitter_client) = create_emitter(&e);
     emitter_client.initialize(&blnt, &contract_id, &blnt_usdc);
-    let drop_list = vec![&e, (Address::generate(&e), 50_000_000 * SCALAR_7)];
+    let drop_list = vec![&e, (Address::generate(&e), 150_000_000 * SCALAR_7)];
 
     e.register_at(
         &contract_id,

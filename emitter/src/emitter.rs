@@ -1,4 +1,8 @@
-use crate::{constants::SCALAR_7, errors::EmitterError, storage};
+use crate::{
+    constants::{MAX_INITIAL_DROP, MAX_MIGRATION_DROP, SCALAR_7},
+    errors::EmitterError,
+    storage,
+};
 use sep_41_token::StellarAssetClient;
 use soroban_sdk::{panic_with_error, Address, Env, Vec};
 
@@ -25,6 +29,11 @@ pub fn execute_drop(e: &Env, list: &Vec<(Address, i128)>) {
     if storage::get_drop_status(e, &backstop) {
         panic_with_error!(e, EmitterError::BadDrop);
     }
+    let max_drop = if backstop == storage::get_initial_backstop(e) {
+        MAX_INITIAL_DROP
+    } else {
+        MAX_MIGRATION_DROP
+    };
 
     let mut drop_amount = 0_i128;
     for (_, amt) in list.iter() {
@@ -34,8 +43,7 @@ pub fn execute_drop(e: &Env, list: &Vec<(Address, i128)>) {
         drop_amount = drop_amount
             .checked_add(amt)
             .unwrap_or_else(|| panic_with_error!(e, EmitterError::OverflowError));
-        // The initial list and any migration backfill share this ceiling.
-        if drop_amount > 50_000_000 * SCALAR_7 {
+        if drop_amount > max_drop {
             panic_with_error!(e, EmitterError::BadDrop);
         }
     }
@@ -123,18 +131,19 @@ mod tests {
         let blnt_client = MockTokenClient::new(&e, &blnt_id);
         let drop_list = vec![
             &e,
-            (frodo.clone(), 20_000_000 * SCALAR_7),
+            (frodo.clone(), 120_000_000 * SCALAR_7),
             (samwise.clone(), 30_000_000 * SCALAR_7),
         ];
 
         e.as_contract(&emitter, || {
             storage::set_last_distro_time(&e, &backstop, 1000);
             storage::set_backstop(&e, &backstop);
+            storage::set_initial_backstop(&e, &backstop);
             storage::set_emission_token(&e, &blnt_id);
 
             execute_drop(&e, &drop_list);
             assert!(storage::get_drop_status(&e, &backstop));
-            assert_eq!(blnt_client.balance(&frodo), 20_000_000 * SCALAR_7);
+            assert_eq!(blnt_client.balance(&frodo), 120_000_000 * SCALAR_7);
             assert_eq!(blnt_client.balance(&samwise), 30_000_000 * SCALAR_7);
         });
     }
@@ -208,17 +217,41 @@ mod tests {
             .address();
         let drop_list = vec![
             &e,
-            (frodo.clone(), 20_000_000 * SCALAR_7),
+            (frodo.clone(), 120_000_000 * SCALAR_7),
             (samwise.clone(), 30_000_001 * SCALAR_7),
         ];
 
         e.as_contract(&emitter, || {
             storage::set_last_distro_time(&e, &backstop, 1000);
             storage::set_backstop(&e, &backstop);
+            storage::set_initial_backstop(&e, &backstop);
             storage::set_emission_token(&e, &blnt_id);
 
             execute_drop(&e, &drop_list);
             assert!(!storage::get_drop_status(&e, &backstop));
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1101)")]
+    fn test_migration_drop_retains_fifty_million_cap() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let emitter = create_emitter(&e);
+        let initial_backstop = Address::generate(&e);
+        let migration_backstop = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let blnt_id = e
+            .register_stellar_asset_contract_v2(emitter.clone())
+            .address();
+        let drop_list = vec![&e, (recipient, 50_000_000 * SCALAR_7 + 1)];
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &migration_backstop);
+            storage::set_initial_backstop(&e, &initial_backstop);
+            storage::set_emission_token(&e, &blnt_id);
+            execute_drop(&e, &drop_list);
         });
     }
 
@@ -238,6 +271,7 @@ mod tests {
 
         e.as_contract(&emitter, || {
             storage::set_backstop(&e, &backstop);
+            storage::set_initial_backstop(&e, &backstop);
             storage::set_emission_token(&e, &blnt_id);
             execute_drop(&e, &drop_list);
         });
@@ -256,10 +290,11 @@ mod tests {
         let blnt_id = e
             .register_stellar_asset_contract_v2(emitter.clone())
             .address();
-        let drop_list = vec![&e, (frodo, 50_000_001 * SCALAR_7), (samwise, -SCALAR_7)];
+        let drop_list = vec![&e, (frodo, 150_000_001 * SCALAR_7), (samwise, -SCALAR_7)];
 
         e.as_contract(&emitter, || {
             storage::set_backstop(&e, &backstop);
+            storage::set_initial_backstop(&e, &backstop);
             storage::set_emission_token(&e, &blnt_id);
             execute_drop(&e, &drop_list);
         });

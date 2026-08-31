@@ -41,7 +41,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 | `get_queued_swap() -> Option<Swap>` | Same | Unchanged | Preserves the queued-swap view. |
 | `cancel_swap_backstop()` | Same | Extended | Preserves invalid-queue cancellation and also permits cancellation through the same entry point after the seven-day execution window expires. |
 | `swap_backstop()` | Same | Extended | Preserves final distribution, revalidation, and recipient replacement while limiting execution to the seven days after unlock. |
-| `drop(list)` | Same | Extended | Mints the initial BLNT allocation under the inherited one-call, 50-million-token ceiling. |
+| `drop(list)` | Same | Extended | Mints the initial BLNT allocation under a one-call 150-million launch ceiling while retaining the 50-million ceiling for later migrations. |
 
 ## Backstop
 
@@ -49,7 +49,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnt_usdc_token, blnt_xlm_token, emitter, blnt_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical BLNT assets and both emission-eligible Comet v2 LPs. The emitter's initial recipient may bind a 50-million-BLNT list; migration candidates are capped at 40 million to reserve the maximum 10-million-BLNT backfill within the emitter's unchanged aggregate ceiling. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| `__constructor(backstop_token, emitter, blnd_token, usdc_token, pool_factory, drop_list)` | `__constructor(blnt_usdc_token, blnt_xlm_token, emitter, blnt_token, usdc_token, xlm_token, pool_factory, drop_list)` | Extended | Binds and validates the canonical BLNT assets and both emission-eligible Comet v2 LPs. The emitter's initial recipient may bind a 150-million-BLNT list; migration candidates are capped at 40 million to reserve the maximum 10-million-BLNT backfill within the emitter's 50-million migration ceiling. Pool-specific tiers come from the factory. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | `deposit(from, pool, amount) -> i128` | `deposit(tier, from, pool, amount) -> i128` | Extended | Selects one independently accounted tier. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | `queue_withdrawal(from, pool, amount) -> Q4W` | `queue_withdrawal(tier, from, pool, amount) -> Q4W` | Extended | Queues shares in one tier under the aggregate queue bound. [V3 §3.3](V3_SYSTEM_SPEC.md#33-withdrawals) |
 | — | `force_queue_withdrawal(tier, user, pool) -> Q4W` | Added | After backstop-deposit permission is revoked, queues all active shares in one tier only to the target's inherited Q4W. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
@@ -66,7 +66,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 | `add_reward(to_add, to_remove)` | Same | Extended | Admission uses v3 activation; full-zone replacement remains strictly underlying-BLNT weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `remove_reward(to_remove)` | Same | Extended | Removal uses the v3 activation valuation and otherwise preserves the v2 threshold and checkpoint rules. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `claim(from, pools, min_lp_out) -> i128` | `claim(tier, from, pools, min_lp_out) -> i128` | Extended | Compounds one eligible BLNT-bearing tier across the selected pools. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `drop()` | Same | Extended | Keeps the one-call drop surface for the immutable BLNT allocation and migration backfill. V3 launch may use the full 50-million-BLNT list because it schedules no backfill; a future migration combines its at-most-40-million list with at most 10 million of backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
+| `drop()` | Same | Extended | Keeps the one-call drop surface for the immutable BLNT allocation and migration backfill. V3 launch may use the full 150-million-BLNT list because it schedules no backfill; a future migration combines its at-most-40-million list with at most 10 million of backfill. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | `draw(pool, amount, to)` | `draw(tier, pool, amount, to)` | Extended | A pool draws loss capital from the tier selected by the waterfall. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
 | `donate(from, pool, amount)` | `donate(tier, from, pool, amount)` | Extended | Credits every selected-tier payment in full, including plain USDC and XLM. [V3 §5.3](V3_SYSTEM_SPEC.md#53-take-rate-allocation--replaced) |
 

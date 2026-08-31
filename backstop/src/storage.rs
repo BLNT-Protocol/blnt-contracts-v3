@@ -85,6 +85,7 @@ const BLNT_BINDING_VERIFIED_KEY: &str = "BlntBound";
 const ONGOING_EMISSION_STATE_KEY: &str = "OngoingEmis";
 const REWARD_ZONE_CHECKPOINT_KEY: &str = "RZCheck";
 const REWARD_ZONE_DISTRIBUTED_KEY: &str = "RZStarted";
+const EXTENDED_INITIAL_DROP_KEY: &str = "InitDrop";
 
 #[derive(Clone)]
 #[contracttype(export = false)]
@@ -544,6 +545,21 @@ pub fn set_blnt_binding_verified(e: &Env) {
     e.storage()
         .instance()
         .set(&Symbol::new(e, BLNT_BINDING_VERIFIED_KEY), &true);
+}
+
+/// Return whether this backstop was constructed with the extended launch-drop allowance.
+pub fn get_extended_initial_drop(e: &Env) -> bool {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, EXTENDED_INITIAL_DROP_KEY))
+        .unwrap_or(false)
+}
+
+/// Record whether this backstop may use the extended launch-drop allowance.
+pub fn set_extended_initial_drop(e: &Env, enabled: bool) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, EXTENDED_INITIAL_DROP_KEY), &enabled);
 }
 
 /// Get aggregate ongoing BLNT accounting.

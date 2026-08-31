@@ -7,7 +7,8 @@ use soroban_sdk::{
 };
 
 const SCALAR_7: i128 = 10_000_000;
-const MAX_DROP: i128 = 50_000_000 * SCALAR_7;
+const MAX_INITIAL_DROP: i128 = 150_000_000 * SCALAR_7;
+const MAX_MIGRATION_DROP: i128 = 50_000_000 * SCALAR_7;
 const QUEUE_SECONDS: u64 = 31 * 24 * 60 * 60;
 const SWAP_GRACE_SECONDS: u64 = 7 * 24 * 60 * 60;
 
@@ -37,6 +38,7 @@ pub struct Swap {
 #[contracttype]
 enum DataKey {
     Backstop,
+    InitialBackstop,
     BackstopToken,
     BlntToken,
     Dropped(Address),
@@ -57,6 +59,9 @@ impl MockEmitter {
             .instance()
             .set(&DataKey::BlntToken, &blnt_token);
         env.storage().instance().set(&DataKey::Backstop, &backstop);
+        env.storage()
+            .instance()
+            .set(&DataKey::InitialBackstop, &backstop);
         env.storage()
             .instance()
             .set(&DataKey::BackstopToken, &backstop_token);
@@ -154,6 +159,16 @@ impl MockEmitter {
             panic_with_error!(&env, EmitterError::BadDrop);
         }
         let mut total = 0_i128;
+        let initial_backstop: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::InitialBackstop)
+            .unwrap();
+        let max_drop = if backstop == initial_backstop {
+            MAX_INITIAL_DROP
+        } else {
+            MAX_MIGRATION_DROP
+        };
         for (_, amount) in list.iter() {
             if amount.is_negative() {
                 panic_with_error!(&env, EmitterError::BadDrop);
@@ -161,7 +176,7 @@ impl MockEmitter {
             total = total
                 .checked_add(amount)
                 .unwrap_or_else(|| panic_with_error!(&env, EmitterError::OverflowError));
-            if total > MAX_DROP {
+            if total > max_drop {
                 panic_with_error!(&env, EmitterError::BadDrop);
             }
         }

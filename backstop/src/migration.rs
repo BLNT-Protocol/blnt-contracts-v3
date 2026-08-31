@@ -2,7 +2,7 @@ use sep_41_token::TokenClient;
 use soroban_sdk::{contracttype, panic_with_error, Env};
 
 use crate::{
-    constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP},
+    constants::{MAX_BACKFILLED_EMISSIONS, MAX_INITIAL_DROP, MAX_MIGRATION_DROP},
     dependencies::{EmitterClient, Swap},
     errors::BackstopError,
     events::BackstopEvents,
@@ -206,7 +206,12 @@ pub(crate) fn drop(e: &Env) {
                 .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
         }
     }
-    if drop_total > MAX_INITIAL_DROP {
+    let max_drop = if storage::get_extended_initial_drop(e) {
+        MAX_INITIAL_DROP
+    } else {
+        MAX_MIGRATION_DROP
+    };
+    if drop_total > max_drop {
         panic_with_error!(e, BackstopError::InvalidBackfillFunding);
     }
 
@@ -905,7 +910,7 @@ mod tests {
     fn delayed_queue_reaches_the_full_backfill_cap() {
         let fixture = Fixture::create();
         let discretionary_recipient = Address::generate(&fixture.e);
-        let discretionary_amount = MAX_INITIAL_DROP - MAX_BACKFILLED_EMISSIONS;
+        let discretionary_amount = MAX_MIGRATION_DROP - MAX_BACKFILLED_EMISSIONS;
         fixture.e.as_contract(&fixture.backstop, || {
             storage::set_drop_list(
                 &fixture.e,
@@ -960,7 +965,7 @@ mod tests {
                 &fixture.e,
                 &vec![
                     &fixture.e,
-                    (Address::generate(&fixture.e), MAX_INITIAL_DROP),
+                    (Address::generate(&fixture.e), MAX_MIGRATION_DROP),
                 ],
             );
             fixture

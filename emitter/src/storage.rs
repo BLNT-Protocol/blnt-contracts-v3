@@ -23,6 +23,7 @@ const BACKSTOP_TOKEN_KEY: &str = "BToken";
 const EMISSION_TOKEN_KEY: &str = "BLNDTkn";
 const SWAP_KEY: &str = "Swap";
 const INITIALIZER_KEY: &str = "InitAuth";
+const INITIAL_BACKSTOP_KEY: &str = "InitBstop";
 
 // Emitter Data Keys
 #[derive(Clone)]
@@ -94,6 +95,21 @@ pub fn set_backstop(e: &Env, new_backstop: &Address) {
     e.storage()
         .instance()
         .set::<Symbol, Address>(&Symbol::new(e, BACKSTOP_KEY), new_backstop);
+}
+
+/// Fetch the immutable launch backstop address.
+pub fn get_initial_backstop(e: &Env) -> Address {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, INITIAL_BACKSTOP_KEY))
+        .unwrap_optimized()
+}
+
+/// Record the immutable launch backstop address.
+pub fn set_initial_backstop(e: &Env, initial_backstop: &Address) {
+    e.storage()
+        .instance()
+        .set::<Symbol, Address>(&Symbol::new(e, INITIAL_BACKSTOP_KEY), initial_backstop);
 }
 
 /// Fetch the current backstop token address
