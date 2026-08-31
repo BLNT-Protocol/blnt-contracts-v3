@@ -1,4 +1,4 @@
-# Blend V3 Contract Specification
+# BLNT V3 Contract Specification
 
 Status: Draft 0.2
 
@@ -323,8 +323,8 @@ reserves, and MUST fit Protocol-27 invocation limits.
 
 The pool exposes `clawback(asset, from, amount)` as a multi-reserve extension
 of the Stellar Asset Contract clawback operation. It accepts a configured
-reserve, a Blend position owner, and a strictly positive exact underlying
-amount. `from` identifies the internal Blend position; the pool contract is
+reserve, a BLNT position owner, and a strictly positive exact underlying
+amount. `from` identifies the internal BLNT position; the pool contract is
 the token holder passed to the reserve SAC.
 
 The operation MUST:
@@ -355,7 +355,7 @@ resulting unhealthy position uses the inherited user-liquidation, bad-debt
 handoff, waterfall, and supplier-loss paths; clawback itself neither creates
 liabilities nor starts an auction.
 This entry point cannot prevent the SAC administrator from invoking the SAC
-directly; a direct clawback bypasses Blend position accounting.
+directly; a direct clawback bypasses BLNT position accounting.
 
 ### 4.6 Reserve-loss reconciliation — **Safety extension**
 
@@ -443,17 +443,17 @@ controller after deployment. The factory MUST record the same binding used by
 the pool and return it with the pool's tier configuration so the shared
 backstop applies the identical policy.
 
-Blend standardizes only this controller entry point:
+BLNT standardizes only this controller entry point:
 
 ```text
 permissions(pool, user) -> u32
 ```
 
 Bits 0, 1, and 2 respectively mean `RESERVE_SUPPLY_ALLOWED`,
-`RESERVE_BORROW_ALLOWED`, and `BACKSTOP_DEPOSIT_ALLOWED`. Blend ignores higher
+`RESERVE_BORROW_ALLOWED`, and `BACKSTOP_DEPOSIT_ALLOWED`. BLNT ignores higher
 bits. Controller construction, pool registration, permission administration,
 credential evaluation, code mutability, and every other controller entry
-point are implementation decisions outside the Blend ABI. The controller
+point are implementation decisions outside the BLNT ABI. The controller
 address and the trust implied by its implementation MUST be disclosed to pool
 users.
 

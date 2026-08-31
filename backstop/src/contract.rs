@@ -14,7 +14,7 @@ use soroban_sdk::{contract, contractclient, contractimpl, panic_with_error, Addr
 
 /// ### Backstop
 ///
-/// A backstop module for the Blend protocol's Isolated Lending Pools
+/// A backstop module for the BLNT protocol's isolated lending pools
 #[contract]
 pub struct BackstopContract;
 

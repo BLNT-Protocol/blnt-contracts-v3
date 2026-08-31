@@ -219,7 +219,7 @@ pub trait Pool {
     /// for rebasing tokens where the token balance of the pool can increase without any corresponding
     /// transfer.
     ///
-    /// Blend Pools do not support fee-on-transaction tokens, or any tokens in which the pools balance
+    /// BLNT pools do not support fee-on-transaction tokens, or any tokens in which the pools balance
     /// can decrease without any corresponding withdraw. Thus, negative token deltas are ignored.
     ///
     /// ### Arguments

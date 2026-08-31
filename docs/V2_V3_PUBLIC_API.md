@@ -1,7 +1,7 @@
-# Blend V2 and V3 Public API Comparison
+# Blend V2 and BLNT V3 Public API Comparison
 
 This non-normative review aid compares public contract entry points and data
-types in the frozen Blend v2 baseline with the Blend v3 candidate. The
+types in the frozen Blend v2 baseline with the BLNT v3 candidate. The
 [specification index](SYSTEM_SPEC.md), [v2 specification](V2_SYSTEM_SPEC.md),
 and [v3 specification](V3_SYSTEM_SPEC.md) remain authoritative.
 
@@ -171,7 +171,7 @@ configuration and exposes that configuration to the backstop and clients.
 
 V3 standardizes only the read interface used by a permissioned pool and its
 shared backstop. Controller deployment, administration, and permission logic
-are intentionally outside the Blend ABI.
+are intentionally outside the BLNT ABI.
 
 ### Entry points
 

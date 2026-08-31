@@ -1,8 +1,8 @@
-# Blend Protocol V3 Candidate
+# BLNT Protocol V3 Candidate
 
-This repository contains the experimental Blend Protocol v3 candidate
+This repository contains the experimental BLNT Protocol v3 candidate
 contracts. It is derived from Blend v2 and is not an official or
-production-ready Blend release.
+production-ready BLNT release.
 
 ## Documentation
 

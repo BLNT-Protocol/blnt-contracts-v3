@@ -172,7 +172,7 @@ pub fn set_emission_token(e: &Env, emission_token: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, EMISSION_TOKEN_KEY), emission_token);
 }
 
-/********** Blend Distributions **********/
+/********** BLNT Distributions **********/
 
 /// Fetch the last timestamp distribution was ran on
 ///

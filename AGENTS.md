@@ -4,7 +4,7 @@ These instructions apply to the entire repository.
 
 ## Mission
 
-Build and evaluate the experimental Blend Protocol v3 contracts while
+Build and evaluate the experimental BLNT Protocol v3 contracts while
 preserving Blend v2 behavior except for differences explicitly specified for
 v3.
 

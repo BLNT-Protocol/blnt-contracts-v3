@@ -56,10 +56,10 @@ pub struct TestFixture<'a> {
 }
 
 impl TestFixture<'_> {
-    /// Create a new TestFixture for the Blend Protocol
+    /// Create a new TestFixture for the BLNT Protocol
     ///
     /// Deploys BLNT (0), USDC (1), wETH (2), XLM (3), and STABLE (4) test tokens, alongside all required
-    /// Blend Protocol contracts, including a BLNT-USDC LP.
+    /// BLNT Protocol contracts, including a BLNT-USDC LP.
     pub fn create<'a>(wasm: bool) -> TestFixture<'a> {
         let e = Env::new_with_config(EnvTestConfig {
             capture_snapshot_at_drop: false,
@@ -92,7 +92,7 @@ impl TestFixture<'_> {
         let (lp, lp_client) = create_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
         let (blnt_xlm_lp, _) = create_lp_pool(&e, &bombadil, &blnt_id, &xlm_id);
 
-        // generate Blend Protocol contract IDs
+        // generate BLNT Protocol contract IDs
         let backstop_id = Address::generate(&e);
         let pool_factory_id = Address::generate(&e);
         let incumbent_backstop = Address::generate(&e);

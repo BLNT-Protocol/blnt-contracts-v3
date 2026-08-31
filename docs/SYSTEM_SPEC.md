@@ -1,7 +1,7 @@
-# Blend Contract Specification Index
+# BLNT Contract Specification Index
 
 This index defines how the frozen Blend v2 behavioral baseline and the
-experimental Blend v3 contract specification compose.
+experimental BLNT v3 contract specification compose.
 
 ## Specification set
 
@@ -19,7 +19,7 @@ Declarative behavioral requirements and the terms `MUST`, `MUST NOT`,
 
 ## Baseline and provenance
 
-Blend v3 is derived from Blend v2 source commit
+BLNT v3 is derived from Blend v2 source commit
 `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`. The frozen baseline uses Rust
 1.81, Soroban SDK 22.0.7, and `wasm32-unknown-unknown`.
 
@@ -29,7 +29,7 @@ The v3 contracts use the toolchain selected by
 
 ## Inheritance rule
 
-Blend v3 inherits every requirement and executable behavior in the frozen v2
+BLNT v3 inherits every requirement and executable behavior in the frozen v2
 baseline unless `V3_SYSTEM_SPEC.md` explicitly classifies a requirement as:
 
 - **Added:** behavior with no v2 equivalent.
