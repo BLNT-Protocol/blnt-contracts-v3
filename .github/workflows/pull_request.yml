@@ -35,12 +35,9 @@ jobs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          target
-          test-suites/fuzz/target
-        key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-suites/fuzz/Cargo.lock') }}-${{ github.sha }}
+        key: cargo-deps-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-suites/fuzz/Cargo.lock') }}
         restore-keys: |
-          cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'test-suites/fuzz/Cargo.lock') }}-
-          cargo-${{ runner.os }}-
+          cargo-deps-${{ runner.os }}-
     - run: rustup toolchain install 1.91.1 --profile minimal --component clippy --target wasm32v1-none
     - uses: stellar/stellar-cli@5a7c5fe76530bf4248477ac812fc757146b98cc4 # v27.0.0
       with:
