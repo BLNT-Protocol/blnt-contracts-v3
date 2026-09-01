@@ -21,7 +21,7 @@ pub trait Emitter {
     /// ### Arguments
     /// * `blnd_token` - Legacy ABI name for the BLNT token the emitter distributes
     /// * `backstop` - The backstop module address to emit to
-    /// * `backstop_token` - The token the backstop takes deposits in
+    /// * `backstop_token` - The initial comparison token for future backstop swaps
     fn initialize(e: Env, blnd_token: Address, backstop: Address, backstop_token: Address);
 
     /// Distributes BLNT tokens to the listed backstop module

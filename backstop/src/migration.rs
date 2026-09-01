@@ -496,7 +496,7 @@ mod tests {
         EmitterClient::new(&fixture.e, &emitter).initialize(
             &fixture.blnt,
             &fixture.backstop,
-            &fixture.blnt_usdc,
+            &fixture.blnt_xlm,
         );
         MockTokenClient::new(&fixture.e, &fixture.blnt).set_admin(&emitter);
         fixture.e.as_contract(&fixture.backstop, || {

@@ -33,7 +33,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 | Legacy entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
 | No constructor | `__constructor(initializer)` | Added | Prevents first-call initialization races without creating an ongoing administrator. |
-| `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:USDC as the initial designated token. |
+| `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:XLM as the initial designated token. |
 | `distribute() -> i128` | Same | Extended | Mints BLNT at the inherited one-token-per-second rate and requires the current backstop; callers use the backstop's permissionless checkpoint. |
 | `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
 | `get_backstop() -> Address` | Same | Unchanged | Returns the current BLNT recipient backstop. |

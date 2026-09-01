@@ -728,7 +728,7 @@ fn test_initial_backstop_constructor_allows_full_drop_list() {
         },),
     );
     let (emitter, emitter_client) = create_emitter(&e);
-    emitter_client.initialize(&blnt, &contract_id, &blnt_usdc);
+    emitter_client.initialize(&blnt, &contract_id, &blnt_xlm);
     let drop_list = vec![&e, (Address::generate(&e), 150_000_000 * SCALAR_7)];
 
     e.register_at(

@@ -716,7 +716,7 @@ reconciliation that reduces included protocol credit cancels the auction. Type
 ### 6.1 V3 emitter launch and replacement — **Replaced and extended**
 
 `V2-EMISSIONS-004` is replaced for the initial v3 launch. V3 deploys a new
-emitter already configured for the v3 backstop and canonical BLNT:USDC Comet v2
+emitter already configured for the v3 backstop and canonical BLNT:XLM Comet v2
 LP. It does not replace, reconfigure, or depend on any earlier emitter.
 
 The v3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
@@ -754,7 +754,7 @@ combined-backfill sums MUST use checked arithmetic.
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
 the current designated token than the incumbent; for the initial v3 binding,
-that token is canonical BLNT:USDC LP. Equality is insufficient. The existing
+that token is canonical BLNT:XLM LP. Equality is insufficient. The existing
 31-day queue remains unchanged. Finalization is available from the unlock
 through exactly seven days after it and revalidates the strict balance before
 the final incumbent distribution, recipient switch, new-recipient checkpoint,
