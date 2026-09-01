@@ -5,7 +5,20 @@ use soroban_sdk::{
     vec, Address, BytesN, Env, IntoVal, String, Symbol,
 };
 
-use crate::{PoolFactoryClient, PoolFactoryContract, PoolInitMeta};
+use crate::{
+    pool_factory::validate_backstop_config, BackstopAsset, BackstopTierConfig, PoolFactoryClient,
+    PoolFactoryContract, PoolInitMeta,
+};
+
+fn backstop_config(e: &Env) -> soroban_sdk::Vec<BackstopTierConfig> {
+    vec![
+        e,
+        BackstopTierConfig {
+            asset: BackstopAsset::BlntXlm,
+            take_rate_weight: 1,
+        },
+    ]
+}
 
 mod pool {
     soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/pool.wasm");
@@ -26,12 +39,12 @@ fn test_pool_factory() {
     let backstop_rate: u32 = 0_1000000;
     let max_positions: u32 = 6;
     let min_collateral: i128 = 1_0000000;
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -40,6 +53,8 @@ fn test_pool_factory() {
     let name2 = String::from_str(&e, "pool2");
     let salt = BytesN::<32>::random(&e);
 
+    let config = backstop_config(&e);
+    let access_controller = Address::generate(&e);
     let deployed_pool_address_1 = pool_factory_client.deploy(
         &bombadil,
         &name1,
@@ -48,8 +63,9 @@ fn test_pool_factory() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &config,
+        &Some(access_controller.clone()),
     );
-
     let event = e.events().all().filter_by_contract(&pool_factory_address);
     assert_eq!(
         event,
@@ -62,6 +78,12 @@ fn test_pool_factory() {
             )
         ]
     );
+    assert_eq!(
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_1)
+            .access_controller,
+        Some(access_controller)
+    );
 
     let salt = BytesN::<32>::random(&e);
     let deployed_pool_address_2 = pool_factory_client.deploy(
@@ -72,6 +94,14 @@ fn test_pool_factory() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
+    );
+    assert_eq!(
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_2)
+            .access_controller,
+        None
     );
 
     e.as_contract(&deployed_pool_address_1, || {
@@ -105,15 +135,167 @@ fn test_pool_factory() {
         assert_eq!(
             e.storage()
                 .instance()
-                .get::<_, Address>(&Symbol::new(&e, "BLNDTkn"))
+                .get::<_, Address>(&Symbol::new(&e, "BLNTTkn"))
                 .unwrap(),
-            blnd_id.clone()
+            blnt_id.clone()
         );
     });
     assert_ne!(deployed_pool_address_1, deployed_pool_address_2);
     assert!(pool_factory_client.is_pool(&deployed_pool_address_1));
     assert!(pool_factory_client.is_pool(&deployed_pool_address_2));
     assert!(!pool_factory_client.is_pool(&Address::generate(&e)));
+    assert_eq!(
+        pool_factory_client
+            .backstop_config(&deployed_pool_address_1)
+            .tiers,
+        config
+    );
+}
+
+#[test]
+fn test_pool_factory_accepts_three_ordered_backstop_tiers() {
+    let e = Env::default();
+    let config = vec![
+        &e,
+        BackstopTierConfig {
+            asset: BackstopAsset::BlntXlm,
+            take_rate_weight: 4,
+        },
+        BackstopTierConfig {
+            asset: BackstopAsset::BlntUsdc,
+            take_rate_weight: 3,
+        },
+        BackstopTierConfig {
+            asset: BackstopAsset::Usdc,
+            take_rate_weight: 2,
+        },
+    ];
+    validate_backstop_config(&e, &config);
+}
+
+#[test]
+fn test_pool_factory_accepts_maximum_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 100,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_empty_backstop_config() {
+    let e = Env::default();
+    validate_backstop_config(&e, &soroban_sdk::Vec::new(&e));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_duplicate_backstop_tokens() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 2,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_zero_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 0,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_more_than_three_backstop_tiers() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntUsdc,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 1,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_excessive_backstop_weight() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 101,
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_pool_factory_accepts_equal_and_ascending_backstop_weights() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Xlm,
+                take_rate_weight: 100,
+            },
+        ],
+    );
 }
 
 #[test]
@@ -126,12 +308,12 @@ fn test_pool_factory_invalid_pool_init_args_backstop_rate() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -152,6 +334,8 @@ fn test_pool_factory_invalid_pool_init_args_backstop_rate() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 }
 
@@ -164,12 +348,12 @@ fn test_pool_factory_invalid_pool_init_args_max_positions() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -191,6 +375,8 @@ fn test_pool_factory_invalid_pool_init_args_max_positions() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 }
 
@@ -203,12 +389,12 @@ fn test_pool_factory_invalid_pool_init_args_max_positions_large() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -230,6 +416,8 @@ fn test_pool_factory_invalid_pool_init_args_max_positions_large() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 }
 
@@ -242,12 +430,12 @@ fn test_pool_factory_invalid_pool_init_args_min_collateral() {
     let wasm_hash = e.deployer().upload_contract_wasm(pool::WASM);
 
     let backstop_id = Address::generate(&e);
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -269,6 +457,8 @@ fn test_pool_factory_invalid_pool_init_args_min_collateral() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 }
 
@@ -288,12 +478,12 @@ fn test_pool_factory_frontrun_protection() {
     let backstop_rate: u32 = 0_1000000;
     let max_positions: u32 = 6;
     let min_collateral: i128 = 0;
-    let blnd_id = Address::generate(&e);
+    let blnt_id = Address::generate(&e);
 
     let pool_init_meta = PoolInitMeta {
         backstop: backstop_id.clone(),
         pool_hash: wasm_hash.clone(),
-        blnd_id: blnd_id.clone(),
+        blnt_id: blnt_id.clone(),
     };
     let pool_factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
     let pool_factory_client = PoolFactoryClient::new(&e, &pool_factory_address);
@@ -312,6 +502,8 @@ fn test_pool_factory_frontrun_protection() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 
     let deployed_pool_address_bombadil = pool_factory_client.deploy(
@@ -322,6 +514,8 @@ fn test_pool_factory_frontrun_protection() {
         &backstop_rate,
         &max_positions,
         &min_collateral,
+        &backstop_config(&e),
+        &None,
     );
 
     assert!(deployed_pool_address_sauron != deployed_pool_address_bombadil);

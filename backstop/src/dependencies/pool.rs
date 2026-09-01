@@ -4,7 +4,7 @@
 use soroban_sdk::{contractclient, contracttype, Address, Env, Map};
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct Positions {
     pub liabilities: Map<u32, i128>, // Map of Reserve Index to liability share balance
     pub collateral: Map<u32, i128>,  // Map of Reserve Index to collateral supply share balance

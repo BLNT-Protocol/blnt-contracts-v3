@@ -6,6 +6,7 @@ use crate::{
     storage::{self, ReserveConfig},
     PoolConfig, PoolError, ReserveEmissionData, UserEmissionData,
 };
+use sep_41_token::StellarAssetClient;
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Env, String, Vec,
 };
@@ -163,17 +164,38 @@ pub trait Pool {
         requests: Vec<Request>,
     ) -> Positions;
 
-    /// Update the pool status based on the backstop state - backstop triggered status' are odd numbers
-    /// * 1 = backstop active - if the minimum backstop deposit has been reached
-    ///                and 30% of backstop deposits are not queued for withdrawal
-    ///                then all pool operations are permitted
-    /// * 3 = backstop on-ice - if the minimum backstop deposit has not been reached
-    ///                or 30% of backstop deposits are queued for withdrawal and admin active isn't set
-    ///                or 50% of backstop deposits are queued for withdrawal
-    ///                then borrowing and cancelling liquidations are not permitted
-    /// * 5 = backstop frozen - if 60% of backstop deposits are queued for withdrawal and admin on-ice isn't set
-    ///                or 75% of backstop deposits are queued for withdrawal
-    ///                then all borrowing, cancelling liquidations, and supplying are not permitted
+    /// Claw back an exact amount of a user's supplied reserve.
+    ///
+    /// The reserve's Stellar Asset Contract requires its administrator's
+    /// authorization and rejects the operation unless this pool's balance
+    /// entry is clawbackable. Ordinary supply is removed before collateral.
+    /// The operation may leave the user unhealthy for the inherited
+    /// liquidation and bad-debt paths to resolve. If collateral is removed,
+    /// an active user-liquidation auction is atomically invalidated.
+    fn clawback(e: Env, asset: Address, from: Address, amount: i128);
+
+    /// Recognize a direct reserve-custody deficit against the affected
+    /// reserve's unpaid protocol credit, supplier rate, and then unpaid
+    /// take-rate credit. The operation is permissionless, leaves user bToken
+    /// balances and borrower liabilities unchanged, and creates no backstop
+    /// debt. An affected protocol-fee auction is canceled.
+    ///
+    /// Returns the underlying deficit recognized, or zero when the reserve has
+    /// no custody deficit.
+    fn reconcile_loss(e: Env, asset: Address) -> i128;
+
+    /// Burn all reserve-supply and collateral shares for one asset and return
+    /// their current underlying value to a user whose supply permission has
+    /// been revoked. The target must have no liabilities or active auction.
+    fn force_withdrawal(e: Env, user: Address, asset: Address) -> i128;
+
+    /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
+    ///
+    /// Backstop-triggered statuses are odd:
+    /// * 1 = active
+    /// * 3 = on-ice when the applicable activation threshold is not met, or
+    ///   Q4W reaches the inherited 30% or 50% boundary
+    /// * 5 = frozen when Q4W reaches the inherited 60% or 75% boundary
     ///
     /// ### Panics
     /// If the pool is currently on status 4, "admin-freeze", where only the admin
@@ -181,9 +203,8 @@ pub trait Pool {
     fn update_status(e: Env) -> u32;
 
     /// (Admin only) Pool status is changed to `pool_status`
-    /// * 0 = admin active - requires that the backstop threshold is met
-    ///                 and less than 50% of backstop deposits are queued for withdrawal
-    /// * 2 = admin on-ice - requires that less than 75% of backstop deposits are queued for withdrawal
+    /// * 0 = admin active - requires the applicable activation threshold and Q4W below 50%
+    /// * 2 = admin on-ice - requires Q4W below 75%
     /// * 4 = admin frozen - can always be set
     ///
     /// ### Arguments
@@ -198,7 +219,7 @@ pub trait Pool {
     /// for rebasing tokens where the token balance of the pool can increase without any corresponding
     /// transfer.
     ///
-    /// Blend Pools do not support fee-on-transaction tokens, or any tokens in which the pools balance
+    /// BLNT pools do not support fee-on-transaction tokens, or any tokens in which the pools balance
     /// can decrease without any corresponding withdraw. Thus, negative token deltas are ignored.
     ///
     /// ### Arguments
@@ -264,16 +285,33 @@ pub trait Pool {
 
     /***** Auction / Liquidation Functions *****/
 
-    /// Create a new auction. Auctions are used to process liquidations, bad debt, and interest.
+    /// Create a liquidation, bad-debt, interest, or protocol-fee auction.
+    ///
+    /// `bid` and `lot` have these auction-specific meanings:
+    /// - Liquidation: both are required auction inputs; neither may be empty.
+    /// - Bad debt: either may be `[]`, meaning the caller accepts the corresponding canonical
+    ///   asset set. A nonempty `bid` must exactly match the canonical debt assets, and a nonempty
+    ///   `lot` must exactly match the selected waterfall-tier token.
+    /// - Interest: `bid` may be `[]`, meaning the caller accepts the canonically selected tier
+    ///   token, or nonempty to assert that exact token. `lot` is the required, nonempty list of
+    ///   reserve assets to checkpoint and offer; `lot = []` is invalid.
+    /// - Protocol fee: `bid` may be `[]`, meaning the caller accepts canonical BLNT, or nonempty
+    ///   to assert that exact token. `lot` is the required, nonempty list of reserve assets to
+    ///   checkpoint and offer; `lot = []` is invalid.
+    ///
+    /// Assertions are order-independent and never choose a tier, set an amount, or affect pricing.
+    /// A mismatch fails the transaction atomically.
     ///
     /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
-    /// * `user` - The Address involved in the auction. This is generally the source of the assets being auctioned.
-    ///            For bad debt and interest auctions, this is expected to be the backstop address.
-    /// * `bid` - The set of assets to include in the auction bid, or what the filler spends when filling the auction.
-    /// * `lot` - The set of assets to include in the auction lot, or what the filler receives when filling the auction.
-    /// * `percent` - The percent of the assets to be auctioned off as a percentage (15 => 15%). For bad debt and interest auctions.
-    ///               this is expected to be 100.
+    /// * `auction_type` - 0 for liquidation, 1 for bad debt, 2 for interest,
+    ///   or 3 for protocol fee
+    /// * `user` - The borrower for liquidation or the configured backstop otherwise
+    /// * `bid` - Bid assets or optional backstop-auction asset assertion, as described above
+    /// * `lot` - Lot assets, optional bad-debt asset assertion, or reserve inputs for type 2 or 3
+    /// * `percent` - Liquidation percentage; exactly 100 otherwise
+    ///
+    /// A nonempty assertion that does not exactly match the canonical asset set fails with
+    /// `InvalidBid` or `InvalidLot`, as applicable.
     fn new_auction(
         e: Env,
         auction_type: u32,
@@ -283,34 +321,21 @@ pub trait Pool {
         percent: u32,
     ) -> AuctionData;
 
-    /// Fetch an auction from the ledger. Returns the base auction. On fill, this will be scaled based on the
-    /// number of blocks that have passed since the auction was created.
-    ///
-    /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
-    /// * `user` - The Address involved in the auction
-    ///
-    /// ### Panics
-    /// If the auction does not exist
+    /// Create one protocol-selected auction to close every liability held by
+    /// a borrower whose borrowing permission has been revoked.
+    fn new_forced_exit_auction(e: Env, user: Address) -> AuctionData;
+
+    /// Return an auction's v2-compatible base bid, lot, and starting ledger.
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData;
 
-    /// Delete a stale auction. A stale auction is one that has been running for 500 blocks
-    /// without being filled. This likely means something went wrong with the auction creation,
-    /// and it should be re-created.
-    ///
-    /// ### Arguments
-    /// * `auction_type` - The type of auction, 0 for liquidation auction, 1 for bad debt auction, and 2 for interest auction
-    /// * `user` - The Address involved in the auction
-    ///
-    /// ### Panics
-    /// * If the auction does not exist
-    /// * If the auction is not stale
+    /// Delete a stale auction after the inherited 500-ledger boundary.
     fn del_auction(e: Env, auction_type: u32, user: Address);
 
     /// Check and handle bad debt for a user.
+    ///
     /// * If the user is not the backstop and they have bad debt, the backstop will take over the debt.
-    /// * If the user is the backstop, the backstop health will be checked, and if it is unhealthy, the backstop will default it's
-    /// remaining debt.
+    /// * If the user is the backstop, residual debt defaults to suppliers only
+    ///   after all configured tiers are verified to have no usable value.
     ///
     /// ### Arguments
     /// * `user` - The address of the user to check for bad debt
@@ -336,7 +361,8 @@ impl PoolContract {
     ///
     /// Pool Factory supplied:
     /// * `backstop_id` - The contract address of the pool's backstop module
-    /// * `blnd_id` - The contract ID of the BLND token
+    /// * `blnt_id` - The contract ID of the BLNT token
+    /// * `access_controller` - Optional immutable pool access controller
     pub fn __constructor(
         e: Env,
         admin: Address,
@@ -346,7 +372,8 @@ impl PoolContract {
         max_positions: u32,
         min_collateral: i128,
         backstop_id: Address,
-        blnd_id: Address,
+        blnt_id: Address,
+        access_controller: Option<Address>,
     ) {
         admin.require_auth();
 
@@ -359,7 +386,8 @@ impl PoolContract {
             &max_positions,
             &min_collateral,
             &backstop_id,
-            &blnd_id,
+            &blnt_id,
+            &access_controller,
         );
     }
 }
@@ -493,6 +521,91 @@ impl Pool for PoolContract {
         pool::execute_submit_with_flash_loan(&e, &from, flash_loan, requests)
     }
 
+    fn clawback(e: Env, asset: Address, from: Address, amount: i128) {
+        storage::extend_instance(&e);
+        StellarAssetClient::new(&e, &asset).admin().require_auth();
+
+        let (supply_burned, collateral_burned, auction_invalidated) =
+            pool::execute_clawback(&e, &asset, &from, amount);
+
+        if auction_invalidated {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::UserLiquidation as u32,
+                from.clone(),
+            );
+        }
+
+        PoolEvents::clawback(&e, asset, from, amount, supply_burned, collateral_burned);
+    }
+
+    fn reconcile_loss(e: Env, asset: Address) -> i128 {
+        storage::extend_instance(&e);
+        let (
+            loss,
+            protocol_credit_loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+            auction_canceled,
+            protocol_auction_canceled,
+        ) = pool::execute_reconcile_loss(&e, &asset);
+
+        if auction_canceled {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::InterestAuction as u32,
+                storage::get_backstop(&e),
+            );
+        }
+        if protocol_auction_canceled {
+            PoolEvents::delete_auction(
+                &e,
+                auctions::AuctionType::ProtocolFeeAuction as u32,
+                storage::get_backstop(&e),
+            );
+        }
+        if protocol_credit_loss > 0 {
+            PoolEvents::protocol_credit_loss(&e, asset.clone(), protocol_credit_loss);
+        }
+        PoolEvents::reconcile_loss(
+            &e,
+            asset,
+            loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+        );
+        loss
+    }
+
+    fn force_withdrawal(e: Env, user: Address, asset: Address) -> i128 {
+        storage::extend_instance(&e);
+        crate::access::require_permission_absent(&e, &user, crate::access::RESERVE_SUPPLY_ALLOWED);
+
+        let (tokens, supply_burned, supply_tokens, collateral_burned) =
+            pool::execute_force_withdrawal(&e, &user, &asset);
+        if supply_burned > 0 {
+            PoolEvents::withdraw(
+                &e,
+                asset.clone(),
+                user.clone(),
+                supply_tokens,
+                supply_burned,
+            );
+        }
+        if collateral_burned > 0 {
+            PoolEvents::withdraw_collateral(
+                &e,
+                asset,
+                user,
+                tokens - supply_tokens,
+                collateral_burned,
+            );
+        }
+        tokens
+    }
+
     fn update_status(e: Env) -> u32 {
         storage::extend_instance(&e);
         let new_status = pool::execute_update_pool_status(&e);
@@ -577,15 +690,29 @@ impl Pool for PoolContract {
         auction_data
     }
 
+    fn new_forced_exit_auction(e: Env, user: Address) -> AuctionData {
+        storage::extend_instance(&e);
+        crate::access::require_permission_absent(&e, &user, crate::access::RESERVE_BORROW_ALLOWED);
+
+        let auction_data = auctions::create_borrower_exit_auction(&e, &user);
+        PoolEvents::new_auction(
+            &e,
+            auctions::AuctionType::UserLiquidation as u32,
+            user,
+            100,
+            auction_data.clone(),
+        );
+        auction_data
+    }
+
     fn get_auction(e: Env, auction_type: u32, user: Address) -> AuctionData {
-        storage::get_auction(&e, &auction_type, &user)
+        auctions::get_auction(&e, auction_type, &user)
     }
 
     fn del_auction(e: Env, auction_type: u32, user: Address) {
         storage::extend_instance(&e);
 
         auctions::delete_stale_auction(&e, auction_type, &user);
-
         PoolEvents::delete_auction(&e, auction_type, user);
     }
 

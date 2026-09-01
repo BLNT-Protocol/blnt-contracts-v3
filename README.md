@@ -1,54 +1,52 @@
-# Blend Protocol V2
+# BLNT Protocol V3 Candidate
 
-This repository contains the smart contacts for an implementation of the Blend Protocol. Blend is a universal liquidity protocol primitive that enables the permissionless creation of lending pools.
+This repository contains the experimental BLNT Protocol v3 candidate
+contracts. It is derived from Blend v2 and is not an official or
+production-ready BLNT release.
 
 ## Documentation
 
-To learn more about the Blend Protocol, visit the docs:
+The contract specification is composed by
+[docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md). It inherits the frozen behavior in
+[docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional v3
+changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
 
-- [Blend Docs](https://docs.blend.capital/)
+## Audit status
 
-## Audits
+The v3-specific contract changes have not yet undergone an independent
+security audit.
 
-Conducted audits can be viewed in the `audits` folder.
-
-## Getting Started
+## Build and test
 
 The checked-in `rust-toolchain.toml` selects Rust 1.91.1 and the
 `wasm32v1-none` target automatically for commands run in this repository.
 
-Build the contracts with:
+Build the optimized contract WASMs:
 
-```
+```bash
 make
 ```
 
-Run all unit tests and the integration test suite with:
+Artifacts are written to `target/wasm32v1-none/optimized`. The build includes
+the pool factory, v3 BLNT emitter, backstop, and pool. The emitter preserves the
+legacy backstop-replacement API and emits BLNT directly to v3 without replacing
+the v1/v2 BLND emitter. Comet v2-based backstop valuation is integrated into
+the backstop. The build rejects any production
+WASM larger than 120,000 bytes, preserving the Protocol 27 deployment headroom
+established by the candidate's deployment testing.
 
+Compare the optimized artifacts with the exact deployed v2 contracts:
+
+```bash
+make wasm-sizes
 ```
+
+Continuous integration publishes the Markdown report for every commit. The
+immutable comparison inputs and their artifact hashes are recorded in
+`wasm-size-v2-baseline.json`.
+
+Run the complete native and integration test suite:
+
+```bash
 make test
 ```
-
-## Deployment
-
-The `make` command creates an optimized and un-optimized set of WASM contracts. It's recommended to use the optimized version if deploying to a network.
-
-These can be found at the path:
-
-```
-target/wasm32v1-none/optimized
-```
-
-For help with deployment to a network, please visit the [Blend Utils](https://github.com/blend-capital/blend-utils) repo.
-
-## Contributing
-
-Notes for contributors:
-
-- Under no circumstances should the "overflow-checks" flag be removed otherwise contract math will become unsafe
-
-## Community Links
-
-A set of links for various things in the community. Please submit a pull request if you would like a link included.
-
-- [Blend Discord](https://discord.com/invite/a6CDBQQcjW)

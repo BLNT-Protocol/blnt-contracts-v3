@@ -1,82 +1,159 @@
+use sep_41_token::{StellarAssetClient, TokenClient};
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env};
+use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env, I256};
 
 use crate::{
-    constants::SCALAR_7,
-    dependencies::{CometClient, PoolFactoryClient},
+    constants::{ACTIVATION_THRESHOLD_USDC, SCALAR_7},
+    dependencies::{BackstopTierConfig, CometClient, FactoryBackstopAsset, PoolFactoryClient},
     errors::BackstopError,
     storage,
 };
 
-/// The pool's backstop data
-#[derive(Clone)]
+const MAX_TAKE_RATE_WEIGHT: u32 = 100;
+
+/// One pool's complete configured backstop accounting and valuation.
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct PoolBackstopData {
-    pub tokens: i128,  // the number of backstop tokens held in the pool's backstop
-    pub shares: i128,  // the number of shares the pool's backstop has issued
-    pub q4w_pct: i128, // the percentage of shares/tokens queued for withdrawal
-    pub blnd: i128,    // the amount of blnd held in the pool's backstop via backstop tokens
-    pub usdc: i128,    // the amount of usdc held in the pool's backstop via backstop tokens
-    pub token_spot_price: i128, // the spot price sans fees in USDC of the backstop token (7 decimals)
+    /// Aggregate transferable USDC value excluding queued withdrawals.
+    pub active_value: i128,
+    /// Queued value divided by total active-plus-queued value, rounded up.
+    pub q4w_pct: i128,
+    /// Tier data in configured loss-waterfall order.
+    pub tiers: soroban_sdk::Vec<PoolTierData>,
 }
 
-pub fn load_pool_backstop_data(e: &Env, address: &Address) -> PoolBackstopData {
-    let pool_balance = storage::get_pool_balance(e, address);
-    let q4w_pct = if pool_balance.shares > 0 {
-        pool_balance
-            .q4w
-            .fixed_div_ceil(pool_balance.shares, SCALAR_7)
-            .unwrap_optimized()
-    } else {
-        0
-    };
+/// One configured tier's compact accounting and verified valuation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolTierData {
+    pub asset: BackstopAsset,
+    pub blnt_emission_eligible: bool,
+    pub take_rate_weight: u32,
+    pub token: Address,
+    pub tokens: i128,
+    pub shares: i128,
+    /// Transferable USDC-equivalent value; zero while plain USDC is deauthorized.
+    pub value: i128,
+}
 
-    let backstop_token = storage::get_backstop_token(e);
-    let blnd_token = storage::get_blnd_token(e);
-    let usdc_token = storage::get_usdc_token(e);
-    let comet_client = CometClient::new(e, &backstop_token);
-    let total_comet_shares = comet_client.get_total_supply();
-    let total_blnd = comet_client.get_balance(&blnd_token);
-    let total_usdc = comet_client.get_balance(&usdc_token);
+/// The canonical asset assigned to one configured loss tier.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopAsset {
+    BlntXlm,
+    BlntUsdc,
+    Usdc,
+    Xlm,
+}
 
-    // underlying per LP token
-    let blnd_per_tkn = total_blnd
-        .fixed_div_floor(total_comet_shares, SCALAR_7)
-        .unwrap_optimized();
-    let usdc_per_tkn = total_usdc
-        .fixed_div_floor(total_comet_shares, SCALAR_7)
-        .unwrap_optimized();
+/// A backstop asset's immutable position in one pool's loss waterfall.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopTier {
+    FirstLoss,
+    SecondLoss,
+    ThirdLoss,
+}
 
-    // spot price of backstop token in USDC, exlcuding slippage/fees
-    // LP token is 20% USDC, so 5x is the spot price without slippage/fees
-    let tkn_spot_price_sans_fee = usdc_per_tkn * 5;
+pub fn tier_index(tier: BackstopTier) -> u32 {
+    match tier {
+        BackstopTier::FirstLoss => 0,
+        BackstopTier::SecondLoss => 1,
+        BackstopTier::ThirdLoss => 2,
+    }
+}
 
-    if pool_balance.tokens > 0 {
-        let blnd = pool_balance
-            .tokens
-            .fixed_mul_floor(blnd_per_tkn, SCALAR_7)
-            .unwrap_optimized();
-        let usdc = pool_balance
-            .tokens
-            .fixed_mul_floor(usdc_per_tkn, SCALAR_7)
-            .unwrap_optimized();
-        PoolBackstopData {
-            tokens: pool_balance.tokens,
-            shares: pool_balance.shares,
-            q4w_pct,
-            blnd,
-            usdc,
-            token_spot_price: tkn_spot_price_sans_fee,
+pub fn tier_from_index(e: &Env, index: u32) -> BackstopTier {
+    match index {
+        0 => BackstopTier::FirstLoss,
+        1 => BackstopTier::SecondLoss,
+        2 => BackstopTier::ThirdLoss,
+        _ => panic_with_error!(e, BackstopError::BadRequest),
+    }
+}
+
+pub fn pool_backstop_config(e: &Env, pool: &Address) -> soroban_sdk::Vec<BackstopTierConfig> {
+    if let Some(config) = storage::get_pool_backstop_config(e, pool) {
+        return config;
+    }
+    let factory = PoolFactoryClient::new(e, &storage::get_pool_factory(e));
+    if !factory.is_pool(pool) {
+        panic_with_error!(e, BackstopError::NotPool);
+    }
+    let config = factory.backstop_config(pool).tiers;
+    validate_pool_backstop_config(e, &config);
+    storage::set_pool_backstop_config(e, pool, &config);
+    config
+}
+
+pub fn tier_config(e: &Env, pool: &Address, tier: BackstopTier) -> BackstopTierConfig {
+    pool_backstop_config(e, pool)
+        .get(tier_index(tier))
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::BadRequest))
+}
+
+pub fn tier_token(e: &Env, pool: &Address, tier: BackstopTier) -> Address {
+    asset_token(e, tier_asset(e, pool, tier))
+}
+
+pub fn tier_asset(e: &Env, pool: &Address, tier: BackstopTier) -> BackstopAsset {
+    from_factory_asset(tier_config(e, pool, tier).asset)
+}
+
+pub fn tier_for_token(e: &Env, pool: &Address, token: &Address) -> Option<BackstopTier> {
+    let config = pool_backstop_config(e, pool);
+    for (index, tier) in config.iter().enumerate() {
+        if asset_token(e, from_factory_asset(tier.asset)) == *token {
+            return Some(tier_from_index(e, index as u32));
         }
-    } else {
-        PoolBackstopData {
-            tokens: 0,
-            shares: pool_balance.shares,
-            q4w_pct,
-            blnd: 0,
-            usdc: 0,
-            token_spot_price: tkn_spot_price_sans_fee,
-        }
+    }
+    None
+}
+
+pub fn is_blnt_emission_tier(e: &Env, pool: &Address, tier: BackstopTier) -> bool {
+    matches!(
+        tier_asset(e, pool, tier),
+        BackstopAsset::BlntUsdc | BackstopAsset::BlntXlm
+    )
+}
+
+pub fn asset_token(e: &Env, asset: BackstopAsset) -> Address {
+    match asset {
+        BackstopAsset::BlntXlm => storage::get_blnt_xlm_token(e),
+        BackstopAsset::BlntUsdc => storage::get_blnt_usdc_token(e),
+        BackstopAsset::Usdc => storage::get_usdc_token(e),
+        BackstopAsset::Xlm => storage::get_xlm_token(e),
+    }
+}
+
+fn from_factory_asset(asset: FactoryBackstopAsset) -> BackstopAsset {
+    match asset {
+        FactoryBackstopAsset::BlntXlm => BackstopAsset::BlntXlm,
+        FactoryBackstopAsset::BlntUsdc => BackstopAsset::BlntUsdc,
+        FactoryBackstopAsset::Usdc => BackstopAsset::Usdc,
+        FactoryBackstopAsset::Xlm => BackstopAsset::Xlm,
+    }
+}
+
+pub(crate) fn load_pool_backstop_data(e: &Env, pool: &Address) -> PoolBackstopData {
+    let valuation = build_pool_valuation(e, pool);
+    let config = pool_backstop_config(e, pool);
+    let mut tiers = soroban_sdk::Vec::new(e);
+    for (index, tier_config) in config.iter().enumerate() {
+        let tier = tier_from_index(e, index as u32);
+        let balance = storage::get_pool_balance_for_tier(e, tier, pool);
+        tiers.push_back(tier_data(
+            e,
+            &tier_config,
+            &balance,
+            valuation.total_values.tiers.get(index as u32).unwrap(),
+        ));
+    }
+    PoolBackstopData {
+        active_value: sum_activation_values(e, &valuation.active_values),
+        q4w_pct: calculate_q4w_percentage(e, &valuation.active_values, &valuation.queued_values),
+        tiers,
     }
 }
 
@@ -92,38 +169,18 @@ pub fn load_pool_backstop_data(e: &Env, address: &Address) -> PoolBackstopData {
 /// If the pool address cannot be verified
 pub fn require_is_from_pool_factory(e: &Env, address: &Address, balance: i128) {
     if balance == 0 {
-        let pool_factory_client = PoolFactoryClient::new(e, &storage::get_pool_factory(e));
-        if !pool_factory_client.is_pool(address) {
-            panic_with_error!(e, BackstopError::NotPool);
-        }
+        pool_backstop_config(e, address);
     }
 }
 
-/// Calculate the threshold for the pool's backstop balance
-///
-/// Returns true if the pool's backstop balance is above the threshold
-pub fn is_pool_above_threshold(pool_backstop_data: &PoolBackstopData) -> bool {
-    // @dev: Calculation for pools product constant of underlying will often overflow i128
-    //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the
-    //       protocol does not need to differentiate between pools over the threshold product constant.
-    //       The calculation is:
-    //        - Threshold % = (bal_blnd^4 * bal_usdc) / PC^5 such that PC is 100k
-    let threshold_pc = 10_000_000_000_000_000_000_000_000i128; // 1e25 (100k^5)
-
-    // floor balances to nearest full unit and calculate saturated pool product constant
-    let bal_blnd = pool_backstop_data.blnd / SCALAR_7;
-    let bal_usdc = pool_backstop_data.usdc / SCALAR_7;
-    let saturating_pool_pc = bal_blnd
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_usdc);
-    saturating_pool_pc >= threshold_pc
+/// Verify a pool is registered by the configured pool factory.
+pub fn require_registered_pool(e: &Env, address: &Address) {
+    pool_backstop_config(e, address);
 }
 
 /// The pool's backstop balances
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolBalance {
     pub shares: i128, // the amount of shares the pool has issued
     pub tokens: i128, // the number of tokens the pool holds in the backstop
@@ -214,142 +271,544 @@ impl PoolBalance {
     }
 }
 
+const BLNT_WEIGHT: i128 = 8_000_000;
+const PAIR_WEIGHT: i128 = 2_000_000;
+const PAIR_VALUE_MULTIPLIER: i128 = 5;
+const BLNT_SPOT_VALUE_MULTIPLIER: i128 = 4;
+const TOKEN_DECIMALS: u32 = 7;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AssetValuation {
+    pub usdc_value: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ActivationValues {
+    pub tiers: soroban_sdk::Vec<i128>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ActivationQuote {
+    pub eligible_value: i128,
+    pub meets_threshold: bool,
+    pub required_value: i128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PoolValuation {
+    pub active_values: ActivationValues,
+    pub queued_values: ActivationValues,
+    pub total_values: ActivationValues,
+}
+
+struct PoolTierValuation {
+    active: AssetValuation,
+    queued: AssetValuation,
+    total: AssetValuation,
+}
+
+fn tier_data(
+    e: &Env,
+    config: &BackstopTierConfig,
+    balance: &PoolBalance,
+    value: i128,
+) -> PoolTierData {
+    let asset = from_factory_asset(config.asset);
+    PoolTierData {
+        asset,
+        blnt_emission_eligible: matches!(asset, BackstopAsset::BlntUsdc | BackstopAsset::BlntXlm),
+        take_rate_weight: config.take_rate_weight,
+        token: asset_token(e, asset),
+        tokens: balance.tokens,
+        shares: balance.shares,
+        value,
+    }
+}
+
+pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
+    let config = pool_backstop_config(e, pool);
+    let mut amounts = soroban_sdk::Vec::new(e);
+    let mut any_tokens = false;
+    let mut needs_anchor = false;
+    let mut needs_target = false;
+    for index in 0..config.len() {
+        let partition = pool_tier_asset_partition(e, tier_from_index(e, index), pool);
+        any_tokens |= partition.2 > 0;
+        if partition.2 > 0 {
+            match from_factory_asset(config.get(index).unwrap().asset) {
+                BackstopAsset::BlntUsdc => needs_anchor = true,
+                BackstopAsset::BlntXlm | BackstopAsset::Xlm => {
+                    needs_anchor = true;
+                    needs_target = true;
+                }
+                BackstopAsset::Usdc => {}
+            }
+        }
+        amounts.push_back(partition);
+    }
+
+    #[cfg(any(test, feature = "testutils"))]
+    if let Some(should_fail) = test_valuation_override(e) {
+        if should_fail {
+            panic_with_error!(e, BackstopError::InvalidValuation);
+        }
+        let mut active = soroban_sdk::Vec::new(e);
+        let mut queued = soroban_sdk::Vec::new(e);
+        let mut total = soroban_sdk::Vec::new(e);
+        for (index, partition) in amounts.iter().enumerate() {
+            let config = config.get(index as u32).unwrap();
+            if partition.2 == 0 || configured_tier_is_transferable(e, &config) {
+                active.push_back(partition.0);
+                queued.push_back(partition.1);
+                total.push_back(partition.2);
+            } else {
+                active.push_back(0);
+                queued.push_back(0);
+                total.push_back(0);
+            }
+        }
+        return PoolValuation {
+            active_values: ActivationValues { tiers: active },
+            queued_values: ActivationValues { tiers: queued },
+            total_values: ActivationValues { tiers: total },
+        };
+    }
+
+    if !any_tokens {
+        let mut zeroes = soroban_sdk::Vec::new(e);
+        for _ in 0..config.len() {
+            zeroes.push_back(0);
+        }
+        return PoolValuation {
+            active_values: ActivationValues {
+                tiers: zeroes.clone(),
+            },
+            queued_values: ActivationValues {
+                tiers: zeroes.clone(),
+            },
+            total_values: ActivationValues { tiers: zeroes },
+        };
+    }
+
+    let blnt = storage::get_blnt_token(e);
+    let anchor = needs_anchor.then(|| {
+        read_comet(
+            e,
+            &storage::get_blnt_usdc_token(e),
+            &blnt,
+            &storage::get_usdc_token(e),
+        )
+    });
+    let anchor_value = anchor
+        .as_ref()
+        .map(|composition| checked_mul(e, composition.pair_reserve, PAIR_VALUE_MULTIPLIER));
+    let target = needs_target.then(|| {
+        read_comet(
+            e,
+            &storage::get_blnt_xlm_token(e),
+            &blnt,
+            &storage::get_xlm_token(e),
+        )
+    });
+    let mut active = soroban_sdk::Vec::new(e);
+    let mut queued = soroban_sdk::Vec::new(e);
+    let mut total = soroban_sdk::Vec::new(e);
+    for index in 0..config.len() {
+        let tier_config = config.get(index).unwrap();
+        let tier_amounts = amounts.get(index).unwrap();
+        let quotes = quote_configured_tier(
+            e,
+            &tier_config,
+            tier_amounts,
+            anchor.as_ref(),
+            anchor_value,
+            target.as_ref(),
+        );
+        if tier_amounts.2 == 0 || configured_tier_is_transferable(e, &tier_config) {
+            active.push_back(quotes.active.usdc_value);
+            queued.push_back(quotes.queued.usdc_value);
+            total.push_back(quotes.total.usdc_value);
+        } else {
+            active.push_back(0);
+            queued.push_back(0);
+            total.push_back(0);
+        }
+    }
+    PoolValuation {
+        active_values: ActivationValues { tiers: active },
+        queued_values: ActivationValues { tiers: queued },
+        total_values: ActivationValues { tiers: total },
+    }
+}
+
+/// Return the seven-decimal USDC value of one BLNT implied by the canonical
+/// 80:20 BLNT:USDC Comet v2 pool's current reserves.
+pub fn quote_blnt_price(e: &Env) -> i128 {
+    let anchor = read_comet(
+        e,
+        &storage::get_blnt_usdc_token(e),
+        &storage::get_blnt_token(e),
+        &storage::get_usdc_token(e),
+    );
+    let price = mul_div_floor(
+        e,
+        SCALAR_7,
+        checked_mul(e, anchor.pair_reserve, BLNT_SPOT_VALUE_MULTIPLIER),
+        anchor.blnt_reserve,
+    );
+    if price <= 0 {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    price
+}
+
+fn quote_configured_tier(
+    e: &Env,
+    config: &BackstopTierConfig,
+    amounts: (i128, i128, i128),
+    anchor: Option<&CometComposition>,
+    anchor_value: Option<i128>,
+    target: Option<&CometComposition>,
+) -> PoolTierValuation {
+    for amount in [amounts.0, amounts.1, amounts.2] {
+        if amount < 0 {
+            panic_with_error!(e, BackstopError::InvalidValuation);
+        }
+    }
+    if amounts.2 == 0 {
+        return unit_pool_tier_valuation(amounts);
+    }
+    match from_factory_asset(config.asset) {
+        BackstopAsset::BlntUsdc => pool_tier_valuation(
+            e,
+            amounts,
+            anchor_value.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
+            anchor.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
+        ),
+        BackstopAsset::BlntXlm => {
+            let anchor =
+                anchor.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
+            let anchor_value = anchor_value
+                .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
+            let target =
+                target.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
+            let target_value =
+                mul_div_floor(e, target.blnt_reserve, anchor_value, anchor.blnt_reserve);
+            pool_tier_valuation(e, amounts, target_value, target)
+        }
+        BackstopAsset::Usdc => unit_pool_tier_valuation(amounts),
+        BackstopAsset::Xlm => xlm_pool_tier_valuation(
+            e,
+            amounts,
+            anchor.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
+            target.unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation)),
+        ),
+    }
+}
+
+fn configured_tier_is_transferable(e: &Env, config: &BackstopTierConfig) -> bool {
+    if from_factory_asset(config.asset) != BackstopAsset::Usdc {
+        return true;
+    }
+    let usdc = storage::get_usdc_token(e);
+    StellarAssetClient::new(e, &usdc).authorized(&e.current_contract_address())
+}
+
+fn xlm_pool_tier_valuation(
+    e: &Env,
+    amounts: (i128, i128, i128),
+    anchor: &CometComposition,
+    target: &CometComposition,
+) -> PoolTierValuation {
+    PoolTierValuation {
+        active: xlm_asset_valuation(e, amounts.0, anchor, target),
+        queued: xlm_asset_valuation(e, amounts.1, anchor, target),
+        total: xlm_asset_valuation(e, amounts.2, anchor, target),
+    }
+}
+
+fn xlm_asset_valuation(
+    e: &Env,
+    amount: i128,
+    anchor: &CometComposition,
+    target: &CometComposition,
+) -> AssetValuation {
+    if amount < 0 {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    let numerator = I256::from_i128(e, amount)
+        .mul(&I256::from_i128(e, anchor.pair_reserve))
+        .mul(&I256::from_i128(e, target.blnt_reserve));
+    let denominator =
+        I256::from_i128(e, anchor.blnt_reserve).mul(&I256::from_i128(e, target.pair_reserve));
+    AssetValuation {
+        usdc_value: numerator
+            .div(&denominator)
+            .to_i128()
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError)),
+    }
+}
+
+#[cfg(test)]
+fn quote_pool_lp_amounts(
+    e: &Env,
+    blnt_usdc: (i128, i128, i128),
+    blnt_xlm: (i128, i128, i128),
+) -> (PoolTierValuation, PoolTierValuation) {
+    let blnt = storage::get_blnt_token(e);
+    let usdc = storage::get_usdc_token(e);
+    let anchor = read_comet(e, &storage::get_blnt_usdc_token(e), &blnt, &usdc);
+    let anchor_value = checked_mul(e, anchor.pair_reserve, PAIR_VALUE_MULTIPLIER);
+    let blnt_usdc_quote = pool_tier_valuation(e, blnt_usdc, anchor_value, &anchor);
+    let target = read_comet(
+        e,
+        &storage::get_blnt_xlm_token(e),
+        &blnt,
+        &storage::get_xlm_token(e),
+    );
+    let target_value = mul_div_floor(e, target.blnt_reserve, anchor_value, anchor.blnt_reserve);
+    (
+        blnt_usdc_quote,
+        pool_tier_valuation(e, blnt_xlm, target_value, &target),
+    )
+}
+
+fn pool_tier_valuation(
+    e: &Env,
+    amounts: (i128, i128, i128),
+    total_value: i128,
+    composition: &CometComposition,
+) -> PoolTierValuation {
+    if total_value <= 0 || amounts.2 > composition.total_supply {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    PoolTierValuation {
+        active: quote_from_composition(e, amounts.0, total_value, composition),
+        queued: quote_from_composition(e, amounts.1, total_value, composition),
+        total: quote_from_composition(e, amounts.2, total_value, composition),
+    }
+}
+
+fn quote_from_composition(
+    e: &Env,
+    amount: i128,
+    total_value: i128,
+    composition: &CometComposition,
+) -> AssetValuation {
+    AssetValuation {
+        usdc_value: mul_div_floor(e, amount, total_value, composition.total_supply),
+    }
+}
+
+fn unit_pool_tier_valuation(amounts: (i128, i128, i128)) -> PoolTierValuation {
+    PoolTierValuation {
+        active: unit_asset_valuation(amounts.0),
+        queued: unit_asset_valuation(amounts.1),
+        total: unit_asset_valuation(amounts.2),
+    }
+}
+
+fn unit_asset_valuation(amount: i128) -> AssetValuation {
+    AssetValuation { usdc_value: amount }
+}
+
+pub fn quote_activation(e: &Env, values: &ActivationValues) -> ActivationQuote {
+    let eligible_value = sum_activation_values(e, values);
+    ActivationQuote {
+        eligible_value,
+        meets_threshold: eligible_value >= ACTIVATION_THRESHOLD_USDC,
+        required_value: ACTIVATION_THRESHOLD_USDC,
+    }
+}
+
+fn pool_tier_asset_partition(e: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128, i128) {
+    let balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    let active_shares = balance
+        .shares
+        .checked_sub(balance.q4w)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidValuation));
+    let active = assets_from_shares(e, active_shares, &balance);
+    let queued = assets_from_shares(e, balance.q4w, &balance);
+    (active, queued, balance.tokens)
+}
+
+fn assets_from_shares(e: &Env, shares: i128, balance: &PoolBalance) -> i128 {
+    if shares < 0 || balance.tokens < 0 || balance.shares < 0 {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    balance.convert_to_tokens(shares)
+}
+
+pub(crate) fn validate_backstop_assets(
+    e: &Env,
+    blnt: &Address,
+    usdc: &Address,
+    xlm: &Address,
+    blnt_usdc: &Address,
+    blnt_xlm: &Address,
+) {
+    let addresses = [blnt, usdc, xlm, blnt_usdc, blnt_xlm];
+    for (index, address) in addresses.iter().enumerate() {
+        if addresses
+            .iter()
+            .skip(index + 1)
+            .any(|other| address == other)
+        {
+            panic_with_error!(e, BackstopError::AssetConfigurationCollision);
+        }
+    }
+
+    for token in addresses {
+        if TokenClient::new(e, token).decimals() != TOKEN_DECIMALS {
+            panic_with_error!(e, BackstopError::InvalidBackstopValuation);
+        }
+    }
+    validate_comet(e, blnt_usdc, blnt, usdc);
+    validate_comet(e, blnt_xlm, blnt, xlm);
+}
+
+fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTierConfig>) {
+    if config.is_empty() || config.len() > 3 {
+        panic_with_error!(e, BackstopError::InvalidBackstopValuation);
+    }
+    for (index, tier) in config.iter().enumerate() {
+        if tier.take_rate_weight == 0 || tier.take_rate_weight > MAX_TAKE_RATE_WEIGHT {
+            panic_with_error!(e, BackstopError::InvalidBackstopValuation);
+        }
+        let asset = from_factory_asset(tier.asset);
+        if TokenClient::new(e, &asset_token(e, asset)).decimals() != TOKEN_DECIMALS {
+            panic_with_error!(e, BackstopError::InvalidBackstopValuation);
+        }
+        for later in config.iter().skip(index + 1) {
+            if tier.asset == later.asset {
+                panic_with_error!(e, BackstopError::AssetConfigurationCollision);
+            }
+        }
+    }
+}
+
+struct CometComposition {
+    blnt_reserve: i128,
+    pair_reserve: i128,
+    total_supply: i128,
+}
+
+fn validate_comet(e: &Env, comet: &Address, blnt: &Address, pair: &Address) {
+    let client = CometClient::new(e, comet);
+    let tokens = client.get_tokens();
+    if tokens.len() != 2
+        || !tokens.contains(blnt)
+        || !tokens.contains(pair)
+        || client.get_normalized_weight(blnt) != BLNT_WEIGHT
+        || client.get_normalized_weight(pair) != PAIR_WEIGHT
+    {
+        panic_with_error!(e, BackstopError::InvalidBackstopValuation);
+    }
+}
+
+fn read_comet(e: &Env, comet: &Address, blnt: &Address, pair: &Address) -> CometComposition {
+    let client = CometClient::new(e, comet);
+    let total_supply = client.get_total_supply();
+    let blnt_reserve = client.get_balance(blnt);
+    let pair_reserve = client.get_balance(pair);
+    if total_supply <= 0
+        || blnt_reserve <= 0
+        || pair_reserve <= 0
+        || client.get_normalized_weight(blnt) != BLNT_WEIGHT
+        || client.get_normalized_weight(pair) != PAIR_WEIGHT
+    {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    CometComposition {
+        blnt_reserve,
+        pair_reserve,
+        total_supply,
+    }
+}
+
+fn checked_mul(e: &Env, left: i128, right: i128) -> i128 {
+    left.checked_mul(right)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
+}
+
+fn mul_div_floor(e: &Env, value: i128, numerator: i128, denominator: i128) -> i128 {
+    if value < 0 || numerator < 0 || denominator <= 0 {
+        panic_with_error!(e, BackstopError::InvalidValuation);
+    }
+    I256::from_i128(e, value)
+        .mul(&I256::from_i128(e, numerator))
+        .div(&I256::from_i128(e, denominator))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
+}
+
+#[cfg(any(test, feature = "testutils"))]
+#[derive(Clone)]
+#[contracttype]
+enum TestValuationKey {
+    Override,
+}
+
+#[cfg(any(test, feature = "testutils"))]
+fn test_valuation_override(e: &Env) -> Option<bool> {
+    e.storage().instance().get(&TestValuationKey::Override)
+}
+
+#[cfg(any(test, feature = "testutils"))]
+pub fn set_test_valuation_override(e: &Env, should_fail: Option<bool>) {
+    if let Some(should_fail) = should_fail {
+        e.storage()
+            .instance()
+            .set(&TestValuationKey::Override, &should_fail);
+    } else {
+        e.storage().instance().remove(&TestValuationKey::Override);
+    }
+}
+
+fn sum_activation_values(e: &Env, values: &ActivationValues) -> i128 {
+    let mut total = 0_i128;
+    for value in values.tiers.iter() {
+        if value < 0 {
+            panic_with_error!(e, BackstopError::InvalidActivationValue);
+        }
+        total = total
+            .checked_add(value)
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    }
+    total
+}
+
+fn calculate_q4w_percentage(
+    e: &Env,
+    active_values: &ActivationValues,
+    queued_values: &ActivationValues,
+) -> i128 {
+    let active_value = sum_activation_values(e, active_values);
+    let queued_value = sum_activation_values(e, queued_values);
+    let total_value = active_value
+        .checked_add(queued_value)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    if total_value == 0 {
+        return 0;
+    }
+
+    let numerator = I256::from_i128(e, queued_value).mul(&I256::from_i128(e, SCALAR_7));
+    let denominator = I256::from_i128(e, total_value);
+    numerator
+        .add(&denominator)
+        .sub(&I256::from_i32(e, 1))
+        .div(&denominator)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
+}
+
 #[cfg(test)]
 mod tests {
     use soroban_sdk::testutils::Address as _;
 
-    use crate::testutils::{
-        create_backstop, create_blnd_token, create_comet_lp_pool_with_tokens_per_share,
-        create_mock_pool_factory, create_usdc_token,
-    };
+    use crate::testutils::{create_backstop, create_mock_pool_factory};
 
     use super::*;
-
-    #[test]
-    fn test_load_pool_data() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 150_0000000,
-                    tokens: 250_0000000,
-                    q4w: 50_0000000,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 250_0000000);
-            assert_eq!(pool_data.q4w_pct, 0_3333334); // rounds up
-            assert_eq!(pool_data.blnd, 1_250_0000000);
-            assert_eq!(pool_data.usdc, 12_5000000);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
-
-    #[test]
-    fn test_load_pool_data_no_shares() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 0,
-                    tokens: 250_0000000,
-                    q4w: 0,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 250_0000000);
-            assert_eq!(pool_data.q4w_pct, 0);
-            assert_eq!(pool_data.blnd, 1_250_0000000);
-            assert_eq!(pool_data.usdc, 12_5000000);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
-
-    #[test]
-    fn test_load_pool_data_no_tokens() {
-        let e = Env::default();
-        e.mock_all_auths();
-
-        let bombadil = Address::generate(&e);
-        let backstop_address = create_backstop(&e);
-        let pool = Address::generate(&e);
-
-        let (blnd_id, _) = create_blnd_token(&e, &backstop_address, &bombadil);
-        let (usdc_id, _) = create_usdc_token(&e, &backstop_address, &bombadil);
-        create_comet_lp_pool_with_tokens_per_share(
-            &e,
-            &backstop_address,
-            &bombadil,
-            &blnd_id,
-            5_0000000,
-            &usdc_id,
-            0_0500000,
-        );
-
-        e.as_contract(&backstop_address, || {
-            storage::set_pool_balance(
-                &e,
-                &pool,
-                &PoolBalance {
-                    shares: 100_0000000,
-                    tokens: 0,
-                    q4w: 0,
-                },
-            );
-
-            let pool_data = load_pool_backstop_data(&e, &pool);
-
-            assert_eq!(pool_data.tokens, 0);
-            assert_eq!(pool_data.q4w_pct, 0);
-            assert_eq!(pool_data.blnd, 0);
-            assert_eq!(pool_data.usdc, 0);
-            assert_eq!(pool_data.token_spot_price, 0_2500000);
-        });
-    }
 
     /********** require_is_from_pool_factory **********/
 
@@ -400,80 +859,6 @@ mod tests {
             require_is_from_pool_factory(&e, &not_pool_address, 0);
             assert!(false);
         });
-    }
-
-    /********** require_pool_above_threshold **********/
-
-    #[test]
-    fn test_require_pool_above_threshold_under() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200000_0000000,
-            q4w_pct: 0,
-            tokens: 20_000_0000000,
-            shares: 15_000_0000000,
-            usdc: 6_249_0000000,
-            token_spot_price: 0_1000000,
-        }; // ~99% threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_zero() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 5_000_0000000,
-            q4w_pct: 0,
-            tokens: 500_0000000,
-            shares: 500_0000000,
-            usdc: 1_000_0000000,
-            token_spot_price: 0_1000000,
-        }; // ~3.6% threshold - rounds to zero in calc
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_over() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200001_0000000,
-            q4w_pct: 0,
-            tokens: 15_000_0000000,
-            shares: 14_000_0000000,
-            usdc: 6_250_0000000,
-            token_spot_price: 0_1000000,
-        }; // 100% threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(result);
-    }
-
-    #[test]
-    fn test_require_pool_above_threshold_saturates() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 50_000_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 1_099_999_0000000,
-            usdc: 10_000_000_0000000,
-            token_spot_price: 0_1000000,
-        }; // 362x threshold
-
-        let result = is_pool_above_threshold(&pool_backstop_data);
-        assert!(result);
     }
 
     /********** Logic **********/
@@ -704,5 +1089,544 @@ mod tests {
         assert_eq!(pool_balance.shares, 75);
         assert_eq!(pool_balance.tokens, 150);
         assert_eq!(pool_balance.q4w, 0);
+    }
+}
+
+#[cfg(test)]
+mod tier_tests {
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, LedgerInfo},
+        vec, Address,
+    };
+
+    use crate::{
+        constants::{MAX_Q4W_SIZE, Q4W_LOCK_TIME},
+        testutils::{
+            create_backstop, create_backstop_token, create_blnt_xlm_token, create_mock_pool,
+            create_mock_pool_factory, create_usdc_token,
+        },
+        BackstopClient,
+    };
+
+    use super::*;
+
+    #[test]
+    fn three_tiers_keep_pool_and_user_accounting_isolated() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (blnt_usdc, blnt_usdc_client) = create_backstop_token(&e, &backstop, &admin);
+        let (blnt_xlm, blnt_xlm_client) = create_blnt_xlm_token(&e, &backstop, &admin);
+        let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool(&pool);
+
+        blnt_usdc_client.mint(&user, &100);
+        blnt_xlm_client.mint(&user, &200);
+        usdc_client.mint(&user, &300);
+
+        let client = BackstopClient::new(&e, &backstop);
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::SecondLoss, &user, &pool, &100),
+            100
+        );
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::FirstLoss, &user, &pool, &200),
+            200
+        );
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::ThirdLoss, &user, &pool, &300),
+            300
+        );
+
+        assert_eq!(
+            client.backstop_token(&BackstopTier::SecondLoss, &pool),
+            blnt_usdc
+        );
+        assert_eq!(
+            client.backstop_token(&BackstopTier::FirstLoss, &pool),
+            blnt_xlm
+        );
+        assert_eq!(client.backstop_token(&BackstopTier::ThirdLoss, &pool), usdc);
+        let pool_data = client.pool_data(&pool);
+        assert_eq!(pool_data.tiers.get(1).unwrap().tokens, 100);
+        assert_eq!(pool_data.tiers.get(1).unwrap().shares, 100);
+        assert_eq!(pool_data.tiers.get(0).unwrap().tokens, 200);
+        assert_eq!(pool_data.tiers.get(0).unwrap().shares, 200);
+        assert_eq!(pool_data.tiers.get(2).unwrap().tokens, 300);
+        assert_eq!(pool_data.tiers.get(2).unwrap().shares, 300);
+        let user_balance = client.user_balance(&BackstopTier::ThirdLoss, &pool, &user);
+        assert_eq!(user_balance.shares, 300);
+        assert!(user_balance.q4w.is_empty());
+    }
+
+    #[test]
+    fn q4w_limit_is_aggregate_and_withdrawal_is_tier_specific() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.ledger().set(LedgerInfo {
+            protocol_version: 27,
+            sequence_number: 1,
+            timestamp: 10_000,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let recipient = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (pool, _) = create_mock_pool(&e, &backstop);
+        let (_, blnt_usdc_client) = create_backstop_token(&e, &backstop, &admin);
+        let (_, blnt_xlm_client) = create_blnt_xlm_token(&e, &backstop, &admin);
+        let (_, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool(&pool);
+
+        blnt_usdc_client.mint(&user, &100);
+        blnt_xlm_client.mint(&user, &100);
+        usdc_client.mint(&user, &100);
+        let client = BackstopClient::new(&e, &backstop);
+        client.deposit(&crate::BackstopTier::SecondLoss, &user, &pool, &100);
+        client.deposit(&crate::BackstopTier::FirstLoss, &user, &pool, &100);
+        client.deposit(&crate::BackstopTier::ThirdLoss, &user, &pool, &100);
+
+        for _ in 0..10 {
+            client.queue_withdrawal(&crate::BackstopTier::SecondLoss, &user, &pool, &1);
+        }
+        for _ in 0..5 {
+            client.queue_withdrawal(&crate::BackstopTier::FirstLoss, &user, &pool, &1);
+            client.queue_withdrawal(&crate::BackstopTier::ThirdLoss, &user, &pool, &1);
+        }
+        assert_eq!(
+            client
+                .user_balance(&BackstopTier::SecondLoss, &pool, &user)
+                .q4w
+                .len()
+                + client
+                    .user_balance(&BackstopTier::FirstLoss, &pool, &user)
+                    .q4w
+                    .len()
+                + client
+                    .user_balance(&BackstopTier::ThirdLoss, &pool, &user)
+                    .q4w
+                    .len(),
+            MAX_Q4W_SIZE
+        );
+        assert!(client
+            .try_queue_withdrawal(&crate::BackstopTier::ThirdLoss, &user, &pool, &1)
+            .is_err());
+
+        client.dequeue_withdrawal(&crate::BackstopTier::SecondLoss, &user, &pool, &1);
+        client.queue_withdrawal(&crate::BackstopTier::FirstLoss, &user, &pool, &1);
+        e.ledger().set_timestamp(10_000 + Q4W_LOCK_TIME + 1);
+        assert_eq!(
+            client.withdraw(
+                &crate::BackstopTier::FirstLoss,
+                &user,
+                &pool,
+                &6,
+                &recipient
+            ),
+            6
+        );
+        assert_eq!(blnt_xlm_client.balance(&recipient), 6);
+        let user_balance = client.user_balance(&BackstopTier::FirstLoss, &pool, &user);
+        assert_eq!(user_balance.shares, 94);
+        assert!(user_balance.q4w.is_empty());
+    }
+
+    #[test]
+    fn deposit_requires_factory_registration_only() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (_, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        let client = BackstopClient::new(&e, &backstop);
+
+        usdc_client.mint(&user, &200);
+        assert!(client
+            .try_deposit(&crate::BackstopTier::ThirdLoss, &user, &pool, &100)
+            .is_err());
+        assert_eq!(usdc_client.balance(&user), 200);
+
+        factory.set_pool(&pool);
+        assert_eq!(
+            client.deposit(&crate::BackstopTier::ThirdLoss, &user, &pool, &100),
+            100
+        );
+        assert_eq!(usdc_client.balance(&user), 100);
+    }
+
+    #[test]
+    fn omitted_trailing_tiers_are_rejected_by_public_getters() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        let backstop = create_backstop(&e);
+        let pool = Address::generate(&e);
+        let user = Address::generate(&e);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                mock_pool_factory::BackstopTierConfig {
+                    asset: mock_pool_factory::BackstopAsset::Usdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+
+        let client = BackstopClient::new(&e, &backstop);
+        assert!(client
+            .try_user_balance(&BackstopTier::SecondLoss, &pool, &user)
+            .is_err());
+        assert!(client
+            .try_backstop_token(&BackstopTier::ThirdLoss, &pool)
+            .is_err());
+    }
+}
+
+#[cfg(test)]
+mod valuation_tests {
+    use mock_pool_factory::{BackstopAsset as FactoryBackstopAsset, BackstopTierConfig};
+    use sep_41_token::{testutils::MockTokenClient, StellarAssetClient};
+    use soroban_sdk::{testutils::Address as _, vec, Address};
+
+    use crate::{
+        storage,
+        testutils::{
+            create_backstop, create_backstop_token, create_backstop_with_real_comets,
+            create_blnt_xlm_token, create_mock_pool_factory, create_usdc_token,
+        },
+        BackstopClient,
+    };
+
+    use super::*;
+
+    #[test]
+    fn enforces_weight_range_and_accepts_independent_tier_weights() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        let backstop = create_backstop(&e);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        let client = BackstopClient::new(&e, &backstop);
+
+        let zero = Address::generate(&e);
+        factory.set_pool_config(
+            &zero,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 0,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&zero).is_err());
+
+        let excessive = Address::generate(&e);
+        factory.set_pool_config(
+            &excessive,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 101,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&excessive).is_err());
+
+        let equal = Address::generate(&e);
+        factory.set_pool_config(
+            &equal,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntXlm,
+                    take_rate_weight: 4,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 4,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&equal).is_ok());
+
+        let ascending = Address::generate(&e);
+        factory.set_pool_config(
+            &ascending,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntXlm,
+                    take_rate_weight: 3,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 4,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&ascending).is_ok());
+    }
+
+    fn values(e: &Env, blnt_usdc: i128, blnt_xlm: i128, usdc: i128) -> ActivationValues {
+        ActivationValues {
+            tiers: soroban_sdk::vec![e, blnt_xlm, blnt_usdc, usdc],
+        }
+    }
+
+    #[test]
+    fn activation_values_all_tiers_equally_and_uses_one_threshold() {
+        let e = Env::default();
+        let threshold = values(&e, 4_000 * SCALAR_7, 3_500 * SCALAR_7, 5_000 * SCALAR_7);
+        assert_eq!(
+            quote_activation(&e, &threshold),
+            ActivationQuote {
+                eligible_value: ACTIVATION_THRESHOLD_USDC,
+                meets_threshold: true,
+                required_value: ACTIVATION_THRESHOLD_USDC,
+            }
+        );
+
+        let below_threshold = values(&e, 0, 0, ACTIVATION_THRESHOLD_USDC - 1);
+        assert!(!quote_activation(&e, &below_threshold).meets_threshold);
+    }
+
+    #[test]
+    fn integrated_comet_valuation_preserves_reserve_implied_formulas() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        let backstop = create_backstop_with_real_comets(&e);
+
+        let (blnt_usdc, blnt_xlm, blnt_price) = e.as_contract(&backstop, || {
+            set_test_valuation_override(&e, None);
+            let (blnt_usdc, blnt_xlm) = quote_pool_lp_amounts(
+                &e,
+                (20 * SCALAR_7, 0, 20 * SCALAR_7),
+                (10 * SCALAR_7, 0, 10 * SCALAR_7),
+            );
+            (blnt_usdc.total, blnt_xlm.total, quote_blnt_price(&e))
+        });
+
+        assert_eq!(
+            blnt_usdc,
+            AssetValuation {
+                usdc_value: 25 * SCALAR_7,
+            }
+        );
+        assert_eq!(
+            blnt_xlm,
+            AssetValuation {
+                usdc_value: 125_000_000,
+            }
+        );
+        assert_eq!(blnt_price, 1_000_000);
+    }
+
+    #[test]
+    fn q4w_percentage_uses_value_across_tiers_and_rounds_up() {
+        let e = Env::default();
+        let active = values(&e, 4_000 * SCALAR_7, 3_000 * SCALAR_7, 0);
+        let queued = values(&e, 0, 0, 3_000 * SCALAR_7);
+        assert_eq!(calculate_q4w_percentage(&e, &active, &queued), 3_000_000);
+
+        let rounded = calculate_q4w_percentage(
+            &e,
+            &values(&e, 0, 0, 2 * SCALAR_7),
+            &values(&e, 0, 0, SCALAR_7),
+        );
+        assert_eq!(rounded, 3_333_334);
+    }
+
+    #[test]
+    fn canonical_pool_data_combines_tier_accounting_and_valuation() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (_, blnt_usdc) = create_backstop_token(&e, &backstop, &admin);
+        let (_, blnt_xlm) = create_blnt_xlm_token(&e, &backstop, &admin);
+        let (_, usdc) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool(&pool);
+
+        blnt_usdc.mint(&user, &(4_000 * SCALAR_7));
+        blnt_xlm.mint(&user, &(5_000 * SCALAR_7));
+        usdc.mint(&user, &(6_500 * SCALAR_7));
+        let backstop_client = BackstopClient::new(&e, &backstop);
+        backstop_client.deposit(
+            &crate::BackstopTier::SecondLoss,
+            &user,
+            &pool,
+            &(4_000 * SCALAR_7),
+        );
+        backstop_client.deposit(
+            &crate::BackstopTier::FirstLoss,
+            &user,
+            &pool,
+            &(5_000 * SCALAR_7),
+        );
+        backstop_client.deposit(
+            &crate::BackstopTier::ThirdLoss,
+            &user,
+            &pool,
+            &(6_500 * SCALAR_7),
+        );
+        backstop_client.queue_withdrawal(
+            &crate::BackstopTier::SecondLoss,
+            &user,
+            &pool,
+            &(1_000 * SCALAR_7),
+        );
+        backstop_client.queue_withdrawal(
+            &crate::BackstopTier::FirstLoss,
+            &user,
+            &pool,
+            &(2_000 * SCALAR_7),
+        );
+
+        let pool_data = backstop_client.pool_data(&pool);
+        let blnt_xlm_data = pool_data.tiers.get(0).unwrap();
+        assert_eq!(blnt_xlm_data.token, blnt_xlm.address);
+        assert_eq!(blnt_xlm_data.tokens, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.shares, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.value, 5_000 * SCALAR_7);
+        assert_eq!(blnt_xlm_data.take_rate_weight, 4);
+        let blnt_usdc_data = pool_data.tiers.get(1).unwrap();
+        assert_eq!(blnt_usdc_data.token, blnt_usdc.address);
+        assert_eq!(blnt_usdc_data.tokens, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.shares, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.value, 4_000 * SCALAR_7);
+        assert_eq!(blnt_usdc_data.take_rate_weight, 3);
+        let usdc_data = pool_data.tiers.get(2).unwrap();
+        assert_eq!(usdc_data.token, usdc.address);
+        assert_eq!(usdc_data.tokens, 6_500 * SCALAR_7);
+        assert_eq!(usdc_data.shares, 6_500 * SCALAR_7);
+        assert_eq!(usdc_data.value, 6_500 * SCALAR_7);
+        assert_eq!(usdc_data.take_rate_weight, 2);
+        assert_eq!(pool_data.active_value, ACTIVATION_THRESHOLD_USDC);
+        assert_eq!(pool_data.q4w_pct, 1_935_484);
+        let quote = e.as_contract(&backstop, || {
+            let valuation = build_pool_valuation(&e, &pool);
+            quote_activation(&e, &valuation.active_values)
+        });
+        assert_eq!(quote.eligible_value, ACTIVATION_THRESHOLD_USDC);
+        assert!(quote.meets_threshold);
+    }
+
+    #[test]
+    fn deauthorized_usdc_has_zero_value_until_reauthorized() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        usdc_client.mint(&user, &ACTIVATION_THRESHOLD_USDC);
+        let client = BackstopClient::new(&e, &backstop);
+        client.deposit(
+            &BackstopTier::FirstLoss,
+            &user,
+            &pool,
+            &ACTIVATION_THRESHOLD_USDC,
+        );
+
+        assert_eq!(
+            client.pool_data(&pool).active_value,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &false);
+
+        let deauthorized = client.pool_data(&pool);
+        assert_eq!(deauthorized.active_value, 0);
+        assert_eq!(deauthorized.q4w_pct, 0);
+        assert_eq!(
+            deauthorized.tiers.first().unwrap().tokens,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        assert_eq!(
+            deauthorized.tiers.first().unwrap().shares,
+            ACTIVATION_THRESHOLD_USDC
+        );
+        assert_eq!(deauthorized.tiers.first().unwrap().value, 0);
+
+        StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &true);
+        assert_eq!(
+            client.pool_data(&pool).active_value,
+            ACTIVATION_THRESHOLD_USDC
+        );
+    }
+
+    #[test]
+    fn xlm_tier_uses_the_canonical_comet_cross_price() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop_with_real_comets(&e);
+        let xlm = e.as_contract(&backstop, || storage::get_xlm_token(&e));
+        let xlm_client = MockTokenClient::new(&e, &xlm);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Xlm,
+                    take_rate_weight: 100,
+                },
+            ],
+        );
+        e.as_contract(&backstop, || set_test_valuation_override(&e, None));
+
+        let amount = ACTIVATION_THRESHOLD_USDC;
+        xlm_client.mint(&user, &amount);
+        let client = BackstopClient::new(&e, &backstop);
+        client.deposit(&BackstopTier::FirstLoss, &user, &pool, &amount);
+
+        let data = client.pool_data(&pool);
+        assert_eq!(data.tiers.len(), 1);
+        let tier = data.tiers.first().unwrap();
+        assert_eq!(tier.asset, BackstopAsset::Xlm);
+        assert_eq!(tier.token, xlm);
+        assert_eq!(tier.take_rate_weight, 100);
+        assert!(!tier.blnt_emission_eligible);
+        assert_eq!(tier.value, ACTIVATION_THRESHOLD_USDC);
+        assert_eq!(data.active_value, ACTIVATION_THRESHOLD_USDC);
     }
 }

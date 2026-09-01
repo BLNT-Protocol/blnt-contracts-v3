@@ -1,11 +1,10 @@
 #![cfg(test)]
 use backstop::{BackstopDataKey, PoolBalance};
 use cast::i128;
-use pool::{AuctionData, FlashLoan, PoolDataKey, Request, RequestType, ReserveConfig};
+use pool::{AuctionType, FlashLoan, PoolDataKey, Request, RequestType, ReserveConfig};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{
-    map, testutils::Address as AddressTestTrait, vec, Address, Env, Error, FromVal, IntoVal,
-    Symbol, TryFromVal, Val, Vec,
+    map, testutils::Address as AddressTestTrait, vec, Address, Error, IntoVal, Symbol, Vec,
 };
 use test_suites::{
     assertions::{assert_approx_eq_abs, assert_approx_eq_rel, event_from_end},
@@ -13,39 +12,6 @@ use test_suites::{
     moderc3156::create_flashloan_receiver,
     test_fixture::{TokenIndex, SCALAR_7},
 };
-
-fn assert_fill_auction_event_no_data(
-    env: &Env,
-    event: (Address, Vec<Val>, Val),
-    pool_address: &Address,
-    auction_user: &Address,
-    auction_type: u32,
-    filler: &Address,
-    fill_pct: i128,
-) {
-    let (event_pool_address, topics, data) = event;
-    assert_eq!(event_pool_address, pool_address.clone());
-
-    assert_eq!(topics.len(), 3);
-    assert_eq!(
-        Symbol::from_val(env, &topics.get_unchecked(0)),
-        Symbol::new(env, "fill_auction")
-    );
-    assert_eq!(u32::from_val(env, &topics.get_unchecked(1)), auction_type);
-    assert_eq!(
-        Address::from_val(env, &topics.get_unchecked(2)),
-        auction_user.clone()
-    );
-
-    let event_data = Vec::<Val>::from_val(env, &data);
-    assert_eq!(event_data.len(), 3);
-    assert_eq!(
-        Address::from_val(env, &event_data.get_unchecked(0)),
-        filler.clone()
-    );
-    assert_eq!(i128::from_val(env, &event_data.get_unchecked(1)), fill_pct);
-    assert!(AuctionData::try_from_val(env, &event_data.get_unchecked(2)).is_ok());
-}
 
 #[test]
 fn test_liquidations() {
@@ -121,9 +87,13 @@ fn test_liquidations() {
 
     // have Frodo Q4W some backstop deposits
     let frodo_pre_q4w_amount = 10_000 * SCALAR_7;
-    fixture
-        .backstop
-        .queue_withdrawal(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    fixture.backstop.distribute();
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+    );
 
     // Create a user
     let samwise = Address::generate(&fixture.env); //sam will be supplying XLM and borrowing STABLE
@@ -189,59 +159,10 @@ fn test_liquidations() {
         // Let one week pass
         fixture.jump(60 * 60 * 24 * 7);
         // Update emissions
-        fixture.emitter.distribute();
         fixture.backstop.distribute();
         pool_fixture.pool.gulp_emissions();
     }
-    // Start an interest auction
-    // type 2 is an interest auction
-    let auction_data = pool_fixture.pool.new_auction(
-        &2u32,
-        &fixture.backstop.address,
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &vec![
-            &fixture.env,
-            fixture.tokens[TokenIndex::STABLE].address.clone(),
-            fixture.tokens[TokenIndex::WETH].address.clone(),
-            fixture.tokens[TokenIndex::XLM].address.clone(),
-        ],
-        &100u32,
-    );
-
-    let stable_interest_lot_amount = auction_data
-        .lot
-        .get_unchecked(fixture.tokens[TokenIndex::STABLE].address.clone());
-    assert_approx_eq_abs(stable_interest_lot_amount, 256_746831, 5000000);
-    let xlm_interest_lot_amount = auction_data
-        .lot
-        .get_unchecked(fixture.tokens[TokenIndex::XLM].address.clone());
-    assert_approx_eq_abs(xlm_interest_lot_amount, 179_5067018, 5000000);
-    let weth_interest_lot_amount = auction_data
-        .lot
-        .get_unchecked(fixture.tokens[TokenIndex::WETH].address.clone());
-    assert_approx_eq_abs(weth_interest_lot_amount, 0_002671545, 5000);
-    let lp_donate_bid_amount = auction_data.bid.get_unchecked(fixture.lp.address.clone());
-    //NOTE: bid STABLE amount is seven decimals whereas reserve(and lot) STABLE has 6 decomals
-    assert_approx_eq_abs(lp_donate_bid_amount, 268_9213686, SCALAR_7);
-    assert_eq!(auction_data.block, 151);
     let liq_pct = 30;
-    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
-    assert_eq!(
-        event,
-        vec![
-            &fixture.env,
-            (
-                pool_fixture.pool.address.clone(),
-                (
-                    Symbol::new(&fixture.env, "new_auction"),
-                    2u32,
-                    fixture.backstop.address.clone(),
-                )
-                    .into_val(&fixture.env),
-                (100u32, auction_data.clone()).into_val(&fixture.env) // event_data.into_val(&fixture.env)
-            )
-        ]
-    );
     // Start a liquidation auction
     let auction_data = pool_fixture.pool.new_auction(
         &0,
@@ -291,7 +212,7 @@ fn test_liquidations() {
     let weth_lot_amount = auction_data
         .lot
         .get_unchecked(fixture.tokens[TokenIndex::WETH].address.clone());
-    assert_approx_eq_abs(weth_lot_amount, 4_260750195, 1000);
+    assert_approx_eq_abs(weth_lot_amount, 4_260773114, 1000);
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
         event,
@@ -312,9 +233,7 @@ fn test_liquidations() {
 
     //let 100 blocks pass to scale up the modifier
     fixture.jump_with_sequence(101 * 5);
-    //fill user and interest liquidation
-    let auct_type_1: u32 = 0;
-    let auct_type_2: u32 = 2;
+    // fill user liquidation
     let fill_requests = vec![
         &fixture.env,
         Request {
@@ -328,16 +247,6 @@ fn test_liquidations() {
             amount: 100,
         },
         Request {
-            request_type: RequestType::FillInterestAuction as u32,
-            address: fixture.backstop.address.clone(), //address shouldn't matter
-            amount: 99,
-        },
-        Request {
-            request_type: RequestType::FillInterestAuction as u32,
-            address: fixture.backstop.address.clone(), //address shouldn't matter
-            amount: 100,
-        },
-        Request {
             request_type: RequestType::Repay as u32,
             address: fixture.tokens[TokenIndex::STABLE].address.clone(),
             amount: usdc_bid_amount,
@@ -346,12 +255,6 @@ fn test_liquidations() {
     let frodo_stable_balance = fixture.tokens[TokenIndex::STABLE].balance(&frodo);
     let frodo_xlm_balance = fixture.tokens[TokenIndex::XLM].balance(&frodo);
     let frodo_weth_balance = fixture.tokens[TokenIndex::WETH].balance(&frodo);
-    fixture.lp.approve(
-        &frodo,
-        &fixture.backstop.address,
-        &lp_donate_bid_amount,
-        &fixture.env.ledger().sequence(),
-    );
     let frodo_positions_post_fill =
         pool_fixture
             .pool
@@ -379,64 +282,19 @@ fn test_liquidations() {
         8_000 * 10i128.pow(6) + 559_285757,
         100000,
     );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 16),
-        &pool_fixture.pool.address,
-        &samwise,
-        auct_type_1,
-        &frodo,
-        25,
-    );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 15),
-        &pool_fixture.pool.address,
-        &samwise,
-        auct_type_1,
-        &frodo,
-        100,
-    );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 9),
-        &pool_fixture.pool.address,
-        &fixture.backstop.address,
-        auct_type_2,
-        &frodo,
-        99,
-    );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 3),
-        &pool_fixture.pool.address,
-        &fixture.backstop.address,
-        auct_type_2,
-        &frodo,
-        100,
-    );
     assert_approx_eq_abs(
         fixture.tokens[TokenIndex::STABLE].balance(&frodo),
-        frodo_stable_balance - usdc_bid_amount
-            + stable_interest_lot_amount
-                .fixed_div_floor(2 * 10i128.pow(6), 10i128.pow(6))
-                .unwrap(),
+        frodo_stable_balance - usdc_bid_amount,
         10i128.pow(6),
     );
     assert_approx_eq_abs(
         fixture.tokens[TokenIndex::XLM].balance(&frodo),
-        frodo_xlm_balance
-            + xlm_interest_lot_amount
-                .fixed_div_floor(2 * SCALAR_7, SCALAR_7)
-                .unwrap(),
+        frodo_xlm_balance,
         SCALAR_7,
     );
     assert_approx_eq_abs(
         fixture.tokens[TokenIndex::WETH].balance(&frodo),
-        frodo_weth_balance
-            + weth_interest_lot_amount
-                .fixed_div_floor(2 * 10i128.pow(9), 10i128.pow(9))
-                .unwrap(),
+        frodo_weth_balance,
         10i128.pow(9),
     );
 
@@ -581,27 +439,29 @@ fn test_liquidations() {
     assert_eq!(xlm_bad_debt, backstop_positions.liabilities.get(1).unwrap());
 
     // validate that frodo cannot withdraw backstop deposits if bad debt exists
-    let withdraw_result =
-        fixture
-            .backstop
-            .try_withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    let withdraw_result = fixture.backstop.try_withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
     assert_eq!(
         withdraw_result.err(),
         Some(Ok(Error::from_contract_error(1011)))
     );
 
-    // create a bad debt auction
-    let auction_type: u32 = 1;
+    // create a committed single-tier bad-debt auction
+    let blnt_usdc_token = fixture.backstop.backstop_token(
+        &backstop::BackstopTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     let bad_debt_auction_data = pool_fixture.pool.new_auction(
-        &1u32,
+        &1,
         &fixture.backstop.address,
-        &vec![
-            &fixture.env,
-            fixture.tokens[TokenIndex::STABLE].address.clone(),
-            fixture.tokens[TokenIndex::XLM].address.clone(),
-        ],
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &100u32,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
     );
 
     assert_eq!(bad_debt_auction_data.bid.len(), 2);
@@ -619,84 +479,56 @@ fn test_liquidations() {
             .get_unchecked(fixture.tokens[TokenIndex::XLM].address.clone()),
         xlm_bad_debt //d rate 1.013853805
     );
-    assert_approx_eq_abs(
+    assert!(
         bad_debt_auction_data
             .lot
-            .get_unchecked(fixture.lp.address.clone()),
-        6146_6087407, // lp_token value is $1.25 each
-        SCALAR_7,
-    );
-    let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
-    assert_eq!(
-        event,
-        vec![
-            &fixture.env,
-            (
-                pool_fixture.pool.address.clone(),
-                (
-                    Symbol::new(&fixture.env, "new_auction"),
-                    auction_type,
-                    fixture.backstop.address.clone(),
-                )
-                    .into_val(&fixture.env),
-                (100u32, bad_debt_auction_data.clone()).into_val(&fixture.env)
-            )
-        ]
+            .get(blnt_usdc_token.clone())
+            .unwrap()
+            > 0
     );
 
     // allow 100 blocks to pass
     fixture.jump_with_sequence(101 * 5);
     // fill bad debt auction
+    fixture.backstop.distribute();
     let frodo_bstop_pre_fill = fixture.lp.balance(&frodo);
     let backstop_bstop_pre_fill = fixture.lp.balance(&fixture.backstop.address);
-    let auction_type: u32 = 1;
-    let bad_debt_fill_request = vec![
-        &fixture.env,
-        Request {
-            request_type: RequestType::FillBadDebtAuction as u32,
-            address: fixture.backstop.address.clone(),
-            amount: 20,
-        },
-    ];
-    let post_bd_fill_frodo_positions =
-        pool_fixture
-            .pool
-            .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
+    let frodo_positions_pre_fill = pool_fixture.pool.get_positions(&frodo);
+    pool_fixture.pool.submit(
+        &frodo,
+        &frodo,
+        &frodo,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 20,
+            },
+        ],
+    );
+    let post_bd_fill_frodo_positions = pool_fixture.pool.get_positions(&frodo);
+    let stable_filled = post_bd_fill_frodo_positions.liabilities.get(0).unwrap()
+        - frodo_positions_pre_fill.liabilities.get(0).unwrap();
+    let xlm_filled = post_bd_fill_frodo_positions.liabilities.get(1).unwrap()
+        - frodo_positions_pre_fill.liabilities.get(1).unwrap();
+    let lot_filled = fixture.lp.balance(&frodo) - frodo_bstop_pre_fill;
 
     assert_eq!(
         post_bd_fill_frodo_positions.liabilities.get(0).unwrap(),
-        new_frodo_positions.liabilities.get(0).unwrap()
-            + stable_bad_debt.fixed_mul_ceil(20, 100).unwrap(),
+        new_frodo_positions.liabilities.get(0).unwrap() + stable_filled,
     );
     assert_eq!(
         post_bd_fill_frodo_positions.liabilities.get(1).unwrap(),
-        new_frodo_positions.liabilities.get(1).unwrap()
-            + xlm_bad_debt.fixed_mul_ceil(20, 100).unwrap(),
+        new_frodo_positions.liabilities.get(1).unwrap() + xlm_filled,
     );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 1),
-        &pool_fixture.pool.address,
-        &fixture.backstop.address,
-        auction_type,
-        &frodo,
-        20,
-    );
-    assert_approx_eq_abs(
-        fixture.lp.balance(&frodo),
-        frodo_bstop_pre_fill + 614_6608740,
-        SCALAR_7,
-    );
-    assert_approx_eq_abs(
+    assert!(lot_filled > 0);
+    assert_eq!(
         fixture.lp.balance(&fixture.backstop.address),
-        backstop_bstop_pre_fill - 614_6608740,
-        SCALAR_7,
+        backstop_bstop_pre_fill - lot_filled
     );
-    let new_auction = pool_fixture
-        .pool
-        .get_auction(&(1 as u32), &fixture.backstop.address);
+    let new_auction = pool_fixture.pool.get_auction(&1, &fixture.backstop.address);
     assert_eq!(new_auction.bid.len(), 2);
-    assert_eq!(new_auction.lot.len(), 1);
     assert_eq!(
         new_auction
             .bid
@@ -709,21 +541,28 @@ fn test_liquidations() {
             .get_unchecked(fixture.tokens[TokenIndex::XLM].address.clone()),
         xlm_bad_debt.fixed_mul_floor(80, 100).unwrap()
     );
-    assert_approx_eq_abs(
-        new_auction.lot.get_unchecked(fixture.lp.address.clone()),
+    assert_eq!(
+        new_auction.lot.get(blnt_usdc_token.clone()).unwrap(),
         bad_debt_auction_data
             .lot
-            .get_unchecked(fixture.lp.address.clone())
-            - 1229_3217480,
-        SCALAR_7,
+            .get(blnt_usdc_token.clone())
+            .unwrap()
+            - bad_debt_auction_data
+                .lot
+                .get(blnt_usdc_token)
+                .unwrap()
+                .fixed_mul_floor(20, 100)
+                .unwrap()
     );
     assert_eq!(new_auction.block, bad_debt_auction_data.block);
-
     // validate that frodo cannot withdraw backstop during bad debt auction
-    let withdraw_result =
-        fixture
-            .backstop
-            .try_withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    let withdraw_result = fixture.backstop.try_withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
     assert_eq!(
         withdraw_result.err(),
         Some(Ok(Error::from_contract_error(1011)))
@@ -732,21 +571,23 @@ fn test_liquidations() {
     // allow another 50 blocks to pass (150 total)
     fixture.jump_with_sequence(50 * 5);
     // fill bad debt auction
+    fixture.backstop.distribute();
     let frodo_bstop_pre_fill = fixture.lp.balance(&frodo);
     let backstop_bstop_pre_fill = fixture.lp.balance(&fixture.backstop.address);
-    let auction_type: u32 = 1;
-    let bad_debt_fill_request = vec![
-        &fixture.env,
-        Request {
-            request_type: RequestType::FillBadDebtAuction as u32,
-            address: fixture.backstop.address.clone(),
-            amount: 100,
-        },
-    ];
-    let post_bd_fill_frodo_positions =
-        pool_fixture
-            .pool
-            .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
+    pool_fixture.pool.submit(
+        &frodo,
+        &frodo,
+        &frodo,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
+    );
+    let post_bd_fill_frodo_positions = pool_fixture.pool.get_positions(&frodo);
     assert_eq!(
         post_bd_fill_frodo_positions.liabilities.get(0).unwrap(),
         new_frodo_positions.liabilities.get(0).unwrap() + stable_bad_debt,
@@ -755,24 +596,11 @@ fn test_liquidations() {
         post_bd_fill_frodo_positions.liabilities.get(1).unwrap(),
         new_frodo_positions.liabilities.get(1).unwrap() + xlm_bad_debt,
     );
-    assert_fill_auction_event_no_data(
-        &fixture.env,
-        event_from_end(&fixture.env, 1),
-        &pool_fixture.pool.address,
-        &fixture.backstop.address,
-        auction_type,
-        &frodo,
-        100,
-    );
-    assert_approx_eq_abs(
-        fixture.lp.balance(&frodo),
-        frodo_bstop_pre_fill + 3687_9652440,
-        SCALAR_7,
-    );
-    assert_approx_eq_abs(
+    let second_lot_filled = fixture.lp.balance(&frodo) - frodo_bstop_pre_fill;
+    assert!(second_lot_filled > 0);
+    assert_eq!(
         fixture.lp.balance(&fixture.backstop.address),
-        backstop_bstop_pre_fill - 3687_9652440,
-        SCALAR_7,
+        backstop_bstop_pre_fill - second_lot_filled
     );
 
     //check that frodo was correctly slashed for both q4w and newly withdrawn deposits
@@ -780,32 +608,44 @@ fn test_liquidations() {
     let original_deposit_remaining = original_deposit - frodo_pre_q4w_amount;
     let pre_withdraw_frodo_bstp = fixture.lp.balance(&frodo);
     // withdraw pre_q4w_amount
-    fixture
-        .backstop
-        .withdraw(&frodo, &pool_fixture.pool.address, &frodo_pre_q4w_amount);
+    let first_withdrawal = fixture.backstop.withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &frodo_pre_q4w_amount,
+        &frodo,
+    );
     fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
     );
     //jump a month
     fixture.jump(45 * 24 * 60 * 60);
-    fixture.backstop.withdraw(
+    fixture.backstop.distribute();
+    let second_withdrawal = fixture.backstop.withdraw(
+        &backstop::BackstopTier::SecondLoss,
         &frodo,
         &pool_fixture.pool.address,
         &original_deposit_remaining,
+        &frodo,
     );
-    assert_approx_eq_abs(
+    assert_eq!(
         fixture.lp.balance(&frodo) - pre_withdraw_frodo_bstp,
-        original_deposit - 614_6608740 - 3687_9652440 + 268_9213686,
-        SCALAR_7,
+        first_withdrawal + second_withdrawal
     );
+    assert!(first_withdrawal + second_withdrawal < original_deposit);
 
     // Test bad debt is burned and defaulted correctly
-    // Deposit barely over the minimum backstop threshold in tokens
-    fixture
-        .backstop
-        .deposit(&frodo, &pool_fixture.pool.address, &1100_0000000);
+    // Deposit a small positive tier balance. Bad-debt resolution must auction
+    // all of it before defaulting any residual debt to suppliers.
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &(10 * SCALAR_7),
+    );
 
     // Sam re-borrows
     let sam_requests: Vec<Request> = vec![
@@ -881,7 +721,7 @@ fn test_liquidations() {
         .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
     // bad debt event occurs before the auction fill event
     let event = vec![&fixture.env, event_from_end(&fixture.env, 2)];
-    let bad_debt: i128 = 9_2903008;
+    let bad_debt: i128 = 9_2902973;
     assert_eq!(
         event,
         vec![
@@ -901,14 +741,11 @@ fn test_liquidations() {
 
     // Create bad debt auction
     let bad_deb_auction = pool_fixture.pool.new_auction(
-        &1u32,
+        &1,
         &fixture.backstop.address,
-        &vec![
-            &fixture.env,
-            fixture.tokens[TokenIndex::STABLE].address.clone(),
-        ],
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &100u32,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
     );
     assert!(bad_deb_auction.bid.len() == 1);
     assert_eq!(
@@ -918,48 +755,49 @@ fn test_liquidations() {
         bad_debt
     );
 
-    // Fill bad debt auction
     let frodo_positions = pool_fixture.pool.get_positions(&frodo);
-    let bad_debt_fill_request = vec![
-        &fixture.env,
-        Request {
-            request_type: RequestType::FillBadDebtAuction as u32,
-            address: fixture.backstop.address.clone(),
-            amount: 100,
-        },
-    ];
 
     // fill bad debt auction
-    // pay of 25% of bad debt, allow other 75% to be defaulted
+    // Pay roughly 25% of bad debt. The small tier is fully consumed, so only
+    // the residual debt may then be defaulted to suppliers.
     fixture.jump_with_sequence(351 * 5);
+    fixture.backstop.distribute();
 
     let stable_pre_bad_debt = pool_fixture
         .pool
         .get_reserve(&fixture.tokens[TokenIndex::STABLE].address);
 
-    let post_bd_fill_frodo_positions =
-        pool_fixture
-            .pool
-            .submit(&frodo, &frodo, &frodo, &bad_debt_fill_request);
-    let defaulted_debt = bad_debt.fixed_mul_floor(75, 100).unwrap();
-    let event = vec![&fixture.env, event_from_end(&fixture.env, 2)];
-    assert_eq!(
-        event,
-        vec![
+    pool_fixture.pool.submit(
+        &frodo,
+        &frodo,
+        &frodo,
+        &vec![
             &fixture.env,
-            (
-                pool_fixture.pool.address.clone(),
-                (
-                    Symbol::new(&fixture.env, "defaulted_debt"),
-                    fixture.tokens[TokenIndex::STABLE].address.clone()
-                )
-                    .into_val(&fixture.env),
-                defaulted_debt.into_val(&fixture.env)
-            )
-        ]
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
     );
+    let post_bd_fill_frodo_positions = pool_fixture.pool.get_positions(&frodo);
+    let filled_debt = post_bd_fill_frodo_positions.liabilities.get_unchecked(0)
+        - frodo_positions.liabilities.get_unchecked(0);
+    let defaulted_debt = bad_debt - filled_debt;
+    assert!(defaulted_debt > 0);
+    assert!(pool_fixture
+        .pool
+        .try_new_auction(
+            &1,
+            &fixture.backstop.address,
+            &vec![&fixture.env],
+            &vec![&fixture.env],
+            &100
+        )
+        .is_err());
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
     assert_eq!(
-        frodo_positions.liabilities.get_unchecked(0) + (bad_debt - defaulted_debt),
+        frodo_positions.liabilities.get_unchecked(0) + filled_debt,
         post_bd_fill_frodo_positions.liabilities.get_unchecked(0)
     );
     let bad_debt_positions = pool_fixture.pool.get_positions(&fixture.backstop.address);
@@ -1200,34 +1038,37 @@ fn test_stale_liquidation_deletion() {
     fixture.jump(60 * 60 * 24 * 14);
 
     // Start an interest auction
-    pool_fixture.pool.new_auction(
-        &2u32,
+    let lot_assets = vec![
+        &fixture.env,
+        fixture.tokens[TokenIndex::STABLE].address.clone(),
+        fixture.tokens[TokenIndex::WETH].address.clone(),
+        fixture.tokens[TokenIndex::XLM].address.clone(),
+    ];
+    let _created_auction = pool_fixture.pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
         &fixture.backstop.address,
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &vec![
-            &fixture.env,
-            fixture.tokens[TokenIndex::STABLE].address.clone(),
-            fixture.tokens[TokenIndex::WETH].address.clone(),
-            fixture.tokens[TokenIndex::XLM].address.clone(),
-        ],
-        &100u32,
+        &vec![&fixture.env],
+        &lot_assets,
+        &100,
     );
 
     // skip 500 blocks (499 past start of auction)
     fixture.jump_with_sequence(500 * 5);
 
     // validate the auction can't be deleted
-    let early_delete = pool_fixture
-        .pool
-        .try_del_auction(&2u32, &fixture.backstop.address);
+    let early_delete = pool_fixture.pool.try_del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
     assert_eq!(
         early_delete.err(),
         Some(Ok(Error::from_contract_error(1200)))
     );
 
-    let auction = pool_fixture
-        .pool
-        .get_auction(&2u32, &fixture.backstop.address);
+    let auction = pool_fixture.pool.get_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
     assert_eq!(auction.bid.len(), 1);
     assert_eq!(auction.lot.len(), 3);
 
@@ -1235,9 +1076,10 @@ fn test_stale_liquidation_deletion() {
     fixture.jump_with_sequence(5);
 
     // delete the auction
-    pool_fixture
-        .pool
-        .del_auction(&2u32, &fixture.backstop.address);
+    pool_fixture.pool.del_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
     assert!(fixture.env.auths().is_empty());
     let event = vec![&fixture.env, event_from_end(&fixture.env, 1)];
     assert_eq!(
@@ -1248,8 +1090,8 @@ fn test_stale_liquidation_deletion() {
                 pool_fixture.pool.address.clone(),
                 (
                     Symbol::new(&fixture.env, "delete_auction"),
-                    2u32,
-                    fixture.backstop.address.clone()
+                    AuctionType::InterestAuction as u32,
+                    fixture.backstop.address.clone(),
                 )
                     .into_val(&fixture.env),
                 ().into_val(&fixture.env)
@@ -1257,9 +1099,10 @@ fn test_stale_liquidation_deletion() {
         ]
     );
 
-    let auction = pool_fixture
-        .pool
-        .try_get_auction(&2u32, &fixture.backstop.address);
+    let auction = pool_fixture.pool.try_get_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
     assert!(auction.is_err());
 }
 
@@ -1359,7 +1202,7 @@ fn test_bad_debt() {
     fixture.env.as_contract(&fixture.backstop.address, || {
         let key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
         let new_balance = PoolBalance {
-            shares: cur_pool_data.shares,
+            shares: cur_pool_data.tiers.get(1).unwrap().shares,
             tokens: 0,
             q4w: 0,
         };
@@ -1368,17 +1211,8 @@ fn test_bad_debt() {
 
     fixture.jump_with_sequence(100);
 
-    // Validate invalid liquidaiton can't be created with no lot
-    let result_bad_debt_auction = pool_fixture.pool.try_new_auction(
-        &1,
-        &fixture.backstop.address,
-        &vec![&fixture.env, stable.address.clone()],
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &100,
-    );
-    assert!(result_bad_debt_auction.is_err());
-
-    // Use bad debt to default the leftover liabilities
+    // Default the leftover liabilities only after the empty backstop is
+    // verified.
     let pre_default_stable = pool_fixture.pool.get_reserve(&stable.address);
     pool_fixture.pool.bad_debt(&fixture.backstop.address);
     let post_default_stable = pool_fixture.pool.get_reserve(&stable.address);

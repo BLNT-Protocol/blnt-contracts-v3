@@ -3,14 +3,14 @@
 use soroban_sdk::{contractclient, contracttype, Address, Env, Symbol, Vec};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PriceData {
     pub price: i128,
     pub timestamp: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
+#[contracttype(export = false)]
 pub enum Asset {
     Stellar(Address),
     Other(Symbol),

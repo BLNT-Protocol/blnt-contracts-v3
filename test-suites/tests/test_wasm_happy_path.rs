@@ -1,13 +1,848 @@
 #![cfg(test)]
 
-use pool::{Request, RequestType};
+use backstop::{BackstopDataKey, BackstopTier as BackstopContractTier, PoolBalance};
+use pool::{PoolDataKey, Positions, Request, RequestType, ReserveData};
+use pool_factory::{BackstopAsset, BackstopTierConfig};
+use sep_40_oracle::testutils::Asset;
+use sep_41_token::StellarAssetClient;
 use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{testutils::Address as _, vec, Address};
-use test_suites::{
-    assertions::assert_approx_eq_abs,
-    create_fixture_with_data,
-    test_fixture::{TokenIndex, SCALAR_12, SCALAR_7},
+use soroban_sdk::{
+    contracttype, map,
+    testutils::{Address as _, Ledger},
+    vec, Address, String, Symbol,
 };
+
+const PROTOCOL_INTEREST_FEE_RATE: i128 = 20_000;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+struct ProtocolFeeDataView {
+    credit: i128,
+    carry: i128,
+}
+
+fn protocol_fee_data(fixture: &TestFixture, asset: &Address) -> ProtocolFeeDataView {
+    let pool = &fixture.pools[0].pool.address;
+    fixture.env.as_contract(pool, || {
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .get::<PoolDataKey, soroban_sdk::Map<Address, ProtocolFeeDataView>>(
+                &PoolDataKey::ProtocolFees,
+            )
+            .and_then(|data| data.get(asset.clone()))
+            .unwrap_or(ProtocolFeeDataView {
+                credit: 0,
+                carry: 0,
+            })
+    })
+}
+
+fn preview_protocol_fee_credit(
+    stored: &ReserveData,
+    preview: &ReserveData,
+    stored_fee: &ProtocolFeeDataView,
+) -> i128 {
+    let stored_liabilities = stored
+        .d_supply
+        .fixed_mul_ceil(stored.d_rate, SCALAR_12)
+        .unwrap();
+    let preview_liabilities = preview
+        .d_supply
+        .fixed_mul_ceil(preview.d_rate, SCALAR_12)
+        .unwrap();
+    let accrued_interest = preview_liabilities - stored_liabilities;
+    let new_fee = (accrued_interest * PROTOCOL_INTEREST_FEE_RATE + stored_fee.carry) / SCALAR_7;
+    stored_fee.credit + new_fee
+}
+use test_suites::{
+    assertions::{assert_approx_eq_abs, assert_approx_eq_rel},
+    create_fixture_with_data,
+    pool::default_reserve_metadata,
+    test_fixture::{TestFixture, TokenIndex, SCALAR_12, SCALAR_7},
+};
+
+#[test]
+fn test_wasm_deauthorized_usdc_loses_value_and_releases_selected_auction() {
+    let mut fixture = TestFixture::create(true);
+    fixture.backstop_config = vec![
+        &fixture.env,
+        BackstopTierConfig {
+            asset: BackstopAsset::Usdc,
+            take_rate_weight: 1,
+        },
+    ];
+    fixture.create_pool(
+        String::from_str(&fixture.env, "USDC authorization"),
+        0_1000000,
+        6,
+        0,
+    );
+    let mut stable_config = default_reserve_metadata();
+    stable_config.decimals = 6;
+    fixture.create_pool_reserve(0, TokenIndex::STABLE, &stable_config);
+
+    let depositor = fixture.users[0].clone();
+    let pool = &fixture.pools[0].pool;
+    let usdc = &fixture.tokens[TokenIndex::USDC];
+    let amount = 12_500 * SCALAR_7;
+    usdc.mint(&depositor, &amount);
+    fixture.backstop.deposit(
+        &BackstopContractTier::FirstLoss,
+        &depositor,
+        &pool.address,
+        &amount,
+    );
+    assert_eq!(
+        fixture.backstop.pool_data(&pool.address).active_value,
+        amount
+    );
+    pool.set_status(&3);
+    assert_eq!(pool.update_status(), 1);
+
+    let positions = Positions {
+        liabilities: map![&fixture.env, (0, 50 * 10i128.pow(6))],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+    });
+    let auction = pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    assert!(auction.lot.get(usdc.address.clone()).unwrap() > 0);
+
+    StellarAssetClient::new(&fixture.env, &usdc.address)
+        .set_authorized(&fixture.backstop.address, &false);
+    assert_eq!(fixture.backstop.pool_data(&pool.address).active_value, 0);
+    assert_eq!(pool.update_status(), 3);
+    assert!(fixture
+        .backstop
+        .try_add_reward(&pool.address, &None)
+        .is_err());
+    pool.del_auction(&1, &fixture.backstop.address);
+    assert!(pool.try_get_auction(&1, &fixture.backstop.address).is_err());
+
+    StellarAssetClient::new(&fixture.env, &usdc.address)
+        .set_authorized(&fixture.backstop.address, &true);
+    assert_eq!(
+        fixture.backstop.pool_data(&pool.address).active_value,
+        amount
+    );
+    assert_eq!(pool.update_status(), 1);
+    fixture.backstop.add_reward(&pool.address, &None);
+}
+
+#[test]
+fn test_wasm_reconciles_direct_reserve_custody_loss() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let stored = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    let stored_fee = protocol_fee_data(&fixture, &stable.address);
+    let accrued = pool_fixture.pool.get_reserve(&stable.address).data;
+    let loss = 100_000_i128;
+    let protocol_credit = preview_protocol_fee_credit(&stored, &accrued, &stored_fee);
+    let supplier_loss = loss - core::cmp::min(loss, protocol_credit);
+    let expected_b_rate_loss = supplier_loss
+        .fixed_div_ceil(accrued.b_supply, SCALAR_12)
+        .unwrap();
+
+    stable.burn(&pool_fixture.pool.address, &loss);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), loss);
+
+    let reconciled = pool_fixture.pool.get_reserve(&stable.address).data;
+    assert_eq!(reconciled.b_rate, accrued.b_rate - expected_b_rate_loss);
+    assert_eq!(reconciled.b_supply, accrued.b_supply);
+    assert_eq!(reconciled.d_supply, accrued.d_supply);
+    assert_eq!(reconciled.backstop_credit, accrued.backstop_credit);
+    assert_eq!(protocol_fee_data(&fixture, &stable.address).credit, 0);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), 0);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1223)")]
+fn test_wasm_rejects_supply_below_operational_b_rate() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let before = pool_fixture.pool.get_reserve(&stable.address).data;
+    let supplier_claim = before
+        .b_supply
+        .fixed_mul_floor(before.b_rate, SCALAR_12)
+        .unwrap();
+    let target_claim = supplier_claim / 20;
+    let loss = supplier_claim - target_claim;
+
+    // Credit a direct recovery first so the pool has enough custody to incur
+    // a supplier loss that leaves a positive rate below the 0.1 floor.
+    stable.mint(&pool_fixture.pool.address, &supplier_claim);
+    assert_eq!(pool_fixture.pool.gulp(&stable.address), supplier_claim);
+    stable.burn(&pool_fixture.pool.address, &loss);
+    assert_eq!(pool_fixture.pool.reconcile_loss(&stable.address), loss);
+
+    let impaired = pool_fixture.pool.get_reserve(&stable.address).data;
+    assert!(impaired.b_rate > 0);
+    assert!(impaired.b_rate < 100_000_000_000);
+
+    let supplier = Address::generate(&fixture.env);
+    let amount = 10i128.pow(6);
+    stable.mint(&supplier, &amount);
+    pool_fixture.pool.submit(
+        &supplier,
+        &supplier,
+        &supplier,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::Supply as u32,
+                address: stable.address.clone(),
+                amount,
+            },
+        ],
+    );
+}
+
+#[test]
+fn test_wasm_zero_supply_debt_interest_accrues_to_backstop() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = &fixture.tokens[TokenIndex::STABLE];
+    let debt = 50 * SCALAR_7;
+    let initial_credit = 60 * SCALAR_7;
+    let now = fixture.env.ledger().timestamp();
+    let stored_fee = protocol_fee_data(&fixture, &stable.address);
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        let key = PoolDataKey::ResData(stable.address.clone());
+        let mut reserve: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
+        reserve.b_rate = 0;
+        reserve.b_supply = 0;
+        reserve.d_rate = SCALAR_12;
+        reserve.d_supply = debt;
+        reserve.backstop_credit = initial_credit;
+        reserve.ir_mod = SCALAR_7;
+        reserve.last_time = now;
+        fixture.env.storage().persistent().set(&key, &reserve);
+    });
+
+    fixture.jump(24 * 60 * 60);
+    let accrued = pool_fixture.pool.get_reserve(&stable.address).data;
+    let liabilities = debt.fixed_mul_ceil(accrued.d_rate, SCALAR_12).unwrap();
+    let interest = liabilities - debt;
+
+    assert_eq!(accrued.b_rate, 0);
+    assert_eq!(accrued.b_supply, 0);
+    assert!(accrued.d_rate > SCALAR_12);
+    assert!(interest > 0);
+    let protocol_fee = (interest * PROTOCOL_INTEREST_FEE_RATE + stored_fee.carry) / SCALAR_7;
+    assert_eq!(
+        accrued.backstop_credit,
+        initial_credit + interest - protocol_fee
+    );
+}
+
+#[test]
+fn test_wasm_prepares_and_releases_bad_debt_lot() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let debt = 50 * 10i128.pow(6);
+    let positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+    });
+
+    let auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    let blnt_usdc_token = fixture.backstop.backstop_token(
+        &BackstopContractTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
+    assert!(auction.lot.get(blnt_usdc_token).unwrap() > 0);
+    assert!(!pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 500);
+    pool_fixture.pool.del_auction(&1, &fixture.backstop.address);
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
+    assert!(!pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+}
+
+#[test]
+fn test_wasm_partially_and_completely_fills_bad_debt_lot() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let filler = fixture.users[0].clone();
+    let unhealthy_filler = Address::generate(&fixture.env);
+    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let debt = 50 * 10i128.pow(6);
+    let positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+    });
+
+    let auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    let blnt_usdc_token = fixture.backstop.backstop_token(
+        &BackstopContractTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
+    let base_lot_amount = auction.lot.get(blnt_usdc_token.clone()).unwrap();
+    let filler_positions_before = pool_fixture.pool.get_positions(&filler);
+    let filler_lp_before = fixture.lp.balance(&filler);
+    let tier_assets_before = fixture
+        .backstop
+        .pool_data(&pool_fixture.pool.address)
+        .tiers
+        .get(1)
+        .unwrap()
+        .tokens;
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 100);
+    fixture.backstop.distribute();
+    assert!(pool_fixture
+        .pool
+        .try_submit(
+            &unhealthy_filler,
+            &unhealthy_filler,
+            &unhealthy_filler,
+            &vec![
+                &fixture.env,
+                Request {
+                    request_type: RequestType::FillBadDebtAuction as u32,
+                    address: fixture.backstop.address.clone(),
+                    amount: 50,
+                },
+            ],
+        )
+        .is_err());
+    assert_eq!(
+        pool_fixture.pool.get_auction(&1, &fixture.backstop.address),
+        auction
+    );
+    assert_eq!(fixture.lp.balance(&unhealthy_filler), 0);
+
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 50,
+            },
+        ],
+    );
+    let filler_positions_after_first = pool_fixture.pool.get_positions(&filler);
+    let first_bid = filler_positions_after_first
+        .liabilities
+        .get(stable_index)
+        .unwrap()
+        - filler_positions_before
+            .liabilities
+            .get(stable_index)
+            .unwrap_or(0);
+    let first_base_lot = base_lot_amount / 2;
+    let first_lot = fixture.lp.balance(&filler) - filler_lp_before;
+    assert_eq!(first_bid, (debt + 1) / 2);
+    assert_eq!(first_lot, first_base_lot / 2);
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_data(&pool_fixture.pool.address)
+            .tiers
+            .get(1)
+            .unwrap()
+            .tokens,
+        tier_assets_before - first_lot
+    );
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_positions(&fixture.backstop.address)
+            .liabilities
+            .get(stable_index),
+        Some(debt - first_bid)
+    );
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_positions(&filler)
+            .liabilities
+            .get(stable_index),
+        Some(
+            filler_positions_before
+                .liabilities
+                .get(stable_index)
+                .unwrap_or(0)
+                + first_bid
+        )
+    );
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_auction(&1, &fixture.backstop.address)
+            .lot
+            .get(blnt_usdc_token)
+            .unwrap(),
+        base_lot_amount - first_base_lot
+    );
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(auction.block + 300);
+    let lp_before_second = fixture.lp.balance(&filler);
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
+    );
+    let second_lot = fixture.lp.balance(&filler) - lp_before_second;
+    assert!(second_lot > 0);
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
+    let remaining_debt = pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .get(stable_index)
+        .unwrap();
+    assert!(remaining_debt > 0);
+
+    let continued_auction = pool_fixture.pool.new_auction(
+        &1,
+        &fixture.backstop.address,
+        &vec![&fixture.env],
+        &vec![&fixture.env],
+        &100,
+    );
+    assert_eq!(continued_auction.lot.len(), 1);
+    assert_eq!(
+        continued_auction.bid.get(stable.clone()),
+        Some(remaining_debt)
+    );
+
+    fixture
+        .env
+        .ledger()
+        .set_sequence_number(continued_auction.block + 200);
+    let lp_before_third = fixture.lp.balance(&filler);
+    pool_fixture.pool.submit(
+        &filler,
+        &filler,
+        &filler,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillBadDebtAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
+    );
+    assert!(fixture.lp.balance(&filler) > lp_before_third);
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+}
+
+#[test]
+fn test_wasm_defaults_suppliers_only_after_verified_tier_exhaustion() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let frodo = fixture.users[0].clone();
+    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let deposited_shares = 50_000 * SCALAR_7;
+
+    fixture.backstop.distribute();
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &deposited_shares,
+    );
+    fixture.jump(17 * 24 * 60 * 60 + 1);
+    fixture.backstop.distribute();
+    fixture.backstop.withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &deposited_shares,
+        &frodo,
+    );
+    assert_eq!(
+        fixture
+            .backstop
+            .pool_data(&pool_fixture.pool.address)
+            .tiers
+            .get(1)
+            .unwrap()
+            .tokens,
+        0
+    );
+    // Force the supplier-loss path to obtain a valuation quote from a positive
+    // tier before the test explicitly exhausts it.
+    fixture.backstop.deposit(
+        &BackstopContractTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &SCALAR_7,
+    );
+
+    let debt = 50 * 10i128.pow(6);
+    let mut frodo_positions = pool_fixture.pool.get_positions(&frodo);
+    let frodo_debt = frodo_positions.liabilities.get(stable_index).unwrap();
+    frodo_positions
+        .liabilities
+        .set(stable_index, frodo_debt - debt);
+    let backstop_positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .set(&PoolDataKey::Positions(frodo.clone()), &frodo_positions);
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &backstop_positions,
+        );
+    });
+
+    let reserve_before_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    let tier_state = fixture
+        .backstop
+        .pool_data(&pool_fixture.pool.address)
+        .tiers
+        .get(1)
+        .unwrap();
+    let tier_key = BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone());
+    fixture.env.as_contract(&fixture.backstop.address, || {
+        fixture.env.storage().persistent().set(
+            &tier_key,
+            &PoolBalance {
+                q4w: 0,
+                shares: tier_state.shares,
+                tokens: i128::MAX,
+            },
+        );
+    });
+    assert!(pool_fixture
+        .pool
+        .try_bad_debt(&fixture.backstop.address)
+        .is_err());
+    let positions_after_failure = pool_fixture.pool.get_positions(&fixture.backstop.address);
+    assert_eq!(
+        positions_after_failure.liabilities,
+        backstop_positions.liabilities
+    );
+    assert_eq!(
+        positions_after_failure.collateral,
+        backstop_positions.collateral
+    );
+    assert_eq!(positions_after_failure.supply, backstop_positions.supply);
+    let reserve_after_failure = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    assert_eq!(
+        reserve_after_failure.d_supply,
+        reserve_before_failure.d_supply
+    );
+    assert_eq!(
+        reserve_after_failure.b_supply,
+        reserve_before_failure.b_supply
+    );
+    assert_eq!(reserve_after_failure.d_rate, reserve_before_failure.d_rate);
+    assert_eq!(reserve_after_failure.b_rate, reserve_before_failure.b_rate);
+    assert_eq!(
+        reserve_after_failure.last_time,
+        reserve_before_failure.last_time
+    );
+    assert!(pool_fixture
+        .pool
+        .try_get_auction(&1, &fixture.backstop.address)
+        .is_err());
+
+    // Restore a valid, exhausted tier. Supplier default is allowed only once
+    // no positively valued tier remains.
+    fixture.env.as_contract(&fixture.backstop.address, || {
+        fixture.env.storage().persistent().set(
+            &tier_key,
+            &PoolBalance {
+                q4w: 0,
+                shares: 0,
+                tokens: 0,
+            },
+        );
+    });
+    let accrued_reserve = pool_fixture.pool.get_reserve(&stable);
+    let pool_stable_before = fixture.tokens[TokenIndex::STABLE].balance(&pool_fixture.pool.address);
+    let backstop_stable_before =
+        fixture.tokens[TokenIndex::STABLE].balance(&fixture.backstop.address);
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
+
+    let default_underlying = debt
+        .fixed_mul_ceil(accrued_reserve.data.d_rate, SCALAR_12)
+        .unwrap();
+    let b_rate_loss = default_underlying
+        .fixed_div_ceil(accrued_reserve.data.b_supply, SCALAR_12)
+        .unwrap();
+    let expected_b_rate = (accrued_reserve.data.b_rate - b_rate_loss).max(0);
+    let reserve_after = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    assert_eq!(reserve_after.d_supply, accrued_reserve.data.d_supply - debt);
+    assert_eq!(reserve_after.b_supply, accrued_reserve.data.b_supply);
+    assert_eq!(reserve_after.b_rate, expected_b_rate);
+    assert_eq!(
+        fixture.tokens[TokenIndex::STABLE].balance(&pool_fixture.pool.address),
+        pool_stable_before
+    );
+    assert_eq!(
+        fixture.tokens[TokenIndex::STABLE].balance(&fixture.backstop.address),
+        backstop_stable_before
+    );
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+    let dust = 1_i128;
+    let dust_positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, dust)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        let key = PoolDataKey::ResData(stable.clone());
+        let mut reserve: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
+        reserve.d_supply += dust;
+        fixture.env.storage().persistent().set(&key, &reserve);
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &dust_positions,
+        );
+    });
+    fixture.oracle.set_price_stable(&vec![
+        &fixture.env,
+        2000 * SCALAR_7,
+        SCALAR_7,
+        SCALAR_7 / 10,
+        1,
+    ]);
+
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+}
+
+#[test]
+fn test_wasm_max_reserve_supplier_default_fits_mainnet_invocation_limits() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let frodo = fixture.users[0].clone();
+    let deposited_shares = 50_000 * SCALAR_7;
+
+    fixture.backstop.distribute();
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &deposited_shares,
+    );
+    fixture.jump(17 * 24 * 60 * 60 + 1);
+    fixture.backstop.distribute();
+    fixture.backstop.withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &deposited_shares,
+        &frodo,
+    );
+
+    let mut reserve_assets = pool_fixture.pool.get_reserve_list();
+    while reserve_assets.len() < 30 {
+        reserve_assets.push_back(Address::generate(&fixture.env));
+    }
+    let mut oracle_assets = soroban_sdk::Vec::new(&fixture.env);
+    let mut oracle_prices = soroban_sdk::Vec::new(&fixture.env);
+    for asset in reserve_assets.iter() {
+        oracle_assets.push_back(Asset::Stellar(asset));
+        oracle_prices.push_back(SCALAR_7);
+    }
+    fixture.oracle.set_data(
+        &fixture.bombadil,
+        &Asset::Other(Symbol::new(&fixture.env, "USD")),
+        &oracle_assets,
+        &7,
+        &300,
+    );
+    fixture.oracle.set_price_stable(&oracle_prices);
+
+    let mut positions = Positions {
+        liabilities: map![&fixture.env],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+    let mut pool_config = pool_fixture.pool.get_config();
+    pool_config.max_positions = 60;
+    let template_config = fixture.read_reserve_config(0, TokenIndex::XLM);
+    let now = fixture.env.ledger().timestamp();
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        fixture
+            .env
+            .storage()
+            .instance()
+            .set(&Symbol::new(&fixture.env, "Config"), &pool_config);
+        fixture
+            .env
+            .storage()
+            .persistent()
+            .set(&Symbol::new(&fixture.env, "ResList"), &reserve_assets);
+
+        for (index, asset) in reserve_assets.iter().enumerate() {
+            let index = index as u32;
+            let debt = 1_i128;
+            positions.liabilities.set(index, debt);
+
+            if index < 3 {
+                let key = PoolDataKey::ResData(asset);
+                let mut data: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
+                data.d_supply += debt;
+                data.last_time = now;
+                fixture.env.storage().persistent().set(&key, &data);
+            } else {
+                let mut config = template_config.clone();
+                config.index = index;
+                config.decimals = 7;
+                let data = ReserveData {
+                    d_rate: SCALAR_12,
+                    b_rate: SCALAR_12,
+                    ir_mod: SCALAR_12,
+                    b_supply: 100 * SCALAR_7,
+                    d_supply: debt,
+                    backstop_credit: 0,
+                    last_time: now,
+                };
+                fixture
+                    .env
+                    .storage()
+                    .persistent()
+                    .set(&PoolDataKey::ResConfig(asset.clone()), &config);
+                fixture
+                    .env
+                    .storage()
+                    .persistent()
+                    .set(&PoolDataKey::ResData(asset), &data);
+            }
+        }
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &positions,
+        );
+    });
+
+    assert_eq!(
+        pool_fixture
+            .pool
+            .get_positions(&fixture.backstop.address)
+            .liabilities
+            .len(),
+        30
+    );
+    fixture.env.cost_estimate().budget().reset_unlimited();
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
+    let resources = fixture.env.cost_estimate().resources();
+
+    assert!(resources.instructions <= 600_000_000);
+    assert!(resources.mem_bytes <= 41_943_040);
+    assert!(resources.disk_read_entries <= 100);
+    assert!(resources.write_entries <= 50);
+    // Preserve ten read-footprint entries of headroom for production oracle
+    // implementations beneath the Protocol-27 100-entry ceiling.
+    assert!(
+        resources.disk_read_entries + resources.memory_read_entries <= 90,
+        "resources: {resources:?}"
+    );
+    assert!(resources.disk_read_bytes <= 200_000);
+    assert!(resources.write_bytes <= 132_096);
+    assert!(resources.contract_events_size_bytes <= 16_384);
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+}
 
 /// Smoke test for managing positions, tracking emissions, and accruing interest
 #[test]
@@ -17,6 +852,12 @@ fn test_wasm_happy_path() {
     let pool_fixture = &fixture.pools[0];
     let stable_pool_index = pool_fixture.reserves[&TokenIndex::STABLE];
     let xlm_pool_index = pool_fixture.reserves[&TokenIndex::XLM];
+
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
 
     // Create two new users
     let sam = Address::generate(&fixture.env); // sam will be supplying XLM and borrowing STABLE
@@ -176,29 +1017,35 @@ fn test_wasm_happy_path() {
     //  * rate will be dragged down due to rate modifier
 
     // claim frodo's setup emissions (1h1m passes during setup)
-    // - Frodo should receive 60 * 61 * .3 = 1098 BLND from the pool claim
-    // - Frodo should receive 60 * 61 * .7 = 2562 BLND from the backstop claim
-    let mut backstop_blnd_balance =
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
+    // - Frodo should receive 60 * 61 * .3 = 1098 BLNT from the pool claim
+    // - The backstop claim consumes the already-started seven-day stream; the
+    //   new distribution below remains pending until the pool's next gulp.
+    let mut backstop_blnt_balance =
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
     let claim_amount = pool_fixture
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
-    backstop_blnd_balance -= claim_amount;
+    backstop_blnt_balance -= claim_amount;
     assert_eq!(claim_amount, 1098_0000000);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
-    let lp_amount = fixture.backstop.claim(
+    backstop_blnt_balance += fixture.backstop.distribute();
+    let compounded_lp = fixture.backstop.claim(
+        &BackstopContractTier::SecondLoss,
         &frodo,
         &vec![&fixture.env, pool_fixture.pool.address.clone()],
         &0,
     );
-    assert_eq!(lp_amount, 204_8364995);
-    backstop_blnd_balance -= 2562_0000000;
+    assert!(compounded_lp > 0);
+    let backstop_accrual =
+        backstop_blnt_balance - fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
+    assert!(backstop_accrual > 0);
+    backstop_blnt_balance -= backstop_accrual;
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
 
     // Let three days pass
@@ -208,34 +1055,34 @@ fn test_wasm_happy_path() {
     // Claim 3 day emissions
 
     // Claim frodo's three day pool emissions
-    let frodo_balance = fixture.tokens[TokenIndex::BLND].balance(&frodo);
+    let frodo_balance = fixture.tokens[TokenIndex::BLNT].balance(&frodo);
     let claim_amount = pool_fixture
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 4665_6412730);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 4665_6412283);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&frodo),
+        fixture.tokens[TokenIndex::BLNT].balance(&frodo),
         frodo_balance + claim_amount
     );
 
     // Claim sam's three day pool emissions
-    let sam_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
+    let sam_balance = fixture.tokens[TokenIndex::BLNT].balance(&sam);
     let claim_amount = pool_fixture
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 730943587268);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 730943587715);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&sam),
+        fixture.tokens[TokenIndex::BLNT].balance(&sam),
         sam_balance + claim_amount
     );
 
@@ -365,53 +1212,57 @@ fn test_wasm_happy_path() {
     fixture.jump(341940);
 
     // Distribute emissions
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 
     // Frodo claim emissions
-    let mut backstop_blnd_balance =
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let frodo_balance = fixture.tokens[TokenIndex::BLND].balance(&frodo);
+    let mut backstop_blnt_balance =
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
+    let frodo_balance = fixture.tokens[TokenIndex::BLNT].balance(&frodo);
     let claim_amount = pool_fixture
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 11673_1666149);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 11673_1727237);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&frodo),
+        fixture.tokens[TokenIndex::BLNT].balance(&frodo),
         frodo_balance + claim_amount
     );
 
-    let lp_amount = fixture.backstop.claim(
-        &frodo,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
+    assert!(
+        fixture.backstop.claim(
+            &BackstopContractTier::SecondLoss,
+            &frodo,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
+            &0,
+        ) > 0
     );
-    assert_eq!(lp_amount, 33_629_3445342);
-    backstop_blnd_balance -= 4207979999999;
+    let backstop_accrual =
+        backstop_blnt_balance - fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
+    assert_approx_eq_rel(backstop_accrual, 4233600000000, 0_0100000);
+    backstop_blnt_balance -= backstop_accrual;
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
 
     // Sam claim emissions
-    let sam_balance = fixture.tokens[TokenIndex::BLND].balance(&sam);
+    let sam_balance = fixture.tokens[TokenIndex::BLNT].balance(&sam);
     let claim_amount = pool_fixture
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 90908_8333849);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 90908_8272763);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&sam),
+        fixture.tokens[TokenIndex::BLNT].balance(&sam),
         sam_balance + claim_amount
     );
 
@@ -419,52 +1270,55 @@ fn test_wasm_happy_path() {
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 7 * 51);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
     // Allow another week go by to distribute missed emissions
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 7);
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 
     // Frodo claims a year worth of backstop emissions
-    let mut backstop_blnd_balance =
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address);
-    let lp_amount = fixture.backstop.claim(
-        &frodo,
-        &vec![&fixture.env, pool_fixture.pool.address.clone()],
-        &0,
+    let mut backstop_blnt_balance =
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
+    assert!(
+        fixture.backstop.claim(
+            &BackstopContractTier::SecondLoss,
+            &frodo,
+            &vec![&fixture.env, pool_fixture.pool.address.clone()],
+            &0,
+        ) > 0
     );
-    assert_eq!(lp_amount, 1_723_120_8830717);
-    backstop_blnd_balance -= 22_014_719_9999999;
+    let backstop_accrual =
+        backstop_blnt_balance - fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address);
+    assert_approx_eq_rel(backstop_accrual, 22_014_720_0000000, 0_0100000);
+    backstop_blnt_balance -= backstop_accrual;
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
 
     // Frodo claims a year worth of pool emissions
     let claim_amount = pool_fixture
         .pool
         .claim(&frodo, &vec![&fixture.env, 0, 3], &frodo);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 1073628_1826492);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 1073628_7444890);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
 
     // Sam claims a year worth of pool emissions
     let claim_amount = pool_fixture
         .pool
         .claim(&sam, &vec![&fixture.env, 0, 3], &sam);
-    backstop_blnd_balance -= claim_amount;
-    assert_eq!(claim_amount, 8361251_8173506);
+    backstop_blnt_balance -= claim_amount;
+    assert_eq!(claim_amount, 8361251_2555110);
     assert_eq!(
-        fixture.tokens[TokenIndex::BLND].balance(&fixture.backstop.address),
-        backstop_blnd_balance
+        fixture.tokens[TokenIndex::BLNT].balance(&fixture.backstop.address),
+        backstop_blnt_balance
     );
 
     // Sam repays his STABLE loan
@@ -601,9 +1455,12 @@ fn test_wasm_happy_path() {
     let mut frodo_bstop_token_balance = fixture.lp.balance(&frodo);
     let mut backstop_bstop_token_balance = fixture.lp.balance(&fixture.backstop.address);
     let amount = 500 * SCALAR_7;
-    let result = fixture
-        .backstop
-        .queue_withdrawal(&frodo, &pool_fixture.pool.address, &amount);
+    let result = fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &amount,
+    );
     assert_eq!(result.amount, amount);
     assert_eq!(
         result.exp,
@@ -619,9 +1476,14 @@ fn test_wasm_happy_path() {
     pool_fixture.pool.gulp(&stable.address);
 
     fixture.jump(60 * 60 * 24 * 17 + 1);
-    let result = fixture
-        .backstop
-        .withdraw(&frodo, &pool_fixture.pool.address, &amount);
+    fixture.backstop.distribute();
+    let result = fixture.backstop.withdraw(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &amount,
+        &frodo,
+    );
     frodo_bstop_token_balance += result;
     backstop_bstop_token_balance -= result;
     assert_eq!(result, amount);
