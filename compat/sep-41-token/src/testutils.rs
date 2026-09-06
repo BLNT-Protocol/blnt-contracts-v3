@@ -49,6 +49,7 @@ enum DataKey {
     Allowance(AllowanceKey),
     Authorized(Address),
     Balance(Address),
+    TransferShortfall(Address),
 }
 
 #[contractevent(topics = ["mint"], data_format = "single-value")]
@@ -173,12 +174,24 @@ impl MockToken {
             .set(&DataKey::Authorized(id), &authorize);
     }
 
+    /// Configure a test-only shortfall applied whenever a transfer credits
+    /// `recipient`. The sender is still debited by the requested amount.
+    pub fn set_transfer_shortfall(env: Env, recipient: Address, amount: i128) {
+        require_nonnegative(&env, amount);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TransferShortfall(recipient), &amount);
+    }
+
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         require_nonnegative(&env, amount);
         extend_instance(&env);
         spend_balance(&env, &from, amount);
-        receive_balance(&env, &to, amount);
+        receive_transfer_balance(&env, &to, amount);
         TransferEvent { from, to, amount }.publish(&env);
     }
 
@@ -188,7 +201,7 @@ impl MockToken {
         extend_instance(&env);
         spend_allowance(&env, &from, &spender, amount);
         spend_balance(&env, &from, amount);
-        receive_balance(&env, &to, amount);
+        receive_transfer_balance(&env, &to, amount);
         TransferEvent { from, to, amount }.publish(&env);
     }
 
@@ -263,6 +276,19 @@ fn receive_balance(env: &Env, address: &Address, amount: i128) {
         .checked_add(amount)
         .unwrap_or_else(|| panic_with_error!(env, TokenError::OverflowError));
     set_balance(env, address, balance);
+}
+
+fn receive_transfer_balance(env: &Env, address: &Address, amount: i128) {
+    let shortfall = env
+        .storage()
+        .instance()
+        .get(&DataKey::TransferShortfall(address.clone()))
+        .unwrap_or(0_i128);
+    let received = amount
+        .checked_sub(shortfall)
+        .unwrap_or_else(|| panic_with_error!(env, TokenError::BalanceError));
+    require_nonnegative(env, received);
+    receive_balance(env, address, received);
 }
 
 fn spend_balance(env: &Env, address: &Address, amount: i128) {

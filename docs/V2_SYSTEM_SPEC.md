@@ -201,6 +201,23 @@ A pool supports at most 30 reserves. Reserve configuration validates factors,
 utilization targets, rate ordering, supply cap, decimals, and enabled status as
 encoded by the frozen implementation.
 
+### V2-POOL-ASSET-001: Reserve-token trust boundary
+
+A reserve may be implemented by a generic SEP-41 token contract and is not
+restricted to a Stellar Asset Contract. The frozen implementation does not
+inspect or pin reserve contract code. Correct pool accounting therefore assumes
+that every configured reserve truthfully reports balances and follows the
+transfer semantics expected by the pool.
+
+SEP-41 compatibility does not constitute protocol validation or certification
+of a token implementation. A malicious implementation, privileged
+configuration change, or later upgrade can fabricate balances, selectively
+change transfer behavior, or mutate balances outside an ordinary pool
+submission. This can create unbacked collateral or accounting claims and expose
+suppliers of other reserves in the same pool to loss. Deployers and users must
+treat the token implementation, upgrade and administrative authorities, mutable
+dependencies, issuer controls, and oracle as pool-specific trust assumptions.
+
 ### V2-POOL-STATUS-001: Status codes
 
 V2 defines:

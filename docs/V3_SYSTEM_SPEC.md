@@ -260,6 +260,20 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
   Assertions are order-independent and MUST NOT influence selection, amounts,
   or pricing. A mismatch fails atomically.
 
+### 4.2.1 Generic SEP-41 reserve trust boundary — **Safety extension**
+
+`V2-POOL-ASSET-001` applies. V3 retains support for generic SEP-41 reserves and
+does not quarantine a reserve merely because it is not a Stellar Asset
+Contract. Exact balance-delta verification and custody-loss reconciliation use
+values reported by the token contract's `balance` entry point. They mitigate
+observable transfer shortfalls, fees, in-call rebases, and other balance
+mismatches, but do not establish that an arbitrary token reports truthful
+balances or remove the inherited reserve-token trust assumption.
+
+Permissioned access restricts who may use a pool but does not make a malicious
+reserve token safe. Interfaces SHOULD identify generic SEP-41 reserves and
+disclose this limitation.
+
 ### 4.3 Reserve authorization quarantine — **Safety extension**
 
 For every configured Stellar Asset Contract reserve, the pool MUST read the

@@ -6,20 +6,29 @@ use crate::{constants::SCALAR_12, PoolError};
 
 use super::{Pool, RequestType, Reserve};
 
-/// Return the pool's actual token balance less the reserve's accrued expected
-/// cash. A negative value is an unreconciled custody loss.
-pub(crate) fn reserve_balance_delta(e: &Env, reserve: &Reserve, protocol_credit: i128) -> i128 {
+/// Return the reserve's accrued expected cash balance.
+pub(crate) fn reserve_accounting_balance(
+    e: &Env,
+    reserve: &Reserve,
+    protocol_credit: i128,
+) -> i128 {
     if protocol_credit < 0 {
         panic_with_error!(e, PoolError::BalanceError);
     }
-    let pool_token_balance =
-        TokenClient::new(e, &reserve.asset).balance(&e.current_contract_address());
-    let reserve_token_balance = reserve
+    reserve
         .total_supply(e)
         .checked_add(reserve.data.backstop_credit)
         .and_then(|value| value.checked_add(protocol_credit))
         .and_then(|value| value.checked_sub(reserve.total_liabilities(e)))
-        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
+}
+
+/// Return the pool's actual token balance less the reserve's accrued expected
+/// cash. A negative value is an unreconciled custody loss.
+pub(crate) fn reserve_balance_delta(e: &Env, reserve: &Reserve, protocol_credit: i128) -> i128 {
+    let pool_token_balance =
+        TokenClient::new(e, &reserve.asset).balance(&e.current_contract_address());
+    let reserve_token_balance = reserve_accounting_balance(e, reserve, protocol_credit);
     pool_token_balance
         .checked_sub(reserve_token_balance)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
