@@ -102,6 +102,26 @@ The pool operator has no defence available. They cannot withhold consent, and
 there is no cooldown to top the backstop back up within. Their only recourse is
 to re-add after the fact, which may be blocked if the zone has since filled.
 
+## 3.1 Which pools are exposed
+
+The two properties separate cleanly by backstop composition.
+
+**No consent (property 1) applies to every pool.** It is a permission fact and
+has nothing to do with valuation: any address can call `remove_reward` against
+any member that is under threshold, however it got there.
+
+**No hysteresis (property 2) applies only to pools holding a BLNT-bearing
+tier.** `BUG1 §3.6` and `usdc_only_backstop_immunity.rs` show that a backstop
+configured `Usdc`-only takes the `unit_pool_tier_valuation` pass-through and has
+no Comet input: its `active_value` moved zero under an anchor deflation that cut
+the stock fixture pool to 16%. Such a pool's threshold gate is not volatile, so
+it crosses only when tokens genuinely move, and there is no window for a stranger
+to exploit that the depositors did not create themselves.
+
+That makes a USDC-only backstop a genuine mitigation for threshold stability —
+with the caveat, from BUG1 §3.6, that such a pool also has zero BLNT emission
+weight and so has little reason to be in the reward zone at all.
+
 ## 4. v2 comparison — inherited
 
 Both properties are present in v2 and were carried forward unchanged:
@@ -148,7 +168,7 @@ Mitigation (1) also closes BUG1 §3.5, which is the only leg of BUG1 that
 
 `backstop/src/contract.rs`, `backstop/src/emissions/manager.rs`,
 `backstop/src/emissions/policy.rs`, `backstop/src/backstop/pool.rs`,
-`test-suites/src/test_fixture.rs`,
+`test-suites/src/test_fixture.rs`, `backstop/src/emissions/tier_accounting.rs`,
 `blend-contracts-v2/backstop/src/contract.rs`,
 `blend-contracts-v2/backstop/src/emissions/manager.rs`,
 `blend-contracts-v2/backstop/src/backstop/pool.rs`, `AGENTS.md`.
