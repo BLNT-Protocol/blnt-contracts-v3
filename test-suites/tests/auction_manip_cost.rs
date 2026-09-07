@@ -31,7 +31,12 @@ fn poc_manipulation_cost_curve() {
             let amt = reserve / 4;
             deployed += amt;
             fixture.lp.swap_exact_amount_in(
-                &usdc.address, &amt, &blnt.address, &0, &i128::MAX, &attacker,
+                &usdc.address,
+                &amt,
+                &blnt.address,
+                &0,
+                &i128::MAX,
+                &attacker,
             );
         }
         let skewed = fixture.backstop.blnt_price();
@@ -40,9 +45,16 @@ fn poc_manipulation_cost_curve() {
         while blnt_left > 0 {
             let reserve = fixture.lp.get_balance(&blnt.address);
             let amt = core::cmp::min(blnt_left, reserve / 4);
-            if amt == 0 { break; }
+            if amt == 0 {
+                break;
+            }
             fixture.lp.swap_exact_amount_in(
-                &blnt.address, &amt, &usdc.address, &0, &i128::MAX, &attacker,
+                &blnt.address,
+                &amt,
+                &usdc.address,
+                &0,
+                &i128::MAX,
+                &attacker,
             );
             blnt_left -= amt;
         }
