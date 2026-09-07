@@ -440,6 +440,9 @@ utilization. Every positive borrower-interest accrual first applies the
 protocol-interest fee below. Because no supplier denominator remains, the
 remainder MUST increase `backstop_credit`, independently of the ordinary
 take-rate split. Existing take-rate and protocol credit remain realizable.
+If residual debt reaches terminal default while `b_supply == 0`, the debt MUST
+be cleared without changing `b_rate`; there are no supplier shares against
+which to distribute a loss.
 Positive custody surplus with zero supply is also added to `backstop_credit`
 by `gulp`. Removing
 an individually zero-valued collateral position can reduce the aggregate

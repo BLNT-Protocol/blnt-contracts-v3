@@ -252,6 +252,63 @@ fn test_wasm_zero_supply_debt_interest_accrues_to_backstop() {
 }
 
 #[test]
+fn test_wasm_terminal_default_clears_zero_supply_debt() {
+    let fixture = create_fixture_with_data(true);
+    let pool_fixture = &fixture.pools[0];
+    let stable = fixture.tokens[TokenIndex::STABLE].address.clone();
+    let stable_index = pool_fixture.reserves[&TokenIndex::STABLE];
+    let debt = 50 * SCALAR_7;
+    let backstop_positions = Positions {
+        liabilities: map![&fixture.env, (stable_index, debt)],
+        collateral: map![&fixture.env],
+        supply: map![&fixture.env],
+    };
+
+    fixture.env.as_contract(&pool_fixture.pool.address, || {
+        let key = PoolDataKey::ResData(stable.clone());
+        let mut reserve: ReserveData = fixture.env.storage().persistent().get(&key).unwrap();
+        reserve.b_rate = 0;
+        reserve.b_supply = 0;
+        reserve.d_rate = SCALAR_12;
+        reserve.d_supply = debt;
+        reserve.last_time = fixture.env.ledger().timestamp();
+        fixture.env.storage().persistent().set(&key, &reserve);
+        fixture.env.storage().persistent().set(
+            &PoolDataKey::Positions(fixture.backstop.address.clone()),
+            &backstop_positions,
+        );
+    });
+    fixture.env.as_contract(&fixture.backstop.address, || {
+        fixture.env.storage().persistent().set(
+            &BackstopDataKey::PoolBalance(pool_fixture.pool.address.clone()),
+            &PoolBalance {
+                q4w: 0,
+                shares: 0,
+                tokens: 0,
+            },
+        );
+    });
+    assert!(fixture
+        .backstop
+        .pool_data(&pool_fixture.pool.address)
+        .tiers
+        .iter()
+        .all(|tier| tier.tokens == 0 && tier.value == 0));
+
+    pool_fixture.pool.bad_debt(&fixture.backstop.address);
+
+    assert!(pool_fixture
+        .pool
+        .get_positions(&fixture.backstop.address)
+        .liabilities
+        .is_empty());
+    let reserve_after = fixture.read_reserve_data(0, TokenIndex::STABLE);
+    assert_eq!(reserve_after.d_supply, 0);
+    assert_eq!(reserve_after.b_supply, 0);
+    assert_eq!(reserve_after.b_rate, 0);
+}
+
+#[test]
 fn test_wasm_prepares_and_releases_bad_debt_lot() {
     let fixture = create_fixture_with_data(true);
     let pool_fixture = &fixture.pools[0];

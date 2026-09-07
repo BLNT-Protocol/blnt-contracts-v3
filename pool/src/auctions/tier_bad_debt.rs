@@ -926,6 +926,81 @@ mod tests {
     }
 
     #[test]
+    fn terminal_bad_debt_default_clears_liabilities_without_suppliers() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 12_345,
+            protocol_version: 27,
+            sequence_number: 50,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let pool_address = create_pool(&e);
+        let (blnt, _) = testutils::create_blnt_token(&e, &pool_address, &admin);
+        let (usdc, _) = testutils::create_token_contract(&e, &admin);
+        let (lp_token, _) = testutils::create_comet_lp_pool(&e, &admin, &blnt, &usdc);
+        let (backstop_address, _) =
+            testutils::create_backstop(&e, &pool_address, &lp_token, &usdc, &blnt);
+        let (oracle_id, _) = testutils::create_mock_oracle(&e);
+        let (debt_asset, _) = testutils::create_token_contract(&e, &admin);
+        let debt = 50 * SCALAR_7;
+        let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_config.index = 0;
+        reserve_data.b_rate = 0;
+        reserve_data.b_supply = 0;
+        reserve_data.d_rate = SCALAR_7 * 100_000;
+        reserve_data.d_supply = debt;
+        reserve_data.last_time = e.ledger().timestamp();
+
+        let backstop_positions = Positions {
+            collateral: map![&e],
+            liabilities: map![&e, (reserve_config.index, debt)],
+            supply: map![&e],
+        };
+        e.as_contract(&pool_address, || {
+            assert_eq!(
+                storage::push_res_list(&e, &debt_asset),
+                reserve_config.index
+            );
+            storage::set_res_config(&e, &debt_asset, &reserve_config);
+            storage::set_res_data(&e, &debt_asset, &reserve_data);
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle: oracle_id,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+            storage::set_user_positions(&e, &backstop_address, &backstop_positions);
+        });
+        e.as_contract(&backstop_address, || {
+            backstop::set_test_valuation_override(&e, Some(false));
+        });
+
+        let pool_client = crate::PoolClient::new(&e, &pool_address);
+        pool_client.bad_debt(&backstop_address);
+
+        assert!(pool_client
+            .get_positions(&backstop_address)
+            .liabilities
+            .is_empty());
+        let reserve_after = pool_client.get_reserve(&debt_asset).data;
+        assert_eq!(reserve_after.d_supply, 0);
+        assert_eq!(reserve_after.b_supply, 0);
+        assert_eq!(reserve_after.b_rate, 0);
+    }
+
+    #[test]
     fn creation_caps_bid_and_rejects_unknown_liability_positions() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
