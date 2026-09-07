@@ -83,7 +83,7 @@ of the same type.
 
 ## 3. Reproduction
 
-Five tests against the real `comet.wasm`, in `test-suites/tests/`:
+Six tests against the real `comet.wasm`, in `test-suites/tests/`:
 
 | test | shows | status |
 |---|---|---|
@@ -92,6 +92,7 @@ Five tests against the real `comet.wasm`, in `test-suites/tests/`:
 | `auction_manip_tiers.rs` | anchor moves untouched tiers (§3.3) | passes |
 | `auction_manip_deflate.rs` | deflation cost curve (§3.4) | passes |
 | `auction_manip_crossover.rs` | Dutch curve clears at par (§4) | passes |
+| `auction_manip_eviction.rs` | permissionless reward-zone eviction (§3.5) | passes |
 
 `auction_manip.rs` is written as a regression test: it asserts the property a
 fix must provide, so it is red while the bug is present. The other four are
@@ -179,7 +180,8 @@ instantaneous reads feeding a threshold comparison — `active_value >= 12,500`,
 entrant weight vs. incumbent weight — with no curve, no filler, and no second
 chance. A 2.54x swing held for the length of one transaction flips the boolean,
 and the state change it authorizes (activation, reward-zone admission or
-eviction) persists long after the reserves are restored.
+eviction) persists long after the reserves are restored. §3.5 drives this
+end-to-end.
 
 ### 3.4 Cost curve — deflation direction (bad-debt lot)
 
@@ -203,6 +205,54 @@ Deflation is materially more expensive than inflation, because it drains the
 20%-weighted USDC side against the 80%-weighted BLNT side. It also needs bad debt
 to already exist. It is the strictly less practical of the two directions, but it
 is the one with unbounded loss per event.
+
+### 3.5 Permissionless reward-zone eviction — *the leg that actually pays*
+
+`auction_manip_eviction.rs` drives §3.3's value swing into an irreversible state
+change. `remove_from_reward_zone` (`manager.rs:74`) evicts any member whose
+`active_value` is below the activation threshold, and `remove_reward`
+(`contract.rs:384`) has no `require_auth`:
+
+```
+honest active_value = $62,500 (threshold $12,500)
+  try_remove_reward at honest reserves -> Err   (pool is qualified)
+after 2 BLNT-in swaps: active_value = $10,536 (16% of honest)
+  remove_reward -> Ok                           (pool is "unqualified")
+restored active_value = $62,500
+round-trip cost = 240,073 BLNT (~$23,950)
+```
+
+After the unwind the victim is fully qualified again — `active_value` returns to
+$62,500 exactly — and is still out of the zone. `set_reward_zone` committed the
+membership list; nothing re-derives it. The victim earns nothing while out:
+`gulp_emissions` reverts with `BadRequest`, against 182,538 BLNT for the
+comparable week as a member.
+
+Two things this test also establishes, both of which bound the claim:
+
+- **`require_distribute_run_recently` is not a defence.** It checks that a
+  distribution checkpoint is newer than `CHECKPOINT_MAX_AGE_SECONDS`, not that
+  the caller is authorized. `distribute` is permissionless, so an attacker
+  facing a stale checkpoint refreshes it themselves in the same transaction.
+- **Re-entry is cheap while the zone has a free slot.** The test ends by showing
+  the victim can walk back in with a single `add_reward` call. The eviction is
+  durable only when the reward zone is full, where re-entry requires
+  out-weighing an incumbent on the same manipulable weight.
+
+One further consequence fell out of the fixture: its reward zone had exactly one
+member, so evicting it emptied the zone and `distribute` then failed outright
+with `NoEligibleWeight`. On a populated zone that does not happen — the victim's
+share is redirected to the remaining members rather than stalling distribution.
+
+### 3.5.1 Honest economics
+
+Denial alone does not obviously pay: ~$23,950 to deny ~$18,254/week of emissions,
+recoverable by the victim with one call, is a break-even of roughly nine days of
+the victim not noticing. The version that pays is the one this PoC does *not*
+yet cover: a **full** reward zone, where the eviction locks the victim out, and
+an **attacker-owned pool** taking the vacated slot so the redirected share is
+captured rather than merely denied. That combination should be built before this
+is used to size the fix.
 
 ## 4. The Dutch curve prices the mispricing back to par
 
@@ -322,6 +372,7 @@ after §4: the threshold reads, not the auction quotes, are what need protecting
    This is what defends `meets_activation_threshold`, reward-zone entry/exit and
    `pool_spot_blnt_emission_weight` — the §3.3 consumers, which have no clearing
    mechanism and take an irreversible action on a single instantaneous read.
+   It is the only listed mitigation that would have stopped §3.5.
    Defeated by an attacker who splits the skew and the read across two ledgers,
    but that exposes them to a full ledger of arbitrage against the skew, which
    is the same economic barrier mitigation (2) relies on.
@@ -346,12 +397,22 @@ after §4: the threshold reads, not the auction quotes, are what need protecting
    it composes with (2) and (4).
 
 Mitigation (2) alone would have failed every auction PoC in §3. Only mitigation
-(1) addresses §3.3, which is now the finding's severity driver.
+(1) addresses §3.3 and §3.5, which are now the finding's severity driver.
+
+Two changes worth making regardless of the valuation fix, both surfaced by §3.5
+and independent of any price manipulation:
+
+- `remove_reward` and `add_reward` are fully permissionless. Even with honest
+  reserves, a pool that legitimately dips below threshold can be evicted by a
+  stranger. Requiring auth from the pool, or a guardian, removes the whole class.
+- Emptying the reward zone bricks `distribute` with `NoEligibleWeight` until
+  somebody re-adds a pool. Distribution should degrade rather than revert.
 
 ## 7. Files examined
 
 `backstop/src/backstop/pool.rs`, `backstop/src/contract.rs`,
 `backstop/src/emissions/{manager,policy,tier_accounting}.rs`,
+`backstop/src/errors.rs`,
 `pool/src/auctions/{auction,math,tier_interest,tier_bad_debt,protocol_fee_auction}.rs`,
 `pool/src/contract.rs`, `pool/src/pool/status.rs`,
 `pool/src/auctions/math.rs`,
