@@ -17,7 +17,7 @@ const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
 const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
 const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
 const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
-const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
+const ACTIVATION_THRESHOLD_USDC: i128 = 0;
 
 /// Update the pool status based on the backstop module
 #[allow(clippy::zero_prefixed_literal)]
