@@ -81,7 +81,10 @@ fn poc_anchor_deflation_evicts_a_reward_zone_pool() {
         ACTIVATION_THRESHOLD_USDC
     );
 
-    // Permissionless eviction on the manipulated read.
+    // Eviction on the manipulated read. Note this fixture runs under
+    // `mock_all_auths()` (`test_fixture.rs:67`), so this call does not by itself
+    // prove `remove_reward` is unauthenticated -- see `reward_zone_auth.rs`,
+    // which proves that separately under an enforcing, empty auth set.
     fixture.backstop.remove_reward(&victim);
     assert!(!fixture.backstop.reward_zone().contains(&victim));
 

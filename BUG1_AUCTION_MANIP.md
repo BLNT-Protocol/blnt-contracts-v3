@@ -234,6 +234,12 @@ Two things this test also establishes, both of which bound the claim:
   distribution checkpoint is newer than `CHECKPOINT_MAX_AGE_SECONDS`, not that
   the caller is authorized. `distribute` is permissionless, so an attacker
   facing a stale checkpoint refreshes it themselves in the same transaction.
+- **The eviction being unauthenticated is not established by this test.** The
+  fixture runs under `mock_all_auths()` (`test-suites/src/test_fixture.rs:67`),
+  which masks a missing `require_auth`. That `remove_reward` needs no
+  authorization is proved separately, with a positive control, in
+  `reward_zone_auth.rs` — written up as **BUG2**. This test shows only that a
+  manipulated valuation makes a qualified pool evictable.
 - **Re-entry is cheap while the zone has a free slot.** The test ends by showing
   the victim can walk back in with a single `add_reward` call. The eviction is
   durable only when the reward zone is full, where re-entry requires
@@ -253,6 +259,11 @@ yet cover: a **full** reward zone, where the eviction locks the victim out, and
 an **attacker-owned pool** taking the vacated slot so the redirected share is
 captured rather than merely denied. That combination should be built before this
 is used to size the fix.
+
+Note also that the eviction does not depend on this finding at all: BUG2 shows
+the same removal succeeds on any honest threshold crossing, with no manipulation.
+The fix for this leg therefore belongs to BUG2's hysteresis mitigation, not to
+anything in §6 below.
 
 ## 4. The Dutch curve prices the mispricing back to par
 
@@ -366,23 +377,39 @@ implies:
 The oracle prohibition (`AGENTS.md:181`) rules out the obvious fix. Re-ranked
 after §4: the threshold reads, not the auction quotes, are what need protecting.
 
-1. **Harden the threshold reads (recommended, was ranked 2nd).** Store
+1. ~~**Harden the threshold reads with a same-ledger reserve-move guard.**~~
+   **Does not work — withdrawn.** The idea was to snapshot
    `(sequence, pair_reserve, blnt_reserve)` on each `read_comet` and reject a
-   valuation whose reserves moved beyond a threshold within the same ledger.
-   This is what defends `meets_activation_threshold`, reward-zone entry/exit and
-   `pool_spot_blnt_emission_weight` — the §3.3 consumers, which have no clearing
-   mechanism and take an irreversible action on a single instantaneous read.
-   It is the only listed mitigation that would have stopped §3.5.
-   Defeated by an attacker who splits the skew and the read across two ledgers,
-   but that exposes them to a full ledger of arbitrage against the skew, which
-   is the same economic barrier mitigation (2) relies on.
-2. **Revalidate at fill (was ranked 1st, now lower value).** Recompute
-   `blnt_price` / tier `value` in the three `fill_*` paths and reject or clamp
-   when the stored quote is outside a band (say ±10%) of the live one. Still
-   correct, still cheap, and it is what `auction_manip.rs` asserts. But §4 shows
-   the Dutch curve already recovers ~1:1 clearing on these legs under
-   competitive fillers, so this buys auction throughput and hygiene rather than
-   preventing a value leak. Worth doing; not the thing to do first.
+   valuation whose reserves moved within the same ledger. It has no usable
+   reference point. The attack is `[swap, act, unwind]` inside one transaction
+   and the swap comes *first*, so the first `read_comet` of that ledger — the
+   read that would establish the baseline — is already the manipulated one. The
+   guard compares a skewed value against itself and passes. This applies to the
+   auction legs and to §3.3/§3.5 alike.
+
+   Making it work needs a reference the attacker cannot set in the same
+   transaction, i.e. the *previous* ledger's reserves. That is a lagged
+   reference, and it collides with `AGENTS.md:97-100` ("Backstop value comes
+   only from current canonical Comet v2 reserves… Backstop valuation has no
+   oracle input"); it puts a storage write in `read_comet`, which is reached
+   from the unauthenticated `pool_data` and `blnt_price` views; and it
+   false-positives on any legitimate large LP join or exit.
+2. **Revalidate at fill — the only valuation fix that works, and not
+   recommended now.** Compare the stored quote against a freshly computed one at
+   fill: two current reads separated by 80-200 ledgers, no oracle, no new
+   persisted state, spec-clean. It is what `auction_manip.rs` asserts.
+
+   Cost is the reason to defer it. `AuctionData` is `{bid, lot, block}` with
+   nowhere to record the price a quote was struck at, so a cheap
+   stored-price-vs-live-price comparison is not available; the bid has to be
+   re-derived at fill from the lot, its oracle prices and the live `blnt_price`.
+   That means lifting `protocol_fee_auction.rs:41-75` into a helper shared by
+   create and fill, then repeating for the interest and bad-debt paths — roughly
+   100-150 lines across three fill paths plus tests. `pool.wasm` is 97,038 bytes
+   against the 120,000-byte guard, so size is not the constraint.
+
+   Set against §4, that spend converts a throughput-and-griefing defect into
+   nothing. **Not worth doing now.**
 3. **Guard the whole-tier short-circuit.** Cap the bad-debt lot at a fraction of
    the tier when `value` has moved sharply, so §3.4 cannot sweep a full tier in
    one event. Independent of the above. Note that §4's clearing argument applies
@@ -396,8 +423,14 @@ after §4: the threshold reads, not the auction quotes, are what need protecting
    mispriced auction without waiting 500 ledgers. A race, not a guarantee, but
    it composes with (2) and (4).
 
-Mitigation (2) alone would have failed every auction PoC in §3. Only mitigation
-(1) addresses §3.3 and §3.5, which are now the finding's severity driver.
+**Decision: accepted and documented, not fixed.** The withdrawal of (1) and the
+cost of (2), taken with §4's result that competitive fillers already recover
+~1:1 clearing, leave no auction-leg change worth making. The §3.3/§3.5 threshold
+consumers are real, but their practical fix is BUG2's hysteresis mitigation,
+which needs no valuation change at all.
+
+`auction_manip.rs` remains red by design, asserting the property mitigation (2)
+would provide. It is a fix-me marker, not a regression.
 
 Two changes worth making regardless of the valuation fix, both surfaced by §3.5
 and independent of any price manipulation:
@@ -407,6 +440,9 @@ and independent of any price manipulation:
   stranger. Requiring auth from the pool, or a guardian, removes the whole class.
 - Emptying the reward zone bricks `distribute` with `NoEligibleWeight` until
   somebody re-adds a pool. Distribution should degrade rather than revert.
+
+The permission half of the first bullet is written up separately as **BUG2**,
+with its own PoC and mitigations.
 
 ## 7. Files examined
 
