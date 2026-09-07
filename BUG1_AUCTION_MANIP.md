@@ -12,6 +12,10 @@ which have no clearing mechanism behind them.
 Scope of this document: SCAN.md finding 1 only. Analysis performed on `main` at
 `f5e03b1`, working tree clean.
 
+**Disposition.** §3.1 (protocol-fee auction) is **accepted, WONTFIX** — see §7.
+§3.3/§3.5 (threshold and reward-zone consumers) remain open, and their fix lives
+in `BUG2_REWARD_ZONE_AUTH.md`.
+
 **Revision note.** The first draft rated this HIGH on the strength of §3.2's
 break-even table, which assumed a rational filler waits for the full lot at
 elapsed 200. That assumption is wrong — see §4 and `auction_manip_crossover.rs`.
@@ -87,7 +91,7 @@ Seven tests against the real `comet.wasm`, in `test-suites/tests/`:
 
 | test | shows | status |
 |---|---|---|
-| `auction_manip.rs` | frozen quote survives the unwind (§3.1) | **fails** — asserts the fill charges honest value |
+| `auction_manip.rs` | frozen quote survives the unwind (§3.1) | passes — canary pinning the accepted discount |
 | `auction_manip_cost.rs` | inflation cost curve (§3.2) | passes |
 | `auction_manip_tiers.rs` | anchor moves untouched tiers (§3.3) | passes |
 | `auction_manip_deflate.rs` | deflation cost curve (§3.4) | passes |
@@ -95,9 +99,12 @@ Seven tests against the real `comet.wasm`, in `test-suites/tests/`:
 | `auction_manip_eviction.rs` | permissionless reward-zone eviction (§3.5) | passes |
 | `usdc_only_backstop_immunity.rs` | BLNT-free backstops are unaffected (§3.6) | passes |
 
-`auction_manip.rs` is written as a regression test: it asserts the property a
-fix must provide, so it is red while the bug is present. The other four are
-measurements and pass either way. Run with
+All seven pass. `auction_manip.rs` originally asserted the property a fix would
+provide and was therefore red; with §7's WONTFIX it now pins the *observed*
+discount to a 30-40% band instead. It trips if the discount deepens materially,
+and equally if the quoting path is ever changed — a fix would push the bid to
+~100% of honest value and break the upper bound, which is the intended signal
+that this canary and the WONTFIX both need revisiting. Run with
 `cargo test -p test-suites --test auction_manip -- --nocapture`.
 
 Fixture anchor pool: 100,001,000 BLNT / 2,500,025 USDC (80:20, 0.3% fee),
@@ -440,7 +447,8 @@ after §4: the threshold reads, not the auction quotes, are what need protecting
 2. **Revalidate at fill — the only valuation fix that works, and not
    recommended now.** Compare the stored quote against a freshly computed one at
    fill: two current reads separated by 80-200 ledgers, no oracle, no new
-   persisted state, spec-clean. It is what `auction_manip.rs` asserts.
+   persisted state, spec-clean. It is the property `auction_manip.rs` asserted
+   before the WONTFIX in §7.
 
    Cost is the reason to defer it. `AuctionData` is `{bid, lot, block}` with
    nowhere to record the price a quote was struck at, so a cheap
@@ -472,8 +480,7 @@ cost of (2), taken with §4's result that competitive fillers already recover
 consumers are real, but their practical fix is BUG2's hysteresis mitigation,
 which needs no valuation change at all.
 
-`auction_manip.rs` remains red by design, asserting the property mitigation (2)
-would provide. It is a fix-me marker, not a regression.
+See §7 for the accepted-risk record and what would reopen it.
 
 Two changes worth making regardless of the valuation fix, both surfaced by §3.5
 and independent of any price manipulation:
@@ -487,7 +494,38 @@ and independent of any price manipulation:
 The permission half of the first bullet is written up separately as **BUG2**,
 with its own PoC and mitigations.
 
-## 7. Files examined
+## 7. Accepted risk (WONTFIX)
+
+The §3.1 protocol-fee mispricing is **accepted, not fixed**, on this reasoning:
+
+> At worst this creates an auction that opens asking too few backstop tokens. It
+> does not let anyone buy the lot below value. The bid modifier is pinned at 100%
+> while the lot ramps, so a competitive filler takes the auction early at a
+> proportionally smaller lot, and the protocol still clears at ~1:1. The filler
+> chooses *when* to fill, not how much to pay.
+
+Evidence: §4 and `auction_manip_crossover.rs` (0.988:1 clearing at elapsed 80).
+Cost of the alternative: §6 mitigation (2), ~100-150 lines across three fill
+paths.
+
+`auction_manip.rs` is retained as the canary for this decision, pinning the
+discount to 30-40% of honest value (observed: 32%).
+
+**What would reopen this:**
+
+- The canary's band breaking in either direction — a deeper discount, or a
+  change to the quoting path.
+- Evidence that the filler market is not competitive in practice. §4.1 assumes
+  searchers take a profitable fill within ~120 ledgers; if real fills cluster
+  near elapsed 200, the protocol does lose the full discount.
+- Any new consumer of a stored spot quote that is *not* settled through a Dutch
+  auction. The whole argument rests on the clearing mechanism; a consumer
+  without one inherits §3.3's severity instead, not §3.1's.
+
+Note this record covers §3.1 only. §3.3/§3.5 are not accepted here — their fix
+lives in BUG2.
+
+## 8. Files examined
 
 `backstop/src/backstop/pool.rs`, `backstop/src/contract.rs`,
 `backstop/src/emissions/{manager,policy,tier_accounting}.rs`,
