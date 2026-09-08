@@ -97,7 +97,7 @@ Seven tests against the real `comet.wasm`, in `test-suites/tests/`:
 | `auction_manip_deflate.rs` | deflation cost curve (§3.4) | passes |
 | `auction_manip_crossover.rs` | Dutch curve clears at par (§4) | passes |
 | `auction_manip_eviction.rs` | permissionless reward-zone eviction (§3.5) | passes |
-| `usdc_only_backstop_immunity.rs` | BLNT-free backstops are unaffected (§3.6) | passes |
+| `usdc_only_backstop_immunity.rs` | USDC-only tier values are unaffected (§3.6) | passes |
 
 All seven pass. `auction_manip.rs` originally asserted the property a fix would
 provide and was therefore red; with §7's WONTFIX it now pins the *observed*
@@ -273,7 +273,7 @@ the same removal succeeds on any honest threshold crossing, with no manipulation
 The fix for this leg therefore belongs to BUG2's hysteresis mitigation, not to
 anything in §6 below.
 
-### 3.6 Scope limit: a backstop with no BLNT-bearing tier is immune
+### 3.6 Scope limit: USDC-only tier values are immune
 
 `usdc_only_backstop_immunity.rs`. Every valuation leg above requires the victim
 pool to hold a tier whose value derives from Comet. `build_pool_valuation` sets
@@ -294,8 +294,11 @@ blnt_price:                  1000000 -> 107890         (10% of before)
 
 Not "barely moved" — bit-for-bit identical, because no Comet read enters the
 valuation at all. So §3.3 and §3.5, and the manipulation route into BUG2, all
-require the victim to hold a BLNT-bearing backstop tier. For a pool configured
-`Usdc`-only, `active_value` changes only when tokens actually move.
+require the victim to hold a Comet-valued `BlntUsdc`, `BlntXlm`, or plain
+`Xlm` tier. Plain XLM is not BLNT-bearing, but its USDC value depends on both
+Comet reserve ratios and is exposed to the same anchor manipulation. Only a
+pool configured `Usdc`-only avoids that input; its `active_value` changes only
+when tokens actually move or the backstop's USDC authorization changes.
 
 **Two limits on this immunity.**
 
@@ -311,9 +314,9 @@ emission weight**. `pool_weight` (`backstop/src/emissions/tier_accounting.rs:18`
 resolves to `pool_spot_blnt_emission_weight` (`policy.rs:86`), which sums
 underlying BLNT across the BLNT:USDC and BLNT:XLM tiers only; with neither
 present it is 0 on both migration branches. The immunity in §3.3/§3.5 is
-therefore somewhat academic: a backstop with no BLNT exposure is also outside the
-emission system those findings are about. It is a real mitigation for a pool that
-wants threshold stability, not a free lunch.
+therefore somewhat academic: a USDC-only backstop is also outside the emission
+system those findings are about. It is a real mitigation for a pool that wants
+threshold stability, not a free lunch.
 
 ## 4. The Dutch curve prices the mispricing back to par
 

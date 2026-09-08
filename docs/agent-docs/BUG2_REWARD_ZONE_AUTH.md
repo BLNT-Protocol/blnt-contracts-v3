@@ -110,13 +110,16 @@ The two properties separate cleanly by backstop composition.
 has nothing to do with valuation: any address can call `remove_reward` against
 any member that is under threshold, however it got there.
 
-**No hysteresis (property 2) applies only to pools holding a BLNT-bearing
-tier.** `BUG1 §3.6` and `usdc_only_backstop_immunity.rs` show that a backstop
-configured `Usdc`-only takes the `unit_pool_tier_valuation` pass-through and has
-no Comet input: its `active_value` moved zero under an anchor deflation that cut
-the stock fixture pool to 16%. Such a pool's threshold gate is not volatile, so
-it crosses only when tokens genuinely move, and there is no window for a stranger
-to exploit that the depositors did not create themselves.
+**The anchor-manipulation route through no hysteresis (property 2) applies to
+every pool holding a Comet-valued `BlntUsdc`, `BlntXlm`, or plain `Xlm` tier.**
+`BUG1 §3.6` and `usdc_only_backstop_immunity.rs` show that a backstop configured
+`Usdc`-only takes the `unit_pool_tier_valuation` pass-through and has no Comet
+input: its `active_value` moved zero under an anchor deflation that cut the stock
+fixture pool to 16%. Plain XLM is not BLNT-bearing, but its USDC value depends on
+both Comet reserve ratios and remains exposed. A USDC-only pool's threshold gate
+is not volatile with Comet reserves, so it crosses only when tokens genuinely
+move or the backstop's USDC authorization changes, and there is no
+anchor-manipulation window for a stranger to exploit.
 
 That makes a USDC-only backstop a genuine mitigation for threshold stability —
 with the caveat, from BUG1 §3.6, that such a pool also has zero BLNT emission

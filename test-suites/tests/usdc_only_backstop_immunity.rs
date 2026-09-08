@@ -12,7 +12,7 @@ use test_suites::{
     test_fixture::{TokenIndex, SCALAR_7},
 };
 
-/// A backstop with no BLNT-bearing tier is immune to the anchor manipulation.
+/// A USDC-only backstop's `active_value` is immune to anchor manipulation.
 ///
 /// `build_pool_valuation` reads Comet lazily -- `needs_anchor` / `needs_target`
 /// are set only by `BlntUsdc`, `BlntXlm` and `Xlm`
@@ -22,7 +22,9 @@ use test_suites::{
 /// (`:498`), so its `active_value` has no Comet input to manipulate.
 ///
 /// This bounds BUG1 §3.3/§3.5 and the manipulation route into BUG2: they require
-/// the victim to hold a BLNT-bearing tier.
+/// the victim to hold a Comet-valued `BlntUsdc`, `BlntXlm`, or plain `Xlm`
+/// tier. A plain-XLM tier is not BLNT-bearing, but still depends on both Comet
+/// reserve ratios and is therefore exposed.
 ///
 /// It does NOT make such a pool immune to everything -- see the final assertion.
 #[test]
@@ -106,7 +108,7 @@ fn usdc_only_backstop_is_immune_to_anchor_manipulation() {
     // exactly equal, because no Comet read enters its valuation.
     assert_eq!(
         usdc_only_after, usdc_only_before,
-        "a backstop with no BLNT-bearing tier has no anchor exposure"
+        "a USDC-only active_value has no anchor exposure"
     );
 
     // Bound the claim. `blnt_price` is a global read with no pool input, so the
