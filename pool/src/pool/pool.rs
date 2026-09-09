@@ -50,10 +50,7 @@ impl Pool {
         if let Some(reserve) = self.reserves.get(asset.clone()) {
             if store {
                 self.mark_reserve_for_storage(asset);
-                let protocol_fee = self.protocol_fee_data(e, asset);
-                if protocol_fee != self.stored_protocol_fee_data(asset) {
-                    self.mark_protocol_fee_for_storage(asset);
-                }
+                self.mark_protocol_fee_for_storage(asset);
             }
             reserve
         } else {
@@ -64,14 +61,17 @@ impl Pool {
                         credit: 0,
                         carry: 0,
                     });
-            let (reserve, protocol_fee, protocol_fee_changed) =
+            let (reserve, protocol_fee, _protocol_fee_changed) =
                 Reserve::load_with_protocol_fee_data(e, &self.config, asset, initial_protocol_fee);
             self.protocol_fees.set(asset.clone(), protocol_fee);
             if store {
                 self.mark_reserve_for_storage(asset);
-                if protocol_fee_changed {
-                    self.mark_protocol_fee_for_storage(asset);
-                }
+                // Interest accrual depends on the ledger timestamp. A simulation
+                // can observe no fee change while execution one ledger later does.
+                // Always include the bounded protocol-fee map in the write
+                // footprint for mutating reserve loads so that transition cannot
+                // trap outside the simulated footprint.
+                self.mark_protocol_fee_for_storage(asset);
             }
             reserve
         }
@@ -119,15 +119,6 @@ impl Pool {
             }
             storage::set_protocol_fee_map(e, &protocol_fees);
         }
-    }
-
-    fn stored_protocol_fee_data(&self, asset: &Address) -> ProtocolFeeData {
-        self.stored_protocol_fees
-            .get(asset.clone())
-            .unwrap_or(ProtocolFeeData {
-                credit: 0,
-                carry: 0,
-            })
     }
 
     fn mark_reserve_for_storage(&mut self, asset: &Address) {
@@ -293,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn test_reserve_cache_stores_only_marked() {
+    fn test_reserve_and_protocol_fee_cache_store_only_marked() {
         let e = Env::default();
         e.mock_all_auths();
 
@@ -339,6 +330,12 @@ mod tests {
             let reserve_0 = pool.load_reserve(&e, &underlying_0, false);
             let mut reserve_1 = pool.load_reserve(&e, &underlying_1, true);
             let mut reserve_2 = pool.load_reserve(&e, &underlying_2, true);
+            // A mutating reserve load must mark the protocol-fee map even when
+            // this simulated ledger accrued no fee. Execution can occur at a
+            // later timestamp and must retain a valid write footprint.
+            assert!(!pool.protocol_fees_to_store.contains(&underlying_0));
+            assert!(pool.protocol_fees_to_store.contains(&underlying_1));
+            assert!(pool.protocol_fees_to_store.contains(&underlying_2));
             reserve_2.data.d_rate = 456;
             pool.cache_reserve(reserve_0.clone());
             pool.cache_reserve(reserve_1.clone());
