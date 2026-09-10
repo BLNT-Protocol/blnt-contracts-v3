@@ -13,9 +13,8 @@ use test_suites::{
     test_fixture::{TokenIndex, SCALAR_7},
 };
 
-#[test]
-fn test_liquidations() {
-    let fixture = create_fixture_with_data(false);
+fn exercise_liquidations(wasm: bool) {
+    let fixture = create_fixture_with_data(wasm);
     let frodo = fixture.users.get(0).unwrap();
     let pool_fixture = &fixture.pools[0];
 
@@ -815,6 +814,16 @@ fn test_liquidations() {
         stable_post_bad_debt.to_asset_from_d_token(&fixture.env, defaulted_debt),
         0_0000100,
     );
+}
+
+#[test]
+fn test_liquidations() {
+    exercise_liquidations(false);
+}
+
+#[test]
+fn test_liquidations_optimized_wasm() {
+    exercise_liquidations(true);
 }
 
 #[test]
