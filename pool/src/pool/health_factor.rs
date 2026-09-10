@@ -42,10 +42,15 @@ impl PositionData {
             let asset_to_base = pool.load_price(e, &reserve.asset);
 
             if b_token_balance > 0 {
-                // append users effective collateral to collateral_base
-                let asset_collateral = reserve.to_effective_asset_from_b_token(e, b_token_balance);
-                collateral_base +=
-                    asset_to_base.fixed_mul_floor(e, &asset_collateral, &reserve.scalar);
+                // A deauthorized reserve remains a nominal bToken claim but
+                // provides no effective collateral until the pool's balance
+                // is reauthorized.
+                if reserve.is_authorized(e) {
+                    let asset_collateral =
+                        reserve.to_effective_asset_from_b_token(e, b_token_balance);
+                    collateral_base +=
+                        asset_to_base.fixed_mul_floor(e, &asset_collateral, &reserve.scalar);
+                }
                 collateral_raw += asset_to_base.fixed_mul_floor(
                     e,
                     &reserve.to_asset_from_b_token(e, b_token_balance),
@@ -147,7 +152,7 @@ mod tests {
         reserve_config.index = 1;
         testutils::create_reserve(&e, &pool, &underlying_1, &reserve_config, &reserve_data);
 
-        let (underlying_2, _) = testutils::create_token_contract(&e, &bombadil);
+        let (underlying_2, underlying_2_client) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
         reserve_config.decimals = 6;
         reserve_config.index = 2;
@@ -203,6 +208,16 @@ mod tests {
             assert_eq!(position_data.collateral_raw, 350_3984567);
             assert_eq!(position_data.liability_raw, 148_0895062);
             assert_eq!(position_data.scalar, SCALAR_7);
+        });
+
+        underlying_2_client.set_authorized(&pool, &false);
+        e.as_contract(&pool, || {
+            let mut pool = Pool::load(&e);
+            let position_data = PositionData::calculate_from_positions(&e, &mut pool, &positions);
+            assert_eq!(position_data.collateral_base, 75_0925925);
+            assert_eq!(position_data.collateral_raw, 350_3984567);
+            assert_eq!(position_data.liability_base, 185_2368828);
+            assert_eq!(position_data.liability_raw, 148_0895062);
         });
     }
 

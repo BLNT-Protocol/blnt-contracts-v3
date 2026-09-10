@@ -1,14 +1,16 @@
 use crate::{
     errors::PoolFactoryError,
     events::PoolFactoryEvents,
-    storage::{self, PoolInitMeta},
+    storage::{self, BackstopTierConfig, PoolBackstopConfig, PoolInitMeta},
 };
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal,
-    String,
+    String, Vec,
 };
 
 const SCALAR_7: u32 = 1_0000000;
+const MAX_BACKSTOP_TIERS: u32 = 3;
+const MAX_TAKE_RATE_WEIGHT: u32 = 100;
 
 #[contract]
 pub struct PoolFactoryContract;
@@ -34,6 +36,8 @@ pub trait PoolFactory {
         backstop_take_rate: u32,
         max_positions: u32,
         min_collateral: i128,
+        backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address;
 
     /// Checks if contract address was deployed by the factory
@@ -42,7 +46,10 @@ pub trait PoolFactory {
     ///
     /// ### Arguments
     /// * `pool_id` - The contract address to be checked
-    fn is_pool(e: Env, pool_id: Address) -> bool;
+    fn is_pool(e: Env, pool_address: Address) -> bool;
+
+    /// Return a deployed pool's immutable ordered backstop configuration.
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig;
 }
 
 #[contractimpl]
@@ -67,6 +74,8 @@ impl PoolFactory for PoolFactoryContract {
         backstop_take_rate: u32,
         max_positions: u32,
         min_collateral: i128,
+        backstop_config: Vec<BackstopTierConfig>,
+        access_controller: Option<Address>,
     ) -> Address {
         admin.require_auth();
         storage::extend_instance(&e);
@@ -89,6 +98,8 @@ impl PoolFactory for PoolFactoryContract {
             panic_with_error!(&e, PoolFactoryError::InvalidPoolInitArgs);
         }
 
+        validate_backstop_config(&e, &backstop_config);
+
         let mut as_u8s: [u8; 56] = [0; 56];
         admin.to_string().copy_into_slice(&mut as_u8s);
         let mut salt_as_bytes: Bytes = salt.into_val(&e);
@@ -105,11 +116,12 @@ impl PoolFactory for PoolFactoryContract {
                 max_positions,
                 min_collateral,
                 pool_init_meta.backstop,
-                pool_init_meta.blnd_id,
+                pool_init_meta.blnt_id,
+                access_controller.clone(),
             ),
         );
 
-        storage::set_deployed(&e, &pool_address);
+        storage::set_deployed(&e, &pool_address, &backstop_config, &access_controller);
 
         PoolFactoryEvents::deploy(&e, pool_address.clone());
         pool_address
@@ -118,5 +130,26 @@ impl PoolFactory for PoolFactoryContract {
     fn is_pool(e: Env, pool_address: Address) -> bool {
         storage::extend_instance(&e);
         storage::is_deployed(&e, &pool_address)
+    }
+
+    fn backstop_config(e: Env, pool_address: Address) -> PoolBackstopConfig {
+        storage::extend_instance(&e);
+        storage::get_backstop_config(&e, &pool_address)
+    }
+}
+
+pub(crate) fn validate_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>) {
+    if config.is_empty() || config.len() > MAX_BACKSTOP_TIERS {
+        panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
+    }
+    for (index, tier) in config.iter().enumerate() {
+        if tier.take_rate_weight == 0 || tier.take_rate_weight > MAX_TAKE_RATE_WEIGHT {
+            panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
+        }
+        for later in config.iter().skip(index + 1) {
+            if tier.asset == later.asset {
+                panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
+            }
+        }
     }
 }

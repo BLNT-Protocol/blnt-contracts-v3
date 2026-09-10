@@ -1,6 +1,234 @@
-use soroban_sdk::{Address, Env, Symbol, Vec};
+use soroban_sdk::{contractevent, Address, Env, Vec};
 
 use crate::{AuctionData, ReserveConfig};
+
+macro_rules! single_value_event {
+    (
+        $name:ident,
+        $topic:literal,
+        [$($topic_field:ident: $topic_type:tt),* $(,)?],
+        $data_field:ident: $data_type:tt
+    ) => {
+        #[contractevent(topics = [$topic], data_format = "single-value")]
+        struct $name {
+            $(
+                #[topic]
+                $topic_field: $topic_type,
+            )*
+            $data_field: $data_type,
+        }
+    };
+}
+
+macro_rules! vec_event {
+    (
+        $name:ident,
+        $topic:literal,
+        [$($topic_field:ident: $topic_type:tt),* $(,)?],
+        [$($data_field:ident: $data_type:tt),+ $(,)?]
+    ) => {
+        #[contractevent(topics = [$topic], data_format = "vec")]
+        struct $name {
+            $(
+                #[topic]
+                $topic_field: $topic_type,
+            )*
+            $(
+                $data_field: $data_type,
+            )+
+        }
+    };
+}
+
+macro_rules! unit_event {
+    (
+        $name:ident,
+        $topic:literal,
+        [$($topic_field:ident: $topic_type:tt),* $(,)?]
+    ) => {
+        #[contractevent(topics = [$topic], data_format = "single-value")]
+        struct $name {
+            $(
+                #[topic]
+                $topic_field: $topic_type,
+            )*
+        }
+    };
+}
+
+single_value_event!(
+    SetAdminEvent,
+    "set_admin",
+    [admin: Address],
+    new_admin: Address
+);
+vec_event!(
+    UpdatePoolEvent,
+    "update_pool",
+    [admin: Address],
+    [
+        backstop_take_rate: u32,
+        max_positions: u32,
+        min_collateral: i128
+    ]
+);
+vec_event!(
+    QueueSetReserveEvent,
+    "queue_set_reserve",
+    [admin: Address],
+    [asset: Address, metadata: ReserveConfig]
+);
+single_value_event!(
+    CancelSetReserveEvent,
+    "cancel_set_reserve",
+    [admin: Address],
+    asset: Address
+);
+vec_event!(
+    SetReserveEvent,
+    "set_reserve",
+    [],
+    [asset: Address, index: u32]
+);
+single_value_event!(
+    SetStatusEvent,
+    "set_status",
+    [],
+    new_status: u32
+);
+single_value_event!(
+    SetStatusAdminEvent,
+    "set_status",
+    [admin: Address],
+    pool_status: u32
+);
+vec_event!(
+    ReserveEmissionUpdateEvent,
+    "reserve_emission_update",
+    [],
+    [res_token_id: u32, eps: u64, expiration: u64]
+);
+single_value_event!(
+    GulpEmissionsEvent,
+    "gulp_emissions",
+    [],
+    emissions: i128
+);
+#[contractevent(topics = ["claim"], data_format = "vec")]
+struct ClaimEvent {
+    #[topic]
+    from: Address,
+    reserve_token_ids: Vec<u32>,
+    amount_claimed: i128,
+}
+single_value_event!(
+    BadDebtEvent,
+    "bad_debt",
+    [user: Address, asset: Address],
+    d_tokens: i128
+);
+single_value_event!(
+    DefaultedDebtEvent,
+    "defaulted_debt",
+    [asset: Address],
+    d_tokens_burnt: i128
+);
+vec_event!(
+    SupplyEvent,
+    "supply",
+    [asset: Address, from: Address],
+    [tokens_in: i128, b_tokens_minted: i128]
+);
+vec_event!(
+    WithdrawEvent,
+    "withdraw",
+    [asset: Address, from: Address],
+    [tokens_out: i128, b_tokens_burnt: i128]
+);
+vec_event!(
+    SupplyCollateralEvent,
+    "supply_collateral",
+    [asset: Address, from: Address],
+    [tokens_in: i128, b_tokens_minted: i128]
+);
+vec_event!(
+    WithdrawCollateralEvent,
+    "withdraw_collateral",
+    [asset: Address, from: Address],
+    [tokens_out: i128, b_tokens_burnt: i128]
+);
+vec_event!(
+    BorrowEvent,
+    "borrow",
+    [asset: Address, from: Address],
+    [tokens_out: i128, d_tokens_minted: i128]
+);
+vec_event!(
+    RepayEvent,
+    "repay",
+    [asset: Address, from: Address],
+    [tokens_in: i128, d_tokens_burnt: i128]
+);
+vec_event!(
+    FlashLoanEvent,
+    "flash_loan",
+    [asset: Address, from: Address, contract: Address],
+    [tokens_out: i128, d_tokens_minted: i128]
+);
+vec_event!(
+    ClawbackEvent,
+    "clawback",
+    [asset: Address, from: Address],
+    [
+        amount: i128,
+        supply_burned: i128,
+        collateral_burned: i128
+    ]
+);
+single_value_event!(
+    GulpEvent,
+    "gulp",
+    [asset: Address],
+    token_delta: i128
+);
+vec_event!(
+    ReconcileLossEvent,
+    "reconcile_loss",
+    [asset: Address],
+    [
+        loss: i128,
+        supplier_loss: i128,
+        backstop_credit_loss: i128,
+        b_rate_loss: i128
+    ]
+);
+single_value_event!(
+    ProtocolCreditLossEvent,
+    "protocol_credit_loss",
+    [asset: Address],
+    amount: i128
+);
+vec_event!(
+    NewAuctionEvent,
+    "new_auction",
+    [auction_type: u32, user: Address],
+    [percent: u32, auction_data: AuctionData]
+);
+vec_event!(
+    FillAuctionEvent,
+    "fill_auction",
+    [auction_type: u32, user: Address],
+    [
+        filler: Address,
+        fill_percent: i128,
+        filled_auction_data: AuctionData
+    ]
+);
+unit_event!(
+    DeleteAuctionEvent,
+    "delete_auction",
+    [auction_type: u32, user: Address]
+);
 
 pub struct PoolEvents {}
 
@@ -14,8 +242,7 @@ impl PoolEvents {
     /// * admin - The current admin of the pool
     /// * new_admin - The new admin of the pool
     pub fn set_admin(e: &Env, admin: Address, new_admin: Address) {
-        let topics = (Symbol::new(&e, "set_admin"), admin);
-        e.events().publish(topics, new_admin);
+        SetAdminEvent { admin, new_admin }.publish(e);
     }
 
     /// Emitted when pool parameters are updated
@@ -34,9 +261,13 @@ impl PoolEvents {
         max_positions: u32,
         min_collateral: i128,
     ) {
-        let topics = (Symbol::new(&e, "update_pool"), admin);
-        e.events()
-            .publish(topics, (backstop_take_rate, max_positions, min_collateral));
+        UpdatePoolEvent {
+            admin,
+            backstop_take_rate,
+            max_positions,
+            min_collateral,
+        }
+        .publish(e);
     }
 
     /// Emitted when a new reserve configuration change is queued
@@ -49,8 +280,12 @@ impl PoolEvents {
     /// * asset - The asset to change the reserve configuration of
     /// * metadata - The new reserve configuration
     pub fn queue_set_reserve(e: &Env, admin: Address, asset: Address, metadata: ReserveConfig) {
-        let topics = (Symbol::new(&e, "queue_set_reserve"), admin);
-        e.events().publish(topics, (asset, metadata));
+        QueueSetReserveEvent {
+            admin,
+            asset,
+            metadata,
+        }
+        .publish(e);
     }
 
     /// Emitted when a queued reserve configuration change is cancelled
@@ -62,8 +297,7 @@ impl PoolEvents {
     /// * admin - The current admin of the pool
     /// * asset - The asset to cancel the reserve configuration change of
     pub fn cancel_set_reserve(e: &Env, admin: Address, asset: Address) {
-        let topics = (Symbol::new(&e, "cancel_set_reserve"), admin);
-        e.events().publish(topics, asset);
+        CancelSetReserveEvent { admin, asset }.publish(e);
     }
 
     /// Emitted when a reserve configuration change is set
@@ -75,8 +309,7 @@ impl PoolEvents {
     /// * asset - The asset to change the reserve configuration of
     /// * index - The reserve index
     pub fn set_reserve(e: &Env, asset: Address, index: u32) {
-        let topics = (Symbol::new(&e, "set_reserve"),);
-        e.events().publish(topics, (asset, index));
+        SetReserveEvent { asset, index }.publish(e);
     }
 
     /// Emitted when pool status is updated (non-admin)
@@ -87,8 +320,7 @@ impl PoolEvents {
     /// ### Arguments
     /// * new_status - The new pool status
     pub fn set_status(e: &Env, new_status: u32) {
-        let topics = (Symbol::new(&e, "set_status"),);
-        e.events().publish(topics, new_status);
+        SetStatusEvent { new_status }.publish(e);
     }
 
     /// Emitted when pool status is updated by admin
@@ -100,8 +332,7 @@ impl PoolEvents {
     /// * admin - The admin setting the pool status
     /// * pool_status - The new pool status
     pub fn set_status_admin(e: &Env, admin: Address, pool_status: u32) {
-        let topics = (Symbol::new(&e, "set_status"), admin);
-        e.events().publish(topics, pool_status);
+        SetStatusAdminEvent { admin, pool_status }.publish(e);
     }
 
     /// Emitted when reserve emissions are updated
@@ -114,8 +345,12 @@ impl PoolEvents {
     /// * eps - The new emissions per second
     /// * expiration - The new expiration time
     pub fn reserve_emission_update(e: &Env, res_token_id: u32, eps: u64, expiration: u64) {
-        let topics = (Symbol::new(e, "reserve_emission_update"),);
-        e.events().publish(topics, (res_token_id, eps, expiration));
+        ReserveEmissionUpdateEvent {
+            res_token_id,
+            eps,
+            expiration,
+        }
+        .publish(e);
     }
 
     /// Emitted when emissions are gulped
@@ -126,8 +361,7 @@ impl PoolEvents {
     /// ### Arguments
     /// * emissions - The amount of emissions gulped
     pub fn gulp_emissions(e: &Env, emissions: i128) {
-        let topics = (Symbol::new(&e, "gulp_emissions"),);
-        e.events().publish(topics, emissions);
+        GulpEmissionsEvent { emissions }.publish(e);
     }
 
     /// Emitted when emissions are claimed
@@ -140,9 +374,12 @@ impl PoolEvents {
     /// * reserve_token_ids - The reserve token IDs claimed
     /// * amount_claimed - The amount claimed
     pub fn claim(e: &Env, from: Address, reserve_token_ids: Vec<u32>, amount_claimed: i128) {
-        let topics = (Symbol::new(&e, "claim"), from);
-        e.events()
-            .publish(topics, (reserve_token_ids, amount_claimed));
+        ClaimEvent {
+            from,
+            reserve_token_ids,
+            amount_claimed,
+        }
+        .publish(e);
     }
 
     /// Emitted when bad debt is recorded
@@ -155,8 +392,12 @@ impl PoolEvents {
     /// * asset - The asset with bad debt
     /// * d_tokens - The amount of bad debt
     pub fn bad_debt(e: &Env, user: Address, asset: Address, d_tokens: i128) {
-        let topics = (Symbol::new(e, "bad_debt"), user, asset);
-        e.events().publish(topics, d_tokens);
+        BadDebtEvent {
+            user,
+            asset,
+            d_tokens,
+        }
+        .publish(e);
     }
 
     /// Emitted when bad debt is defaulted
@@ -168,8 +409,11 @@ impl PoolEvents {
     /// * asset - The asset with defaulted debt
     /// * d_tokens_burnt - The amount of defaulted d_tokens
     pub fn defaulted_debt(e: &Env, asset: Address, d_tokens_burnt: i128) {
-        let topics = (Symbol::new(e, "defaulted_debt"), asset);
-        e.events().publish(topics, d_tokens_burnt);
+        DefaultedDebtEvent {
+            asset,
+            d_tokens_burnt,
+        }
+        .publish(e);
     }
 
     /// Emitted when tokens are supplied
@@ -183,8 +427,13 @@ impl PoolEvents {
     /// * tokens_in - The amount of tokens sent to the pool
     /// * b_tokens_minted - The amount of b_tokens minted
     pub fn supply(e: &Env, asset: Address, from: Address, tokens_in: i128, b_tokens_minted: i128) {
-        let topics = (Symbol::new(e, "supply"), asset, from);
-        e.events().publish(topics, (tokens_in, b_tokens_minted));
+        SupplyEvent {
+            asset,
+            from,
+            tokens_in,
+            b_tokens_minted,
+        }
+        .publish(e);
     }
 
     /// Emitted when tokens are withdrawn
@@ -204,8 +453,13 @@ impl PoolEvents {
         tokens_out: i128,
         b_tokens_burnt: i128,
     ) {
-        let topics = (Symbol::new(e, "withdraw"), asset, from);
-        e.events().publish(topics, (tokens_out, b_tokens_burnt));
+        WithdrawEvent {
+            asset,
+            from,
+            tokens_out,
+            b_tokens_burnt,
+        }
+        .publish(e);
     }
 
     /// Emitted when collateral is supplied
@@ -225,8 +479,13 @@ impl PoolEvents {
         tokens_in: i128,
         b_tokens_minted: i128,
     ) {
-        let topics = (Symbol::new(e, "supply_collateral"), asset, from);
-        e.events().publish(topics, (tokens_in, b_tokens_minted));
+        SupplyCollateralEvent {
+            asset,
+            from,
+            tokens_in,
+            b_tokens_minted,
+        }
+        .publish(e);
     }
 
     /// Emitted when collateral is withdrawn
@@ -246,8 +505,13 @@ impl PoolEvents {
         tokens_out: i128,
         b_tokens_burnt: i128,
     ) {
-        let topics = (Symbol::new(e, "withdraw_collateral"), asset, from);
-        e.events().publish(topics, (tokens_out, b_tokens_burnt));
+        WithdrawCollateralEvent {
+            asset,
+            from,
+            tokens_out,
+            b_tokens_burnt,
+        }
+        .publish(e);
     }
 
     /// Emitted when tokens are borrowed
@@ -261,8 +525,13 @@ impl PoolEvents {
     /// * tokens_out - The amount of tokens sent from the pool
     /// * d_tokens_burnt - The amount of d_tokens burnt
     pub fn borrow(e: &Env, asset: Address, from: Address, tokens_out: i128, d_tokens_minted: i128) {
-        let topics = (Symbol::new(e, "borrow"), asset, from);
-        e.events().publish(topics, (tokens_out, d_tokens_minted));
+        BorrowEvent {
+            asset,
+            from,
+            tokens_out,
+            d_tokens_minted,
+        }
+        .publish(e);
     }
 
     /// Emitted when a loan is repaid
@@ -276,8 +545,13 @@ impl PoolEvents {
     /// * tokens_in - The amount of tokens sent to the pool
     /// * d_tokens_burnt - The amount of d_tokens burnt
     pub fn repay(e: &Env, asset: Address, from: Address, tokens_in: i128, d_tokens_burnt: i128) {
-        let topics = (Symbol::new(e, "repay"), asset, from);
-        e.events().publish(topics, (tokens_in, d_tokens_burnt));
+        RepayEvent {
+            asset,
+            from,
+            tokens_in,
+            d_tokens_burnt,
+        }
+        .publish(e);
     }
 
     /// Emitted during a flash loan
@@ -299,8 +573,36 @@ impl PoolEvents {
         tokens_out: i128,
         d_tokens_minted: i128,
     ) {
-        let topics = (Symbol::new(e, "flash_loan"), asset, from, contract);
-        e.events().publish(topics, (tokens_out, d_tokens_minted));
+        FlashLoanEvent {
+            asset,
+            from,
+            contract,
+            tokens_out,
+            d_tokens_minted,
+        }
+        .publish(e);
+    }
+
+    /// Emitted when a reserve issuer claws back supplied assets.
+    ///
+    /// - topics - `["clawback", asset: Address, from: Address]`
+    /// - data - `[amount: i128, supply_burned: i128, collateral_burned: i128]`
+    pub fn clawback(
+        e: &Env,
+        asset: Address,
+        from: Address,
+        amount: i128,
+        supply_burned: i128,
+        collateral_burned: i128,
+    ) {
+        ClawbackEvent {
+            asset,
+            from,
+            amount,
+            supply_burned,
+            collateral_burned,
+        }
+        .publish(e);
     }
 
     /// Emitted when a reserve gulps excess tokens
@@ -312,8 +614,35 @@ impl PoolEvents {
     /// * asset - The asset
     /// * token_delta - The number of tokens gulped
     pub fn gulp(e: &Env, asset: Address, token_delta: i128) {
-        let topics = (Symbol::new(e, "gulp"), asset);
-        e.events().publish(topics, token_delta);
+        GulpEvent { asset, token_delta }.publish(e);
+    }
+
+    /// Emitted when a reserve custody deficit is reconciled.
+    ///
+    /// - topics - `["reconcile_loss", asset: Address]`
+    /// - data - `[loss: i128, supplier_loss: i128,
+    ///   backstop_credit_loss: i128, b_rate_loss: i128]`
+    pub fn reconcile_loss(
+        e: &Env,
+        asset: Address,
+        loss: i128,
+        supplier_loss: i128,
+        backstop_credit_loss: i128,
+        b_rate_loss: i128,
+    ) {
+        ReconcileLossEvent {
+            asset,
+            loss,
+            supplier_loss,
+            backstop_credit_loss,
+            b_rate_loss,
+        }
+        .publish(e);
+    }
+
+    /// Emitted when custody reconciliation consumes unpaid protocol credit.
+    pub fn protocol_credit_loss(e: &Env, asset: Address, amount: i128) {
+        ProtocolCreditLossEvent { asset, amount }.publish(e);
     }
 
     /// Emitted when a new auction is created
@@ -333,8 +662,13 @@ impl PoolEvents {
         percent: u32,
         auction_data: AuctionData,
     ) {
-        let topics = (Symbol::new(e, "new_auction"), auction_type, user);
-        e.events().publish(topics, (percent, auction_data));
+        NewAuctionEvent {
+            auction_type,
+            user,
+            percent,
+            auction_data,
+        }
+        .publish(e);
     }
 
     /// Emitted when an auction is filled
@@ -356,9 +690,14 @@ impl PoolEvents {
         fill_percent: i128,
         filled_auction_data: AuctionData,
     ) {
-        let topics = (Symbol::new(e, "fill_auction"), auction_type, user);
-        e.events()
-            .publish(topics, (filler, fill_percent, filled_auction_data));
+        FillAuctionEvent {
+            auction_type,
+            user,
+            filler,
+            fill_percent,
+            filled_auction_data,
+        }
+        .publish(e);
     }
 
     /// Emitted when an auction is deleted
@@ -370,7 +709,96 @@ impl PoolEvents {
     /// * auction_type - The type of auction
     /// * user - The address of the user
     pub fn delete_auction(e: &Env, auction_type: u32, user: Address) {
-        let topics = (Symbol::new(&e, "delete_auction"), auction_type, user);
-        e.events().publish(topics, ());
+        DeleteAuctionEvent { auction_type, user }.publish(e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{
+        testutils::Address as _, xdr::ScVal, Event, FromVal, IntoVal, Symbol, Val,
+        Vec as SorobanVec,
+    };
+
+    fn assert_legacy_shape(e: &Env, event: &impl Event, topics: SorobanVec<Val>, data: Val) {
+        assert_eq!(event.topics(e), topics);
+        assert_eq!(
+            ScVal::from_val(e, &event.data(e)),
+            ScVal::from_val(e, &data)
+        );
+    }
+
+    #[test]
+    fn typed_events_preserve_legacy_pool_shapes() {
+        let e = Env::default();
+        let asset = Address::generate(&e);
+        let from = Address::generate(&e);
+
+        assert_legacy_shape(
+            &e,
+            &SupplyEvent {
+                asset: asset.clone(),
+                from: from.clone(),
+                tokens_in: 50,
+                b_tokens_minted: 45,
+            },
+            (Symbol::new(&e, "supply"), asset.clone(), from.clone()).into_val(&e),
+            (50_i128, 45_i128).into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &SetStatusEvent { new_status: 3 },
+            (Symbol::new(&e, "set_status"),).into_val(&e),
+            3_u32.into_val(&e),
+        );
+
+        assert_legacy_shape(
+            &e,
+            &DeleteAuctionEvent {
+                auction_type: 0,
+                user: from.clone(),
+            },
+            (Symbol::new(&e, "delete_auction"), 0_u32, from).into_val(&e),
+            ().into_val(&e),
+        );
+    }
+
+    #[test]
+    fn typed_clawback_event_has_documented_shape() {
+        let e = Env::default();
+        let asset = Address::generate(&e);
+        let from = Address::generate(&e);
+        assert_legacy_shape(
+            &e,
+            &ClawbackEvent {
+                asset: asset.clone(),
+                from: from.clone(),
+                amount: 100,
+                supply_burned: 60,
+                collateral_burned: 40,
+            },
+            (Symbol::new(&e, "clawback"), asset, from).into_val(&e),
+            (100_i128, 60_i128, 40_i128).into_val(&e),
+        );
+    }
+
+    #[test]
+    fn typed_reconcile_loss_event_has_documented_shape() {
+        let e = Env::default();
+        let asset = Address::generate(&e);
+        assert_legacy_shape(
+            &e,
+            &ReconcileLossEvent {
+                asset: asset.clone(),
+                loss: 100,
+                supplier_loss: 80,
+                backstop_credit_loss: 20,
+                b_rate_loss: 25,
+            },
+            (Symbol::new(&e, "reconcile_loss"), asset).into_val(&e),
+            (100_i128, 80_i128, 20_i128, 25_i128).into_val(&e),
+        );
     }
 }

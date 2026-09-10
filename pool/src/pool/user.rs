@@ -105,6 +105,12 @@ impl User {
     /// be forgiven and suppliers will lose funds.
     pub fn default_liabilities(&mut self, e: &Env, reserve: &mut Reserve, amount: i128) {
         self.remove_liabilities(e, reserve, amount);
+        // With no bTokens there are no supplier claims to haircut. The debt
+        // still needs to be cleared so terminal bad-debt resolution can
+        // complete and release the backstop.
+        if reserve.data.b_supply == 0 {
+            return;
+        }
         // determine amount of funds in underlying that have defaulted
         // and deduct them from the b_rate
         let default_amount = reserve.to_asset_from_d_token(e, amount);
@@ -599,6 +605,34 @@ mod tests {
             );
             assert_eq!(reserve_0.data.b_rate, 1_210_000_000_000);
             assert_eq!(reserve_0.data.b_supply, 750_0000000);
+        });
+    }
+
+    #[test]
+    fn test_default_liabilities_with_zero_supplier_supply() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let samwise = Address::generate(&e);
+        let pool = testutils::create_pool(&e);
+
+        let mut reserve_0 = testutils::default_reserve(&e);
+        reserve_0.data.b_rate = 1_250_000_000_000;
+        reserve_0.data.b_supply = 0;
+        reserve_0.data.d_rate = 1_500_000_000_000;
+        reserve_0.data.d_supply = 0;
+
+        let mut user = User {
+            address: samwise.clone(),
+            positions: Positions::env_default(&e),
+        };
+        e.as_contract(&pool, || {
+            user.add_liabilities(&e, &mut reserve_0, 20_0000000);
+            user.default_liabilities(&e, &mut reserve_0, 20_0000000);
+
+            assert_eq!(user.get_liabilities(0), 0);
+            assert_eq!(reserve_0.data.d_supply, 0);
+            assert_eq!(reserve_0.data.b_supply, 0);
+            assert_eq!(reserve_0.data.b_rate, 1_250_000_000_000);
         });
     }
 

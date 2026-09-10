@@ -17,8 +17,8 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     fixture.tokens[TokenIndex::WETH].mint(&frodo, &(100 * 10i128.pow(9)));
 
     // mint LP tokens with whale
-    // frodo has 40m BLND from drop
-    fixture.tokens[TokenIndex::BLND].mint(&frodo, &(70_000_000 * SCALAR_7));
+    // Frodo starts with 30m explicitly funded BLNT.
+    fixture.tokens[TokenIndex::BLNT].mint(&frodo, &(70_000_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&frodo, &(2_600_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(10_000_000 * SCALAR_7),
@@ -74,9 +74,12 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     pool_fixture.pool.set_emissions_config(&reserve_emissions);
 
     // deposit into backstop, add to reward zone
-    fixture
-        .backstop
-        .deposit(&frodo, &pool_fixture.pool.address, &(50_000 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &frodo,
+        &pool_fixture.pool.address,
+        &(50_000 * SCALAR_7),
+    );
     fixture
         .backstop
         .add_reward(&pool_fixture.pool.address, &None);
@@ -84,7 +87,6 @@ pub fn create_fixture_with_data<'a>(wasm: bool) -> TestFixture<'a> {
     pool_fixture.pool.update_status();
 
     // enable emissions
-    fixture.emitter.distribute();
     fixture.backstop.distribute();
     pool_fixture.pool.gulp_emissions();
 
@@ -157,14 +159,14 @@ mod tests {
         let frodo = fixture.users.get(0).unwrap();
         let pool_fixture: &PoolFixture = fixture.pools.get(0).unwrap();
 
-        // validate backstop deposit and drop
+        // validate the accounted deposit plus the one raw migration LP base unit
         assert_eq!(
-            50_000 * SCALAR_7,
+            50_000 * SCALAR_7 + 1,
             fixture.lp.balance(&fixture.backstop.address)
         );
         assert_eq!(
             10_000_000 * SCALAR_7,
-            fixture.tokens[TokenIndex::BLND].balance(&fixture.bombadil)
+            fixture.tokens[TokenIndex::BLNT].balance(&fixture.bombadil)
         );
 
         // validate pool actions
@@ -214,14 +216,14 @@ mod tests {
         let frodo = fixture.users.get(0).unwrap();
         let pool_fixture: &PoolFixture = fixture.pools.get(0).unwrap();
 
-        // validate backstop deposit
+        // validate the accounted deposit plus the one raw migration LP base unit
         assert_eq!(
-            50_000 * SCALAR_7,
+            50_000 * SCALAR_7 + 1,
             fixture.lp.balance(&fixture.backstop.address)
         );
         assert_eq!(
             10_000_000 * SCALAR_7,
-            fixture.tokens[TokenIndex::BLND].balance(&fixture.bombadil)
+            fixture.tokens[TokenIndex::BLNT].balance(&fixture.bombadil)
         );
 
         // validate pool actions

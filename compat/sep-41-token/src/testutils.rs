@@ -1,5 +1,5 @@
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, Address,
     Env, String,
 };
 
@@ -47,7 +47,44 @@ enum DataKey {
     Admin,
     Metadata,
     Allowance(AllowanceKey),
+    Authorized(Address),
     Balance(Address),
+    TransferShortfall(Address),
+}
+
+#[contractevent(topics = ["mint"], data_format = "single-value")]
+struct MintEvent {
+    #[topic]
+    admin: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["approve"], data_format = "vec")]
+struct ApproveEvent {
+    #[topic]
+    from: Address,
+    #[topic]
+    spender: Address,
+    amount: i128,
+    live_until_ledger: u32,
+}
+
+#[contractevent(topics = ["transfer"], data_format = "single-value")]
+struct TransferEvent {
+    #[topic]
+    from: Address,
+    #[topic]
+    to: Address,
+    amount: i128,
+}
+
+#[contractevent(topics = ["burn"], data_format = "single-value")]
+struct BurnEvent {
+    #[topic]
+    from: Address,
+    amount: i128,
 }
 
 #[contract]
@@ -79,8 +116,7 @@ impl MockToken {
         admin.require_auth();
         extend_instance(&env);
         receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("mint"), admin, to), amount);
+        MintEvent { admin, to, amount }.publish(&env);
     }
 
     pub fn set_admin(env: Env, new_admin: Address) {
@@ -108,10 +144,13 @@ impl MockToken {
         }
         extend_instance(&env);
         set_allowance(&env, &from, &spender, amount, live_until_ledger);
-        env.events().publish(
-            (symbol_short!("approve"), from, spender),
-            (amount, live_until_ledger),
-        );
+        ApproveEvent {
+            from,
+            spender,
+            amount,
+            live_until_ledger,
+        }
+        .publish(&env);
     }
 
     pub fn balance(env: Env, id: Address) -> i128 {
@@ -119,14 +158,41 @@ impl MockToken {
         get_balance(&env, &id)
     }
 
+    pub fn authorized(env: Env, id: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Authorized(id))
+            .unwrap_or(true)
+    }
+
+    pub fn set_authorized(env: Env, id: Address, authorize: bool) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Authorized(id), &authorize);
+    }
+
+    /// Configure a test-only shortfall applied whenever a transfer credits
+    /// `recipient`. The sender is still debited by the requested amount.
+    pub fn set_transfer_shortfall(env: Env, recipient: Address, amount: i128) {
+        require_nonnegative(&env, amount);
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        extend_instance(&env);
+        env.storage()
+            .instance()
+            .set(&DataKey::TransferShortfall(recipient), &amount);
+    }
+
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         require_nonnegative(&env, amount);
         extend_instance(&env);
         spend_balance(&env, &from, amount);
-        receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to), amount);
+        receive_transfer_balance(&env, &to, amount);
+        TransferEvent { from, to, amount }.publish(&env);
     }
 
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
@@ -135,9 +201,8 @@ impl MockToken {
         extend_instance(&env);
         spend_allowance(&env, &from, &spender, amount);
         spend_balance(&env, &from, amount);
-        receive_balance(&env, &to, amount);
-        env.events()
-            .publish((symbol_short!("transfer"), from, to), amount);
+        receive_transfer_balance(&env, &to, amount);
+        TransferEvent { from, to, amount }.publish(&env);
     }
 
     pub fn burn(env: Env, from: Address, amount: i128) {
@@ -145,7 +210,7 @@ impl MockToken {
         require_nonnegative(&env, amount);
         extend_instance(&env);
         spend_balance(&env, &from, amount);
-        env.events().publish((symbol_short!("burn"), from), amount);
+        BurnEvent { from, amount }.publish(&env);
     }
 
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -154,7 +219,7 @@ impl MockToken {
         extend_instance(&env);
         spend_allowance(&env, &from, &spender, amount);
         spend_balance(&env, &from, amount);
-        env.events().publish((symbol_short!("burn"), from), amount);
+        BurnEvent { from, amount }.publish(&env);
     }
 
     pub fn decimals(env: Env) -> u32 {
@@ -199,14 +264,35 @@ fn set_balance(env: &Env, address: &Address, balance: i128) {
         .set(&DataKey::Balance(address.clone()), &balance);
 }
 
+fn require_authorized(env: &Env, address: &Address) {
+    if !MockToken::authorized(env.clone(), address.clone()) {
+        panic_with_error!(env, TokenError::UnauthorizedError);
+    }
+}
+
 fn receive_balance(env: &Env, address: &Address, amount: i128) {
+    require_authorized(env, address);
     let balance = get_balance(env, address)
         .checked_add(amount)
         .unwrap_or_else(|| panic_with_error!(env, TokenError::OverflowError));
     set_balance(env, address, balance);
 }
 
+fn receive_transfer_balance(env: &Env, address: &Address, amount: i128) {
+    let shortfall = env
+        .storage()
+        .instance()
+        .get(&DataKey::TransferShortfall(address.clone()))
+        .unwrap_or(0_i128);
+    let received = amount
+        .checked_sub(shortfall)
+        .unwrap_or_else(|| panic_with_error!(env, TokenError::BalanceError));
+    require_nonnegative(env, received);
+    receive_balance(env, address, received);
+}
+
 fn spend_balance(env: &Env, address: &Address, amount: i128) {
+    require_authorized(env, address);
     let balance = get_balance(env, address);
     if balance < amount {
         panic_with_error!(env, TokenError::BalanceError);

@@ -1,66 +1,64 @@
 use crate::{
     constants::SCALAR_7,
-    dependencies::{BackstopClient, PoolBackstopData},
+    dependencies::{BackstopClient, BackstopPoolData},
     storage, PoolError,
 };
 use soroban_sdk::{panic_with_error, Env};
+
+const STATUS_ADMIN_ACTIVE: u32 = 0;
+const STATUS_ACTIVE: u32 = 1;
+const STATUS_ADMIN_ON_ICE: u32 = 2;
+const STATUS_ON_ICE: u32 = 3;
+const STATUS_ADMIN_FROZEN: u32 = 4;
+const STATUS_FROZEN: u32 = 5;
+const STATUS_SETUP: u32 = 6;
+
+const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
+const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
+const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
+const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
+const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
 
 /// Update the pool status based on the backstop module
 #[allow(clippy::zero_prefixed_literal)]
 #[allow(clippy::inconsistent_digit_grouping)]
 pub fn execute_update_pool_status(e: &Env) -> u32 {
     let mut pool_config = storage::get_pool_config(e);
-
-    // check the pool has met minimum backstop deposits
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
+    let pool_data = backstop_client.pool_data(&e.current_contract_address());
+    let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
+    let q4w_percentage = pool_data.q4w_pct;
 
-    let pool_backstop_data = backstop_client.pool_data(&e.current_contract_address());
-    let threshold = calc_pool_backstop_threshold(&pool_backstop_data);
-    let mut met_threshold = true;
-    if threshold < SCALAR_7 {
-        met_threshold = false;
-    }
-
-    match pool_config.status {
-        // Setup
-        6 => {
-            // Setup supersedes all other statuses
-            panic_with_error!(e, PoolError::StatusNotAllowed);
+    pool_config.status = match pool_config.status {
+        STATUS_SETUP | STATUS_ADMIN_FROZEN => {
+            panic_with_error!(e, PoolError::StatusNotAllowed)
         }
-        // Admin frozen
-        4 => {
-            // Admin frozen supersedes all other statuses
-            panic_with_error!(e, PoolError::StatusNotAllowed);
-        }
-        // Admin on-ice
-        2 => {
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                // Q4W over 75% freezes the pool
-                pool_config.status = 5;
-            }
-        }
-        // Admin active
-        0 => {
-            if !met_threshold || pool_backstop_data.q4w_pct >= 0_5000000 {
-                // Q4w over 50% or being under threshold puts the pool on-ice
-                pool_config.status = 3;
-            }
-        }
-        // Admin status isn't set
-        _ => {
-            if pool_backstop_data.q4w_pct >= 0_6000000 {
-                // Q4w over 60% sets pool to Frozen
-                pool_config.status = 5;
-            } else if pool_backstop_data.q4w_pct >= 0_3000000 || !met_threshold {
-                // Q4w over 30% sets pool to On-Ice
-                pool_config.status = 3;
+        STATUS_ADMIN_ON_ICE => {
+            if q4w_percentage >= Q4W_ADMIN_ON_ICE_LIMIT {
+                STATUS_FROZEN
             } else {
-                // Backstop is healthy and the pool is set to Active
-                pool_config.status = 1;
+                STATUS_ADMIN_ON_ICE
             }
         }
-    }
+        STATUS_ADMIN_ACTIVE => {
+            if !met_threshold || q4w_percentage >= Q4W_ADMIN_ACTIVE_LIMIT {
+                STATUS_ON_ICE
+            } else {
+                STATUS_ADMIN_ACTIVE
+            }
+        }
+        STATUS_ACTIVE | STATUS_ON_ICE | STATUS_FROZEN => {
+            if q4w_percentage >= Q4W_FROZEN_THRESHOLD {
+                STATUS_FROZEN
+            } else if !met_threshold || q4w_percentage >= Q4W_ON_ICE_THRESHOLD {
+                STATUS_ON_ICE
+            } else {
+                STATUS_ACTIVE
+            }
+        }
+        _ => panic_with_error!(e, PoolError::InvalidPoolStatus),
+    };
     storage::set_pool_config(e, &pool_config);
     pool_config.status
 }
@@ -69,82 +67,40 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
 #[allow(clippy::zero_prefixed_literal)]
 #[allow(clippy::inconsistent_digit_grouping)]
 pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
+    if !matches!(
+        pool_status,
+        STATUS_ADMIN_ACTIVE | STATUS_ADMIN_ON_ICE | STATUS_ON_ICE | STATUS_ADMIN_FROZEN
+    ) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
     let mut pool_config = storage::get_pool_config(e);
-
-    // check the pool has met minimum backstop deposits
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
-
-    let pool_backstop_data = backstop_client.pool_data(&e.current_contract_address());
-
-    match pool_status {
-        0 => {
-            // Threshold must be met and q4w must be under 50% for the admin to set Active
-            if calc_pool_backstop_threshold(&pool_backstop_data) < SCALAR_7
-                || pool_backstop_data.q4w_pct >= 0_5000000
-            {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // Admin Active
-            pool_config.status = 0;
-        }
-        2 => {
-            // Q4w must be under 75% for admin to set On-Ice
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // Admin On-Ice
-            pool_config.status = 2;
-        }
-        3 => {
-            // Q4w must be under 75% for admin to set permissionless On-Ice
-            if pool_backstop_data.q4w_pct >= 0_7500000 {
-                panic_with_error!(e, PoolError::StatusNotAllowed);
-            }
-            // On-Ice
-            pool_config.status = 3;
-        }
-        4 => {
-            // Admin can always freeze the pool
-            // Admin Frozen
-            pool_config.status = 4;
-        }
-        _ => {
-            panic_with_error!(e, PoolError::BadRequest);
-        }
+    let pool_data = backstop_client.pool_data(&e.current_contract_address());
+    let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
+    let transition_allowed = match pool_status {
+        STATUS_ADMIN_ACTIVE => met_threshold && pool_data.q4w_pct < Q4W_ADMIN_ACTIVE_LIMIT,
+        STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => pool_data.q4w_pct < Q4W_ADMIN_ON_ICE_LIMIT,
+        STATUS_ADMIN_FROZEN => true,
+        _ => false,
+    };
+    if !transition_allowed {
+        panic_with_error!(e, PoolError::StatusNotAllowed);
     }
+    pool_config.status = pool_status;
     storage::set_pool_config(e, &pool_config);
 }
 
-/// Calculate the threshold for the pool's backstop balance
-///
-/// Returns the threshold as a percentage^5 in SCALAR_7 points such that SCALAR_7 = 100%
-/// NOTE: The result is the percentage^5 to simplify the calculation of the pools product constant.
-///       Some useful results:
-///         - greater than 1 = 100+%
-///         - 1_0000000 = 100%
-///         - 0_0000100 = ~10%
-///         - 0_0000003 = ~5%
-///         - 0_0000000 = ~0-4%
-pub fn calc_pool_backstop_threshold(pool_backstop_data: &PoolBackstopData) -> i128 {
-    // @dev: Calculation for pools product constant of underlying will often overflow i128
-    //       so saturating mul is used. This is safe because the threshold is below i128::MAX and the
-    //       protocol does not need to differentiate between pools over the threshold product constant.
-    //       The calculation is:
-    //        - Threshold % = (bal_blnd^4 * bal_usdc) / PC^5 such that PC is 100k
-    let threshold_pc = 10_000_000_000_000_000_000_000_000i128; // 1e25 (100k^5)
+fn meets_activation_threshold(e: &Env, current_status: u32, pool_data: &BackstopPoolData) -> bool {
+    pool_data.active_value >= required_activation_value(e, current_status)
+}
 
-    // floor balances to nearest full unit and calculate saturated pool product constant
-    // and scale to SCALAR_7 to get final division result in SCALAR_7 points
-    let bal_blnd = pool_backstop_data.blnd / SCALAR_7;
-    let bal_usdc = pool_backstop_data.usdc / SCALAR_7;
-    let saturating_pool_pc = bal_blnd
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_blnd)
-        .saturating_mul(bal_usdc)
-        .saturating_mul(SCALAR_7); // 10^7 * 10^7
-    saturating_pool_pc / threshold_pc
+fn required_activation_value(e: &Env, current_status: u32) -> i128 {
+    match current_status {
+        STATUS_ADMIN_ACTIVE | STATUS_ACTIVE | STATUS_ADMIN_ON_ICE | STATUS_ON_ICE
+        | STATUS_ADMIN_FROZEN | STATUS_FROZEN | STATUS_SETUP => ACTIVATION_THRESHOLD_USDC,
+        _ => panic_with_error!(e, PoolError::InvalidPoolStatus),
+    }
 }
 
 #[cfg(test)]
@@ -158,6 +114,17 @@ mod tests {
     use soroban_sdk::{testutils::Address as _, vec, Address};
 
     #[test]
+    fn activation_threshold_is_uniform_across_statuses() {
+        let e = Env::default();
+        for status in STATUS_ADMIN_ACTIVE..=STATUS_SETUP {
+            assert_eq!(
+                required_activation_value(&e, status),
+                ACTIVATION_THRESHOLD_USDC
+            );
+        }
+    }
+
+    #[test]
     fn test_set_pool_status_active() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
@@ -168,14 +135,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -183,7 +150,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -215,14 +187,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens - under limit
-        blnd_client.mint(&samwise, &400_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &400_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &10_001_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -230,7 +202,12 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &9_999_9999999,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -259,14 +236,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -274,8 +251,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &30_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -302,14 +289,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -317,7 +304,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -349,14 +341,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -364,8 +356,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &40_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -393,14 +395,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -408,8 +410,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &40_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -436,14 +448,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -451,7 +463,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -482,14 +499,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -497,7 +514,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -525,14 +547,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -540,7 +562,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -572,14 +599,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -587,7 +614,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -619,14 +651,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens - under limit
-        blnd_client.mint(&samwise, &400_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &400_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &10_001_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -634,7 +666,12 @@ mod tests {
             &vec![&e, 400_001_0000000, 10_001_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &20_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &9_999_9999999,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -666,14 +703,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -681,8 +718,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &15_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &15_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -714,14 +761,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -729,8 +776,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &15_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &15_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -762,14 +819,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -777,8 +834,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &25_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &25_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -810,14 +877,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -825,8 +892,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &30_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -857,14 +934,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -872,8 +949,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &30_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &30_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -905,14 +992,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -920,8 +1007,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &40_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &40_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -954,14 +1051,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -969,7 +1066,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -998,14 +1100,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -1013,7 +1115,12 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -1042,14 +1149,14 @@ mod tests {
         let bombadil = Address::generate(&e);
         let samwise = Address::generate(&e);
 
-        let (blnd, blnd_client) = create_token_contract(&e, &bombadil);
+        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
         let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnd, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnd);
+        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
 
         // mint lp tokens
-        blnd_client.mint(&samwise, &500_001_0000000);
-        blnd_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
+        blnt_client.mint(&samwise, &500_001_0000000);
+        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         usdc_client.mint(&samwise, &12_501_0000000);
         usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
         lp_token_client.join_pool(
@@ -1057,8 +1164,18 @@ mod tests {
             &vec![&e, 500_001_0000000, 12_501_0000000],
             &samwise,
         );
-        backstop_client.deposit(&samwise, &pool_id, &50_000_0000000);
-        backstop_client.queue_withdrawal(&samwise, &pool_id, &12_500_0000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &50_000_0000000,
+        );
+        backstop_client.queue_withdrawal(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_id,
+            &12_500_0000000,
+        );
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -1076,113 +1193,5 @@ mod tests {
             let new_pool_config = storage::get_pool_config(&e);
             assert_eq!(new_pool_config.status, 0);
         });
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 175_000_0000000,
-            q4w_pct: 0,
-            tokens: 20_000_0000000,
-            shares: 50_000_0000000,
-            usdc: 6_500_0000000,
-            token_spot_price: 0_5000000,
-        }; // ~90.5% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_6096289);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_too_small() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 5_000_0000000,
-            q4w_pct: 0,
-            tokens: 500_0000000,
-            shares: 1_000_0000000,
-            usdc: 1_000_0000000,
-            token_spot_price: 0_5000000,
-        }; // ~3.6% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_over() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 200_000_0000000,
-            q4w_pct: 0,
-            tokens: 15_000_0000000,
-            shares: 1_000_0000000,
-            usdc: 6_250_0000000,
-            token_spot_price: 0_5000000,
-        }; // 100% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 1_0000000);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_saturates() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 50_000_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 999_999_0000000,
-            usdc: 10_000_000_0000000,
-            token_spot_price: 0_5000000,
-        }; // 362x threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 1701411_8346046);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_10_percent() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 20_000_0000000,
-            q4w_pct: 0,
-            tokens: 1_000_0000000,
-            shares: 1_000_0000000,
-            usdc: 625_0000000,
-            token_spot_price: 0_5000000,
-        }; // 10% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_0000100);
-    }
-
-    #[test]
-    fn test_calc_pool_backstop_threshold_5pct() {
-        let e = Env::default();
-        e.cost_estimate().budget().reset_unlimited();
-
-        let pool_backstop_data = PoolBackstopData {
-            blnd: 10_000_0000000,
-            q4w_pct: 0,
-            tokens: 999_999_0000000,
-            shares: 999_999_0000000,
-            usdc: 312_5000000,
-            token_spot_price: 0_5000000,
-        }; // 5% threshold
-
-        let result = calc_pool_backstop_threshold(&pool_backstop_data);
-        assert_eq!(result, 0_0000003);
     }
 }

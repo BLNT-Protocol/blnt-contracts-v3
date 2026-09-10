@@ -7,7 +7,7 @@ use crate::{
 };
 use soroban_sdk::{panic_with_error, Address, Env, String};
 
-use super::{pool::Pool, Reserve};
+use super::pool::Pool;
 
 /// Initialize the pool
 ///
@@ -22,7 +22,8 @@ pub fn execute_initialize(
     max_positions: &u32,
     min_collateral: &i128,
     backstop_address: &Address,
-    blnd_id: &Address,
+    blnt_id: &Address,
+    access_controller: &Option<Address>,
 ) {
     let pool_config = PoolConfig {
         oracle: oracle.clone(),
@@ -37,7 +38,8 @@ pub fn execute_initialize(
     storage::set_name(e, name);
     storage::set_backstop(e, backstop_address);
     storage::set_pool_config(e, &pool_config);
-    storage::set_blnd_token(e, blnd_id);
+    storage::set_blnt_token(e, blnt_id);
+    storage::set_access_controller(e, access_controller);
 }
 
 /// Update the pool
@@ -50,10 +52,12 @@ pub fn execute_update_pool(
     let mut pool_config = storage::get_pool_config(e);
     let res_list = storage::get_res_list(e);
     if pool_config.bstop_rate != backstop_take_rate {
+        let mut pool = Pool::load(e);
         for res in res_list {
-            let reserve = Reserve::load(e, &pool_config, &res);
-            reserve.store(e);
+            let reserve = pool.load_reserve(e, &res, true);
+            pool.cache_reserve(reserve);
         }
+        pool.store_cached_reserves(e);
     }
     pool_config.bstop_rate = backstop_take_rate;
     pool_config.max_positions = max_positions;
@@ -118,7 +122,7 @@ fn initialize_reserve(e: &Env, asset: &Address, config: &ReserveConfig) -> u32 {
         // accrue and store reserve data to the ledger
         let mut pool = Pool::load(e);
         // @dev: Store the reserve to ledger manually
-        let mut reserve = pool.load_reserve(e, asset, false);
+        let mut reserve = pool.load_reserve(e, asset, true);
         index = reserve.config.index;
         let reserve_config = storage::get_res_config(e, asset);
         require_valid_reserve_metadata_changes(e, &reserve_config, config);
@@ -131,7 +135,8 @@ fn initialize_reserve(e: &Env, asset: &Address, config: &ReserveConfig) -> u32 {
         {
             reserve.data.ir_mod = SCALAR_7;
         }
-        reserve.store(e);
+        pool.cache_reserve(reserve);
+        pool.store_cached_reserves(e);
     } else {
         index = storage::push_res_list(e, asset);
         let init_data = ReserveData {
@@ -233,7 +238,7 @@ mod tests {
         let max_positions = 2;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -245,7 +250,8 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
+                &None,
             );
 
             assert_eq!(storage::get_admin(&e), admin);
@@ -256,7 +262,7 @@ mod tests {
             assert_eq!(pool_config.max_positions, max_positions);
             assert_eq!(pool_config.status, 6);
             assert_eq!(storage::get_backstop(&e), backstop_address);
-            assert_eq!(storage::get_blnd_token(&e), blnd_id);
+            assert_eq!(storage::get_blnt_token(&e), blnt_id);
         });
     }
 
@@ -274,7 +280,7 @@ mod tests {
         let max_positions = 3;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -286,7 +292,8 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
+                &None,
             );
         });
     }
@@ -305,7 +312,7 @@ mod tests {
         let max_positions = 1;
         let min_collateral = 1_0000000;
         let backstop_address = Address::generate(&e);
-        let blnd_id = Address::generate(&e);
+        let blnt_id = Address::generate(&e);
 
         e.as_contract(&pool, || {
             execute_initialize(
@@ -317,7 +324,8 @@ mod tests {
                 &max_positions,
                 &min_collateral,
                 &backstop_address,
-                &blnd_id,
+                &blnt_id,
+                &None,
             );
         });
     }
@@ -1053,6 +1061,7 @@ mod tests {
             let res_data = storage::get_res_data(&e, &underlying);
             assert!(res_data.d_rate > 1_000_000_000_000);
             assert!(res_data.backstop_credit > 0);
+            assert!(storage::get_protocol_fee_data(&e, &underlying).credit > 0);
             assert_eq!(res_data.last_time, 10000);
             assert!(res_data.ir_mod != 1_0000000);
         });

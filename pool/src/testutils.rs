@@ -10,10 +10,15 @@ use mock_emitter::MockEmitter;
 use sep_40_oracle::testutils::{MockPriceOracle, MockPriceOracleClient};
 use sep_41_token::testutils::{MockToken, MockTokenClient};
 use soroban_fixed_point_math::SorobanFixedPoint;
-use soroban_sdk::{testutils::Address as _, vec, Address, BytesN, Env, IntoVal, String};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, testutils::Address as _, vec, Address, BytesN, Env,
+    IntoVal, String,
+};
 
 use backstop::{BackstopClient, BackstopContract, EmitterClient};
-use mock_pool_factory::{MockPoolFactory, MockPoolFactoryClient, PoolInitMeta};
+use mock_pool_factory::{
+    BackstopAsset, BackstopTierConfig, MockPoolFactory, MockPoolFactoryClient, PoolInitMeta,
+};
 use moderc3156_example::{
     FlashLoanReceiverModifiedERC3156, FlashLoanReceiverModifiedERC3156Client,
 };
@@ -23,6 +28,13 @@ use moderc3156_example::{
 /// This sets random data in the constructor, so unit tests that
 /// rely on any constructor data need to reset it.
 pub(crate) fn create_pool(e: &Env) -> Address {
+    create_pool_with_access_controller(e, None)
+}
+
+pub(crate) fn create_pool_with_access_controller(
+    e: &Env,
+    access_controller: Option<Address>,
+) -> Address {
     e.register(
         PoolContract {},
         (
@@ -34,8 +46,49 @@ pub(crate) fn create_pool(e: &Env) -> Address {
             1_0000000i128,
             Address::generate(e),
             Address::generate(e),
+            access_controller,
         ),
     )
+}
+
+#[derive(Clone)]
+#[contracttype]
+enum MockAccessControllerKey {
+    Permissions(Address, Address),
+    Fail,
+}
+
+#[contract]
+pub(crate) struct MockAccessController;
+
+#[contractimpl]
+impl MockAccessController {
+    pub fn permissions(e: Env, pool: Address, user: Address) -> u32 {
+        if e.storage()
+            .instance()
+            .get(&MockAccessControllerKey::Fail)
+            .unwrap_or(false)
+        {
+            panic!("controller unavailable");
+        }
+        e.storage()
+            .persistent()
+            .get(&MockAccessControllerKey::Permissions(pool, user))
+            .unwrap_or(0)
+    }
+
+    pub fn set_permissions(e: Env, pool: Address, user: Address, permissions: u32) {
+        e.storage().persistent().set(
+            &MockAccessControllerKey::Permissions(pool, user),
+            &permissions,
+        );
+    }
+
+    pub fn set_fail(e: Env, fail: bool) {
+        e.storage()
+            .instance()
+            .set(&MockAccessControllerKey::Fail, &fail);
+    }
 }
 
 //************************************************
@@ -55,7 +108,7 @@ pub(crate) fn create_token_contract<'a>(
     (contract_address, client)
 }
 
-pub(crate) fn create_blnd_token<'a>(
+pub(crate) fn create_blnt_token<'a>(
     e: &Env,
     pool_address: &Address,
     admin: &Address,
@@ -63,7 +116,7 @@ pub(crate) fn create_blnd_token<'a>(
     let (contract_address, client) = create_token_contract(e, admin);
 
     e.as_contract(pool_address, || {
-        storage::set_blnd_token(e, &contract_address);
+        storage::set_blnt_token(e, &contract_address);
     });
     (contract_address, client)
 }
@@ -80,11 +133,14 @@ pub(crate) fn create_mock_oracle(e: &Env) -> (Address, MockPriceOracleClient<'_>
 
 //***** Pool Factory ******
 
-pub(crate) fn create_mock_pool_factory(e: &Env) -> (Address, MockPoolFactoryClient<'_>) {
+pub(crate) fn create_mock_pool_factory<'a>(
+    e: &'a Env,
+    backstop: &Address,
+) -> (Address, MockPoolFactoryClient<'a>) {
     let pool_init_meta = PoolInitMeta {
-        backstop: Address::generate(e),
+        backstop: backstop.clone(),
         pool_hash: BytesN::<32>::from_array(&e, &[0u8; 32]),
-        blnd_id: Address::generate(e),
+        blnt_id: Address::generate(e),
     };
     let contract_address = e.register(MockPoolFactory {}, (pool_init_meta,));
     (
@@ -99,11 +155,11 @@ pub(crate) fn create_emitter<'a>(
     e: &Env,
     backstop_id: &Address,
     backstop_token: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
 ) -> (Address, EmitterClient<'a>) {
     let contract_address = e.register(MockEmitter, ());
     let client = EmitterClient::new(e, &contract_address);
-    client.initialize(blnd_token, backstop_id, backstop_token);
+    client.initialize(blnt_token, backstop_id, backstop_token);
     (contract_address.clone(), client)
 }
 
@@ -118,55 +174,82 @@ pub(crate) fn create_backstop<'a>(
     pool_address: &Address,
     backstop_token: &Address,
     usdc_token: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
 ) -> (Address, BackstopClient<'a>) {
     let backstop_id = Address::generate(e);
-    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e);
-    mock_pool_factory_client.set_pool(pool_address);
-    let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnd_token);
+    let comet_admin = Address::generate(e);
+    let (xlm_token, _) = create_token_contract(e, &comet_admin);
+    let (blnt_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnt_token, &xlm_token);
+    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
+    mock_pool_factory_client.set_pool_config(
+        pool_address,
+        &vec![
+            e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 4,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntUsdc,
+                take_rate_weight: 3,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 2,
+            },
+        ],
+    );
+    let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnt_token);
     e.register_at(
         &backstop_id,
         BackstopContract {},
         (
             backstop_token,
+            blnt_xlm_token,
             emitter,
-            blnd_token,
+            blnt_token,
             usdc_token,
+            xlm_token,
             pool_factory,
-            vec![e, (pool_address.clone(), 40_000_000 * SCALAR_7)],
+            soroban_sdk::Vec::<(Address, i128)>::new(e),
         ),
     );
+    e.as_contract(&backstop_id, || {
+        backstop::set_test_valuation_override(e, Some(false));
+        backstop::activate_for_test(e, e.ledger().timestamp());
+    });
     e.as_contract(pool_address, || {
         storage::set_backstop(e, &backstop_id);
     });
-    (backstop_id.clone(), BackstopClient::new(e, &backstop_id))
+    let client = BackstopClient::new(e, &backstop_id);
+    (backstop_id.clone(), client)
 }
 
-/// Deploy a test Comet LP pool of 80% BLND / 20% USDC and set it as the backstop token.
+/// Deploy a test Comet v2 LP pool of 80% BLNT / 20% USDC and set it as the backstop token.
 ///
 /// Initializes the pool with the following settings:
 /// - Swap fee: 0.3%
-/// - BLND: 1,000
+/// - BLNT: 1,000
 /// - USDC: 25
 /// - Shares: 100
 pub(crate) fn create_comet_lp_pool<'a>(
     e: &Env,
     admin: &Address,
-    blnd_token: &Address,
+    blnt_token: &Address,
     usdc_token: &Address,
 ) -> (Address, comet::Client<'a>) {
     let contract_address = Address::generate(e);
     e.register_at(&contract_address, comet::WASM, ());
     let client = comet::Client::new(e, &contract_address);
 
-    let blnd_client = MockTokenClient::new(e, blnd_token);
+    let blnt_client = MockTokenClient::new(e, blnt_token);
     let usdc_client = MockTokenClient::new(e, usdc_token);
-    blnd_client.mint(&admin, &1_000_0000000);
+    blnt_client.mint(&admin, &1_000_0000000);
     usdc_client.mint(&admin, &25_0000000);
 
     client.init(
         admin,
-        &vec![e, blnd_token.clone(), usdc_token.clone()],
+        &vec![e, blnt_token.clone(), usdc_token.clone()],
         &vec![e, 0_8000000, 0_2000000],
         &vec![e, 1_000_0000000, 25_0000000],
         &0_0030000,

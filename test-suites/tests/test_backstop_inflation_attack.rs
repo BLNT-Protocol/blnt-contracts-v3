@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-use pool::{PoolClient, Request, RequestType};
+use pool::{AuctionType, PoolClient, Request, RequestType};
 use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{testutils::Address as _, vec, Address, Error, String};
 use test_suites::{
@@ -25,7 +25,7 @@ fn test_backstop_inflation_attack() {
     let pool_address = fixture.pools[0].pool.address.clone();
 
     // setup backstop and update pool status
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(5_001_000 * SCALAR_7));
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(5_001_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(121_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(400_000 * SCALAR_7),
@@ -40,9 +40,12 @@ fn test_backstop_inflation_attack() {
 
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
-    let sauron_shares = fixture
-        .backstop
-        .deposit(&sauron, &pool_address, &sauron_deposit_amount);
+    let sauron_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &sauron,
+        &pool_address,
+        &sauron_deposit_amount,
+    );
 
     // 2. Attacker tries to send a large amount to the backstop before the victim can perform a deposit
     let inflation_amount = 10_000 * SCALAR_7;
@@ -52,9 +55,12 @@ fn test_backstop_inflation_attack() {
 
     // contract correctly mints share amounts regardless of the token balance
     let deposit_amount = 100;
-    let pippen_shares = fixture
-        .backstop
-        .deposit(&pippen, &pool_address, &deposit_amount);
+    let pippen_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &pippen,
+        &pool_address,
+        &deposit_amount,
+    );
     assert_eq!(pippen_shares, 100);
     assert_eq!(sauron_shares, pippen_shares);
 
@@ -67,14 +73,20 @@ fn test_backstop_inflation_attack() {
         &inflation_amount,
         &fixture.env.ledger().sequence(),
     );
-    fixture
-        .backstop
-        .donate(&sauron, &pool_address, &inflation_amount);
+    fixture.backstop.donate(
+        &backstop::BackstopTier::SecondLoss,
+        &sauron,
+        &pool_address,
+        &inflation_amount,
+    );
 
     // contracts stop any zero share deposits
-    let bad_deposit_result = fixture
-        .backstop
-        .try_deposit(&pippen, &pool_address, &deposit_amount);
+    let bad_deposit_result = fixture.backstop.try_deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &pippen,
+        &pool_address,
+        &deposit_amount,
+    );
     assert_eq!(
         bad_deposit_result.err(),
         Some(Ok(Error::from_contract_error(1005)))
@@ -98,8 +110,8 @@ fn test_backstop_interest_auction_inflation_attack() {
     let pool_client = PoolClient::new(&fixture.env, &pool_address);
     pool_client.set_status(&3);
 
-    // mint LP tokens, ~ 10 BLND and 0.25 USDC per share
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(10_100_000 * SCALAR_7));
+    // mint LP tokens, ~ 10 BLNT and 0.25 USDC per share
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(10_100_000 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(251_000 * SCALAR_7));
     fixture.lp.join_pool(
         &(1_000_000 * SCALAR_7),
@@ -116,9 +128,12 @@ fn test_backstop_interest_auction_inflation_attack() {
 
     // 1. Attacker deposits a small amount as the initial depositor
     let sauron_deposit_amount = 100;
-    fixture
-        .backstop
-        .deposit(&sauron, &pool_address, &sauron_deposit_amount);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &sauron,
+        &pool_address,
+        &sauron_deposit_amount,
+    );
 
     // 2. Attacker tries to force an interest auction to occur to inflate the backstop share value
     let inflation_amount = xlm_balance;
@@ -133,52 +148,63 @@ fn test_backstop_interest_auction_inflation_attack() {
 
     // 3. Attacker enables borrowing on the pool and fills interest auction to cause share inflation
     let remaining_to_threshold = 21_000 * SCALAR_7;
-    fixture
-        .backstop
-        .deposit(&sauron, &pool_address, &remaining_to_threshold);
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &sauron,
+        &pool_address,
+        &remaining_to_threshold,
+    );
     pool_client.update_status();
     pool_client.gulp(&fixture.tokens[TokenIndex::XLM].address);
 
     // -> start and fill interest auction
-    pool_client.new_auction(
-        &2,
+    let lot_assets = vec![
+        &fixture.env,
+        fixture.tokens[TokenIndex::XLM].address.clone(),
+    ];
+    let _interest_auction = pool_client.new_auction(
+        &(AuctionType::InterestAuction as u32),
         &fixture.backstop.address,
-        &vec![&fixture.env, fixture.lp.address.clone()],
-        &vec![
-            &fixture.env,
-            fixture.tokens[TokenIndex::XLM].address.clone(),
-        ],
+        &vec![&fixture.env],
+        &lot_assets,
         &100,
     );
+    fixture
+        .lp
+        .approve(&sauron, &fixture.backstop.address, &i128::MAX, &10_000);
     fixture.jump_with_sequence(201 * 5);
-    fixture.lp.approve(
+    pool_client.submit(
         &sauron,
-        &fixture.backstop.address,
-        &inflation_amount,
-        &fixture.env.ledger().sequence(),
+        &sauron,
+        &sauron,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::FillInterestAuction as u32,
+                address: fixture.backstop.address.clone(),
+                amount: 100,
+            },
+        ],
     );
-    let fill_requests = vec![
-        &fixture.env,
-        Request {
-            request_type: RequestType::FillInterestAuction as u32,
-            address: fixture.backstop.address.clone(),
-            amount: 100,
-        },
-    ];
-    pool_client.submit(&sauron, &sauron, &sauron, &fill_requests);
 
     // -> check new backstop share value
     let backstop_data = fixture.backstop.pool_data(&pool_address);
     let shares_to_tokens = backstop_data
+        .tiers
+        .get(1)
+        .unwrap()
         .tokens
-        .fixed_div_floor(backstop_data.shares, SCALAR_7)
+        .fixed_div_floor(backstop_data.tiers.get(1).unwrap().shares, SCALAR_7)
         .unwrap();
 
     // 4. Victim uses pool with inflated backstop share value
     let pippen_deposit_amount = SCALAR_7;
-    let pippen_shares = fixture
-        .backstop
-        .deposit(&pippen, &pool_address, &pippen_deposit_amount);
+    let pippen_shares = fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &pippen,
+        &pool_address,
+        &pippen_deposit_amount,
+    );
 
     // -> verify the victim did not any meaningful amount of funds due to rounding
     let pippen_tokens = pippen_shares
