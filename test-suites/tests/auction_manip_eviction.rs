@@ -160,4 +160,12 @@ fn poc_anchor_deflation_evicts_a_reward_zone_pool() {
     // requires out-weighing an incumbent.
     let reentry = fixture.backstop.try_add_reward(&victim, &None);
     std::println!("victim can re-add with a free slot = {}", reentry.is_ok());
+    assert!(
+        reentry.is_ok(),
+        "a qualified victim must be able to re-enter while the zone has a free slot"
+    );
+    assert!(
+        fixture.backstop.reward_zone().contains(&victim),
+        "successful re-entry must restore the victim to the reward zone"
+    );
 }
