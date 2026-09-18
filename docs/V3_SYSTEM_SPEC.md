@@ -9,11 +9,11 @@ This document defines only v3 differences. Unstated behavior inherits
 A difference MUST be classified here as an addition, replacement, extension,
 safety fix, or approved exception.
 
-Scoped integer carry-forward is an approved conservation fix; Section 4's
-12,500-USDC threshold is the sole approved economic exception. V3 adds no
-protocol fee, protocol-wide admin, multisig, governance, emergency override,
-privileged WASM replacement, or alternate upgrade path. Deployment grants no
-continuing authority.
+Scoped integer carry-forward is an approved conservation fix. Pool operation
+without mandatory backstop capital and immutable zero-tier pools are approved
+economic exceptions. V3 adds no protocol fee, protocol-wide
+admin, multisig, governance, emergency override, privileged WASM replacement,
+or alternate upgrade path. Deployment grants no continuing authority.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements.
 
@@ -45,7 +45,7 @@ This section replaces `V2-BACKSTOP-001`'s single token and extends
 
 ### 3.1 Asset configuration
 
-At deployment, each pool operator supplies an ordered list of one to three
+At deployment, each pool operator supplies an ordered list of zero to three
 `BackstopTierConfig` values. Entry order maps to `FirstLoss`, `SecondLoss`, and
 `ThirdLoss`; omitted trailing positions do not exist. Each entry selects an
 asset from canonical BLNT:XLM LP, BLNT:USDC LP, USDC, and XLM and one integer
@@ -54,6 +54,12 @@ each appear at most once, while plain USDC and plain XLM may each appear in
 multiple tiers. Weights are independent of loss-waterfall order. The factory
 stores this immutable configuration with the pool registration, and the
 backstop verifies and caches it before accepting the pool.
+
+An empty list immutably designates an unbackstopped pool. Its backstop take
+rate MUST be zero at deployment and MUST remain zero under later pool updates.
+It has no backstop shares, tier-funded bad-debt or interest auctions, take-rate
+entitlement, or BLNT-emission weight, and its bad debt passes directly to
+inherited supplier default.
 
 The candidate also immutably binds the canonical BLNT:USDC and BLNT:XLM 80:20
 Comet v2 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is
@@ -64,7 +70,7 @@ thresholds are positive. Deployment verification MUST reject any other
 controller state. This makes the Comet v2 pool's controller-only freeze and controller-
 replacement operations permanently unreachable.
 
-Every transferable tier counts equally per verified USDC for activation,
+Every transferable tier counts equally per verified USDC for valuation,
 participates in take-rate allocation using its configured weight, and absorbs
 loss in configured order without a protocol-level haircut or concentration
 limit. A deauthorized plain-USDC tier has zero transferable value under
@@ -99,7 +105,7 @@ limit is aggregate per user and pool across all configured tier queues.
 
 Capital state has these canonical policy effects:
 
-| Capital state | Activation/status | Loss | Take rate | Ongoing BLNT |
+| Capital state | Active valuation | Loss | Take rate | Ongoing BLNT |
 | --- | --- | --- | --- | --- |
 | Active accounted shares | Included | Available | Included | BLNT-bearing tiers |
 | Queued shares | Excluded | Available | Included | Excluded |
@@ -129,25 +135,20 @@ authorized, has positive custody, and records `clawback = false`. A failed
 check invalidates the deployment. This requirement does not prevent later SAC
 deauthorization, which remains subject to Section 4's accepted behavior.
 
-## 4. Pool activation — **Replaced**
+## 4. Backstop valuation — **Replaced**
 
 This replaces `V2-BACKSTOP-004`. For configured tiers (i=1\ldots n), in
 seven-decimal USDC units:
 
 \[
-E_p=\sum_{i=1}^{n}V_{p,i},\qquad 1\le n\le3.
+E_p=\sum_{i=1}^{n}V_{p,i},\qquad 0\le n\le3.
 \]
 
 Each \(V_{p,i}\) is eligible, transferable pool-attributed value. Every
-verified transferable USDC has equal weight, so any combination—including one
-asset alone—may qualify.
-
-\[
-T_{\mathrm{activation}} = 12{,}500\ \mathrm{USDC}
-\]
-
-Equality qualifies. Falling below the threshold deactivates a pool, and
-reactivation uses the same threshold.
+verified transferable USDC has equal weight. An empty configuration or a pool
+without funded tiers has \(E_p=0\). No minimum \(E_p\) is required to activate
+or keep borrowing enabled; suppliers independently evaluate the configured and
+funded loss protection.
 
 The backstop immutably binds distinct BLNT, USDC, and XLM tokens and the exact
 BLNT:USDC and BLNT:XLM Comet v2 pools. All five token interfaces MUST use seven
@@ -198,15 +199,15 @@ Canonical LP values deliberately reflect current Comet v2 composition rather
 than an external fair-market price. Swaps, one-sided liquidity changes, and
 donations can change them; BLNT:USDC remains the USDC and BLNT-price anchor.
 Plain-USDC authorization is read directly from its SAC on every valuation. A
-deauthorized balance therefore contributes zero to activation, pool status,
-reward-zone qualification, take-rate allocation, auction sizing, and supplier-
-loss eligibility. Reauthorization restores its value prospectively; it does
+deauthorized balance therefore contributes zero to queued-withdrawal status
+valuation, take-rate allocation, auction sizing, and supplier-loss eligibility.
+Reauthorization restores its value prospectively; it does
 not reallocate take rate or losses processed while the tier was unavailable.
 
-The consumers are activation, status, reward-zone membership, take-rate
-allocation, auction sizing, and supplier-loss eligibility. Emission weight
-instead recognizes only canonical BLNT LPs and uses their same-invocation
-underlying-BLNT composition under Section 6.2.
+The consumers are the queued-withdrawal ratio, take-rate allocation, auction
+sizing, and supplier-loss eligibility. Emission weight instead recognizes only
+canonical BLNT LPs and uses their same-invocation underlying-BLNT composition
+under Section 6.2.
 
 ### 4.1 Pool-status valuation — **Extended**
 
@@ -225,8 +226,8 @@ Q_p =
 Active and queued values use the same canonical inputs without take-rate
 weights. A zero denominator gives zero; division rounds upward at seven
 decimals. Inherited thresholds and admin overrides apply to this ratio.
-Statuses 0 and 1 also require Section 4's activation threshold. Queueing does
-not refresh status, stored status is not an additional reward-zone or
+Pool status has no minimum-backstop-value requirement. Queueing does not
+refresh status, stored status is not an additional reward-zone or
 backstop-auction gate, and each status decision uses one `pool_data` snapshot.
 
 ### 4.2 Pool integration — **Safety extensions**
@@ -596,7 +597,9 @@ One auction sells the first configured tier with positive transferable assets
 and value under Section 4. A deauthorized plain-USDC tier is skipped. The
 configured `FirstLoss`, `SecondLoss`, and optional `ThirdLoss` order is
 otherwise immutable. Supplier loss begins only after every configured tier has
-no usable transferable value.
+no usable transferable value. An empty tier list satisfies that condition, so
+an unbackstopped pool proceeds directly to supplier default without creating a
+type-1 auction.
 
 The auction targets 120% of reserve-oracle-valued debt. Only the pool may authorize a
 lot, which is the smaller of available tier tokens and the target amount. A
@@ -649,6 +652,10 @@ D_i=\left\lfloor
 A zero-value or deauthorized tier is omitted. Each pool and reserve stores one
 pending amount per configured tier and its Section 1.1 carry. Section 3.3
 determines eligible value, including capital selected for bad debt until drawn.
+An empty tier list has an immutable zero backstop take rate and therefore
+creates no take-rate credit. If tiers exist but their weighted value denominator
+is zero, accrued take-rate credit remains carry and is allocated only after a
+configured tier obtains positive transferable value.
 
 Persistent per-reserve tier amounts and carry are a direct-ledger client
 boundary; reads do not renew TTL and report only live RPC entries. The pool
@@ -802,17 +809,15 @@ call also verifies the exact BLNT balance increase.
 
 The inherited reward zone changes as follows:
 
-- Entry requires Section 4's activation threshold. A pool with no eligible
-  underlying BLNT may occupy an open slot but receives no BLNT allocation.
-- Standalone removal requires failure of Section 4's activation threshold,
-  regardless of eligible underlying BLNT.
+- Entry requires strictly positive eligible underlying BLNT weight.
+- Standalone removal requires zero eligible underlying BLNT weight.
 - Full-zone replacement compares eligible underlying BLNT and remains strict.
 - Before distribution begins, entry and standalone removal require no
   checkpoint; afterward they retain the inherited one-hour checkpoint.
 
-A pool without either canonical BLNT LP may activate and enter an open
-reward-zone slot but cannot earn backstop BLNT. For active canonical LP amount \(A_t\),
-current Comet v2 BLNT reserve \(R_t\), and LP supply \(S_t\), post-activation
+A pool without either canonical BLNT LP, including an unbackstopped pool, has
+zero weight and cannot enter the reward zone. For active canonical LP amount
+\(A_t\), current Comet v2 BLNT reserve \(R_t\), and LP supply \(S_t\), eligible
 weight is:
 
 \[

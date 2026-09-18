@@ -100,7 +100,7 @@ pub trait Backstop {
     /// Start or refresh the pool's tier streams and grant its accrued 30% allowance.
     fn gulp_emissions(e: Env, pool: Address) -> i128;
 
-    /// Add a threshold-qualified pool to the reward zone.
+    /// Add a pool with positive eligible underlying BLNT to the reward zone.
     ///
     /// If all 30 slots are occupied, the replacement must have strictly more
     /// active underlying BLNT than the named member.
@@ -113,13 +113,13 @@ pub trait Backstop {
     /// If the pool is ineligible or the required distribution checkpoint is stale
     fn add_reward(e: Env, to_add: Address, to_remove: Option<Address>);
 
-    /// Remove a pool below the activation threshold from the reward zone.
+    /// Remove a pool with zero eligible underlying BLNT from the reward zone.
     ///
     /// ### Arguments
     /// * `to_remove` - The address of the pool to remove
     ///
     /// ### Errors
-    /// If the pool is not below the threshold or if the pool is not in the reward zone
+    /// If the pool has positive eligible weight or is not in the reward zone
     fn remove_reward(e: Env, to_remove: Address);
 
     /// Compound one eligible tier's accrued BLNT across a list of pools.

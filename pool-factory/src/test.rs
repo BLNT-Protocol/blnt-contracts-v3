@@ -189,10 +189,66 @@ fn test_pool_factory_accepts_maximum_backstop_weight() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #1300)")]
-fn test_pool_factory_rejects_empty_backstop_config() {
+fn test_pool_factory_accepts_empty_backstop_config() {
     let e = Env::default();
     validate_backstop_config(&e, &soroban_sdk::Vec::new(&e));
+}
+
+#[test]
+fn test_pool_factory_deploys_unbackstopped_pool_with_zero_take_rate() {
+    let e = Env::default();
+    e.cost_estimate().budget().reset_unlimited();
+    e.mock_all_auths_allowing_non_root_auth();
+
+    let pool_init_meta = PoolInitMeta {
+        backstop: Address::generate(&e),
+        pool_hash: e.deployer().upload_contract_wasm(pool::WASM),
+        blnt_id: Address::generate(&e),
+    };
+    let factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
+    let factory = PoolFactoryClient::new(&e, &factory_address);
+    let pool = factory.deploy(
+        &Address::generate(&e),
+        &String::from_str(&e, "unbackstopped"),
+        &BytesN::<32>::random(&e),
+        &Address::generate(&e),
+        &0,
+        &6,
+        &0,
+        &soroban_sdk::Vec::new(&e),
+        &None,
+    );
+
+    assert!(factory.backstop_config(&pool).tiers.is_empty());
+}
+
+#[test]
+fn test_pool_factory_rejects_unbackstopped_pool_with_take_rate() {
+    let e = Env::default();
+    e.cost_estimate().budget().reset_unlimited();
+    e.mock_all_auths_allowing_non_root_auth();
+
+    let pool_init_meta = PoolInitMeta {
+        backstop: Address::generate(&e),
+        pool_hash: e.deployer().upload_contract_wasm(pool::WASM),
+        blnt_id: Address::generate(&e),
+    };
+    let factory_address = e.register(PoolFactoryContract {}, (pool_init_meta,));
+    let factory = PoolFactoryClient::new(&e, &factory_address);
+
+    assert!(factory
+        .try_deploy(
+            &Address::generate(&e),
+            &String::from_str(&e, "invalid unbackstopped"),
+            &BytesN::<32>::random(&e),
+            &Address::generate(&e),
+            &0_1000000,
+            &6,
+            &0,
+            &soroban_sdk::Vec::new(&e),
+            &None,
+        )
+        .is_err());
 }
 
 #[test]

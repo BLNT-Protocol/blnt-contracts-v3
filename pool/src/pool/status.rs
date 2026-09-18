@@ -1,8 +1,4 @@
-use crate::{
-    constants::SCALAR_7,
-    dependencies::{BackstopClient, BackstopPoolData},
-    storage, PoolError,
-};
+use crate::{dependencies::BackstopClient, storage, PoolError};
 use soroban_sdk::{panic_with_error, Env};
 
 const STATUS_ADMIN_ACTIVE: u32 = 0;
@@ -17,8 +13,6 @@ const Q4W_ON_ICE_THRESHOLD: i128 = 3_000_000;
 const Q4W_ADMIN_ACTIVE_LIMIT: i128 = 5_000_000;
 const Q4W_FROZEN_THRESHOLD: i128 = 6_000_000;
 const Q4W_ADMIN_ON_ICE_LIMIT: i128 = 7_500_000;
-const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;
-
 /// Update the pool status based on the backstop module
 #[allow(clippy::zero_prefixed_literal)]
 #[allow(clippy::inconsistent_digit_grouping)]
@@ -27,7 +21,6 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
     let pool_data = backstop_client.pool_data(&e.current_contract_address());
-    let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
     let q4w_percentage = pool_data.q4w_pct;
 
     pool_config.status = match pool_config.status {
@@ -42,7 +35,7 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
             }
         }
         STATUS_ADMIN_ACTIVE => {
-            if !met_threshold || q4w_percentage >= Q4W_ADMIN_ACTIVE_LIMIT {
+            if q4w_percentage >= Q4W_ADMIN_ACTIVE_LIMIT {
                 STATUS_ON_ICE
             } else {
                 STATUS_ADMIN_ACTIVE
@@ -51,7 +44,7 @@ pub fn execute_update_pool_status(e: &Env) -> u32 {
         STATUS_ACTIVE | STATUS_ON_ICE | STATUS_FROZEN => {
             if q4w_percentage >= Q4W_FROZEN_THRESHOLD {
                 STATUS_FROZEN
-            } else if !met_threshold || q4w_percentage >= Q4W_ON_ICE_THRESHOLD {
+            } else if q4w_percentage >= Q4W_ON_ICE_THRESHOLD {
                 STATUS_ON_ICE
             } else {
                 STATUS_ACTIVE
@@ -77,9 +70,8 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
     let backstop_id = storage::get_backstop(e);
     let backstop_client = BackstopClient::new(e, &backstop_id);
     let pool_data = backstop_client.pool_data(&e.current_contract_address());
-    let met_threshold = meets_activation_threshold(e, pool_config.status, &pool_data);
     let transition_allowed = match pool_status {
-        STATUS_ADMIN_ACTIVE => met_threshold && pool_data.q4w_pct < Q4W_ADMIN_ACTIVE_LIMIT,
+        STATUS_ADMIN_ACTIVE => pool_data.q4w_pct < Q4W_ADMIN_ACTIVE_LIMIT,
         STATUS_ADMIN_ON_ICE | STATUS_ON_ICE => pool_data.q4w_pct < Q4W_ADMIN_ON_ICE_LIMIT,
         STATUS_ADMIN_FROZEN => true,
         _ => false,
@@ -91,38 +83,18 @@ pub fn execute_set_pool_status(e: &Env, pool_status: u32) {
     storage::set_pool_config(e, &pool_config);
 }
 
-fn meets_activation_threshold(e: &Env, current_status: u32, pool_data: &BackstopPoolData) -> bool {
-    pool_data.active_value >= required_activation_value(e, current_status)
-}
-
-fn required_activation_value(e: &Env, current_status: u32) -> i128 {
-    match current_status {
-        STATUS_ADMIN_ACTIVE | STATUS_ACTIVE | STATUS_ADMIN_ON_ICE | STATUS_ON_ICE
-        | STATUS_ADMIN_FROZEN | STATUS_FROZEN | STATUS_SETUP => ACTIVATION_THRESHOLD_USDC,
-        _ => panic_with_error!(e, PoolError::InvalidPoolStatus),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
         storage::PoolConfig,
-        testutils::{create_backstop, create_comet_lp_pool, create_pool, create_token_contract},
+        testutils::{
+            create_backstop, create_backstop_with_config, create_comet_lp_pool, create_pool,
+            create_token_contract,
+        },
     };
 
     use super::*;
     use soroban_sdk::{testutils::Address as _, vec, Address};
-
-    #[test]
-    fn activation_threshold_is_uniform_across_statuses() {
-        let e = Env::default();
-        for status in STATUS_ADMIN_ACTIVE..=STATUS_SETUP {
-            assert_eq!(
-                required_activation_value(&e, status),
-                ACTIVATION_THRESHOLD_USDC
-            );
-        }
-    }
 
     #[test]
     fn test_set_pool_status_active() {
@@ -176,8 +148,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1204)")]
-    fn test_set_pool_status_active_blocks_without_backstop_minimum() {
+    fn test_set_pool_status_active_allows_unbackstopped_pool() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -185,29 +156,10 @@ mod tests {
         let oracle_id = Address::generate(&e);
 
         let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-
-        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
-        let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
-
-        // mint lp tokens - under limit
-        blnt_client.mint(&samwise, &400_001_0000000);
-        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        usdc_client.mint(&samwise, &10_001_0000000);
-        usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        lp_token_client.join_pool(
-            &40_000_0000000,
-            &vec![&e, 400_001_0000000, 10_001_0000000],
-            &samwise,
-        );
-        backstop_client.deposit(
-            &backstop::BackstopTier::SecondLoss,
-            &samwise,
-            &pool_id,
-            &9_999_9999999,
-        );
+        let (blnt, _) = create_token_contract(&e, &bombadil);
+        let (usdc, _) = create_token_contract(&e, &bombadil);
+        let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        create_backstop_with_config(&e, &pool_id, &lp_token, &usdc, &blnt, &vec![&e]);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -221,6 +173,7 @@ mod tests {
             storage::set_pool_config(&e, &pool_config);
 
             execute_set_pool_status(&e, 0);
+            assert_eq!(storage::get_pool_config(&e).status, STATUS_ADMIN_ACTIVE);
         });
     }
 
@@ -641,7 +594,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_pool_status_on_ice_tokens() {
+    fn test_update_pool_status_stays_active_without_backstop_tiers() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -649,29 +602,10 @@ mod tests {
         let oracle_id = Address::generate(&e);
 
         let bombadil = Address::generate(&e);
-        let samwise = Address::generate(&e);
-
-        let (blnt, blnt_client) = create_token_contract(&e, &bombadil);
-        let (usdc, usdc_client) = create_token_contract(&e, &bombadil);
-        let (lp_token, lp_token_client) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
-        let (_, backstop_client) = create_backstop(&e, &pool_id, &lp_token, &usdc, &blnt);
-
-        // mint lp tokens - under limit
-        blnt_client.mint(&samwise, &400_001_0000000);
-        blnt_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        usdc_client.mint(&samwise, &10_001_0000000);
-        usdc_client.approve(&samwise, &lp_token, &i128::MAX, &99999);
-        lp_token_client.join_pool(
-            &40_000_0000000,
-            &vec![&e, 400_001_0000000, 10_001_0000000],
-            &samwise,
-        );
-        backstop_client.deposit(
-            &backstop::BackstopTier::SecondLoss,
-            &samwise,
-            &pool_id,
-            &9_999_9999999,
-        );
+        let (blnt, _) = create_token_contract(&e, &bombadil);
+        let (usdc, _) = create_token_contract(&e, &bombadil);
+        let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
+        create_backstop_with_config(&e, &pool_id, &lp_token, &usdc, &blnt, &vec![&e]);
 
         let pool_config = PoolConfig {
             oracle: oracle_id,
@@ -688,7 +622,7 @@ mod tests {
 
             let new_pool_config = storage::get_pool_config(&e);
             assert_eq!(new_pool_config.status, status);
-            assert_eq!(status, 3);
+            assert_eq!(status, STATUS_ACTIVE);
         });
     }
 

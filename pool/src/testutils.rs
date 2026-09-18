@@ -176,13 +176,12 @@ pub(crate) fn create_backstop<'a>(
     usdc_token: &Address,
     blnt_token: &Address,
 ) -> (Address, BackstopClient<'a>) {
-    let backstop_id = Address::generate(e);
-    let comet_admin = Address::generate(e);
-    let (xlm_token, _) = create_token_contract(e, &comet_admin);
-    let (blnt_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnt_token, &xlm_token);
-    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
-    mock_pool_factory_client.set_pool_config(
+    create_backstop_with_config(
+        e,
         pool_address,
+        backstop_token,
+        usdc_token,
+        blnt_token,
         &vec![
             e,
             BackstopTierConfig {
@@ -198,7 +197,23 @@ pub(crate) fn create_backstop<'a>(
                 take_rate_weight: 2,
             },
         ],
-    );
+    )
+}
+
+pub(crate) fn create_backstop_with_config<'a>(
+    e: &Env,
+    pool_address: &Address,
+    backstop_token: &Address,
+    usdc_token: &Address,
+    blnt_token: &Address,
+    backstop_config: &soroban_sdk::Vec<BackstopTierConfig>,
+) -> (Address, BackstopClient<'a>) {
+    let backstop_id = Address::generate(e);
+    let comet_admin = Address::generate(e);
+    let (xlm_token, _) = create_token_contract(e, &comet_admin);
+    let (blnt_xlm_token, _) = create_comet_lp_pool(e, &comet_admin, blnt_token, &xlm_token);
+    let (pool_factory, mock_pool_factory_client) = create_mock_pool_factory(e, &backstop_id);
+    mock_pool_factory_client.set_pool_config(pool_address, backstop_config);
     let (emitter, _) = create_emitter(e, &backstop_id, backstop_token, blnt_token);
     e.register_at(
         &backstop_id,

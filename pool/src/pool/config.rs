@@ -1,5 +1,6 @@
 use crate::{
     constants::{MAX_RESERVES, SCALAR_12, SCALAR_7, SECONDS_PER_WEEK},
+    dependencies::BackstopClient,
     errors::PoolError,
     storage::{
         self, has_queued_reserve_set, PoolConfig, QueuedReserveInit, ReserveConfig, ReserveData,
@@ -50,8 +51,23 @@ pub fn execute_update_pool(
     min_collateral: i128,
 ) {
     let mut pool_config = storage::get_pool_config(e);
+    let backstop_rate_changed = pool_config.bstop_rate != backstop_take_rate;
+    let enables_backstop_take_rate = pool_config.bstop_rate == 0 && backstop_take_rate > 0;
+    pool_config.bstop_rate = backstop_take_rate;
+    pool_config.max_positions = max_positions;
+    pool_config.min_collateral = min_collateral;
+    require_valid_pool_config(e, &pool_config);
+
+    if enables_backstop_take_rate
+        && BackstopClient::new(e, &storage::get_backstop(e))
+            .pool_data(&e.current_contract_address())
+            .tiers
+            .is_empty()
+    {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
     let res_list = storage::get_res_list(e);
-    if pool_config.bstop_rate != backstop_take_rate {
+    if backstop_rate_changed {
         let mut pool = Pool::load(e);
         for res in res_list {
             let reserve = pool.load_reserve(e, &res, true);
@@ -59,11 +75,6 @@ pub fn execute_update_pool(
         }
         pool.store_cached_reserves(e);
     }
-    pool_config.bstop_rate = backstop_take_rate;
-    pool_config.max_positions = max_positions;
-    pool_config.min_collateral = min_collateral;
-
-    require_valid_pool_config(e, &pool_config);
     storage::set_pool_config(e, &pool_config);
 }
 
@@ -223,7 +234,19 @@ mod tests {
     use crate::testutils;
 
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
+    use mock_pool_factory::{BackstopAsset, BackstopTierConfig};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger, LedgerInfo},
+        vec,
+    };
+
+    fn attach_backstop(e: &Env, pool: &Address, config: &soroban_sdk::Vec<BackstopTierConfig>) {
+        let admin = Address::generate(e);
+        let (blnt, _) = testutils::create_token_contract(e, &admin);
+        let (usdc, _) = testutils::create_token_contract(e, &admin);
+        let (blnt_usdc, _) = testutils::create_comet_lp_pool(e, &admin, &blnt, &usdc);
+        testutils::create_backstop_with_config(e, pool, &blnt_usdc, &usdc, &blnt, config);
+    }
 
     #[test]
     fn test_execute_initialize() {
@@ -335,11 +358,22 @@ mod tests {
         let e = Env::default();
         e.mock_all_auths();
         let pool = testutils::create_pool(&e);
+        attach_backstop(
+            &e,
+            &pool,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: BackstopAsset::BlntUsdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
 
         let pool_config = PoolConfig {
             oracle: Address::generate(&e),
             min_collateral: 1_0000000,
-            bstop_rate: 0_1000000,
+            bstop_rate: 0,
             status: 0,
             max_positions: 2,
         };
@@ -430,6 +464,22 @@ mod tests {
             assert_eq!(new_reserve_data_1.last_time, 12345 * 5);
             assert!(new_reserve_data_1.d_rate > reserve_data_1.d_rate);
             assert!(new_reserve_data_1.b_rate > reserve_data_1.b_rate);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_execute_update_pool_rejects_take_rate_for_unbackstopped_pool() {
+        let e = Env::default();
+        e.mock_all_auths();
+        let pool = testutils::create_pool(&e);
+        attach_backstop(&e, &pool, &vec![&e]);
+
+        e.as_contract(&pool, || {
+            let mut config = storage::get_pool_config(&e);
+            config.bstop_rate = 0;
+            storage::set_pool_config(&e, &config);
+            execute_update_pool(&e, 0_1000000, 4, 1_0000000);
         });
     }
 

@@ -189,12 +189,11 @@ pub trait Pool {
     /// been revoked. The target must have no liabilities or active auction.
     fn force_withdrawal(e: Env, user: Address, asset: Address) -> i128;
 
-    /// Update the pool status from canonical configured-tier USDC valuation and Q4W value.
+    /// Update the pool status from canonical configured-tier Q4W value.
     ///
     /// Backstop-triggered statuses are odd:
     /// * 1 = active
-    /// * 3 = on-ice when the applicable activation threshold is not met, or
-    ///   Q4W reaches the inherited 30% or 50% boundary
+    /// * 3 = on-ice when Q4W reaches the inherited 30% or 50% boundary
     /// * 5 = frozen when Q4W reaches the inherited 60% or 75% boundary
     ///
     /// ### Panics
@@ -203,7 +202,7 @@ pub trait Pool {
     fn update_status(e: Env) -> u32;
 
     /// (Admin only) Pool status is changed to `pool_status`
-    /// * 0 = admin active - requires the applicable activation threshold and Q4W below 50%
+    /// * 0 = admin active - requires Q4W below 50%
     /// * 2 = admin on-ice - requires Q4W below 75%
     /// * 4 = admin frozen - can always be set
     ///

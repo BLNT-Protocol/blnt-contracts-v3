@@ -59,23 +59,34 @@ fn test_backstop_rz_changes_handle_emissions() {
         frodo,
     );
 
-    // Move active value below the v3 activation threshold for the reward-zone
-    // removal, then restore Sam's ordinary position at the same timestamp.
-    // The fixture Comet v2 pool is worth about $1.25 per LP share. Queue enough of
-    // Sam's position to leave 7,500 active shares (about $9,375).
-    let membership_reduction = 10_000 * SCALAR_7;
+    // Remove all active BLNT-bearing backstop weight so the pool can leave the
+    // reward zone, then restore both ordinary positions at the same timestamp.
+    let sam_membership_reduction = 12_500 * SCALAR_7;
+    let frodo_membership_reduction = 5_000 * SCALAR_7;
     fixture.backstop.queue_withdrawal(
         &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool_fixture.pool.address,
-        &membership_reduction,
+        &sam_membership_reduction,
+    );
+    fixture.backstop.queue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        frodo,
+        &pool_fixture.pool.address,
+        &frodo_membership_reduction,
     );
     fixture.backstop.remove_reward(&pool_fixture.pool.address);
     fixture.backstop.dequeue_withdrawal(
         &backstop::BackstopTier::SecondLoss,
         &sam,
         &pool_fixture.pool.address,
-        &membership_reduction,
+        &sam_membership_reduction,
+    );
+    fixture.backstop.dequeue_withdrawal(
+        &backstop::BackstopTier::SecondLoss,
+        frodo,
+        &pool_fixture.pool.address,
+        &frodo_membership_reduction,
     );
 
     let result = pool_fixture.pool.try_gulp_emissions();

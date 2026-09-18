@@ -3,7 +3,7 @@ use soroban_fixed_point_math::FixedPoint;
 use soroban_sdk::{contracttype, panic_with_error, unwrap::UnwrapOptimized, Address, Env, I256};
 
 use crate::{
-    constants::{ACTIVATION_THRESHOLD_USDC, SCALAR_7},
+    constants::SCALAR_7,
     dependencies::{BackstopTierConfig, CometClient, FactoryBackstopAsset, PoolFactoryClient},
     errors::BackstopError,
     storage,
@@ -155,7 +155,7 @@ pub(crate) fn load_pool_backstop_data(e: &Env, pool: &Address) -> PoolBackstopDa
         ));
     }
     PoolBackstopData {
-        active_value: sum_activation_values(e, &valuation.active_values),
+        active_value: sum_tier_values(e, &valuation.active_values),
         q4w_pct: calculate_q4w_percentage(e, &valuation.active_values, &valuation.queued_values),
         tiers,
     }
@@ -287,22 +287,15 @@ struct AssetValuation {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ActivationValues {
+pub(crate) struct TierValues {
     pub tiers: soroban_sdk::Vec<i128>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct ActivationQuote {
-    pub eligible_value: i128,
-    pub meets_threshold: bool,
-    pub required_value: i128,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PoolValuation {
-    pub active_values: ActivationValues,
-    pub queued_values: ActivationValues,
-    pub total_values: ActivationValues,
+    pub active_values: TierValues,
+    pub queued_values: TierValues,
+    pub total_values: TierValues,
 }
 
 struct PoolTierValuation {
@@ -372,9 +365,9 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
             }
         }
         return PoolValuation {
-            active_values: ActivationValues { tiers: active },
-            queued_values: ActivationValues { tiers: queued },
-            total_values: ActivationValues { tiers: total },
+            active_values: TierValues { tiers: active },
+            queued_values: TierValues { tiers: queued },
+            total_values: TierValues { tiers: total },
         };
     }
 
@@ -384,13 +377,13 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
             zeroes.push_back(0);
         }
         return PoolValuation {
-            active_values: ActivationValues {
+            active_values: TierValues {
                 tiers: zeroes.clone(),
             },
-            queued_values: ActivationValues {
+            queued_values: TierValues {
                 tiers: zeroes.clone(),
             },
-            total_values: ActivationValues { tiers: zeroes },
+            total_values: TierValues { tiers: zeroes },
         };
     }
 
@@ -439,9 +432,9 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
         }
     }
     PoolValuation {
-        active_values: ActivationValues { tiers: active },
-        queued_values: ActivationValues { tiers: queued },
-        total_values: ActivationValues { tiers: total },
+        active_values: TierValues { tiers: active },
+        queued_values: TierValues { tiers: queued },
+        total_values: TierValues { tiers: total },
     }
 }
 
@@ -616,15 +609,6 @@ fn unit_asset_valuation(amount: i128) -> AssetValuation {
     AssetValuation { usdc_value: amount }
 }
 
-pub fn quote_activation(e: &Env, values: &ActivationValues) -> ActivationQuote {
-    let eligible_value = sum_activation_values(e, values);
-    ActivationQuote {
-        eligible_value,
-        meets_threshold: eligible_value >= ACTIVATION_THRESHOLD_USDC,
-        required_value: ACTIVATION_THRESHOLD_USDC,
-    }
-}
-
 fn pool_tier_asset_partition(e: &Env, tier: BackstopTier, pool: &Address) -> (i128, i128, i128) {
     let balance = storage::get_pool_balance_for_tier(e, tier, pool);
     let active_shares = balance
@@ -672,7 +656,7 @@ pub(crate) fn validate_backstop_assets(
 }
 
 fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTierConfig>) {
-    if config.is_empty() || config.len() > 3 {
+    if config.len() > 3 {
         panic_with_error!(e, BackstopError::InvalidBackstopValuation);
     }
     for (index, tier) in config.iter().enumerate() {
@@ -773,7 +757,7 @@ pub fn set_test_valuation_override(e: &Env, should_fail: Option<bool>) {
     }
 }
 
-fn sum_activation_values(e: &Env, values: &ActivationValues) -> i128 {
+fn sum_tier_values(e: &Env, values: &TierValues) -> i128 {
     let mut total = 0_i128;
     for value in values.tiers.iter() {
         if value < 0 {
@@ -788,11 +772,11 @@ fn sum_activation_values(e: &Env, values: &ActivationValues) -> i128 {
 
 fn calculate_q4w_percentage(
     e: &Env,
-    active_values: &ActivationValues,
-    queued_values: &ActivationValues,
+    active_values: &TierValues,
+    queued_values: &TierValues,
 ) -> i128 {
-    let active_value = sum_activation_values(e, active_values);
-    let queued_value = sum_activation_values(e, queued_values);
+    let active_value = sum_tier_values(e, active_values);
+    let queued_value = sum_tier_values(e, queued_values);
     let total_value = active_value
         .checked_add(queued_value)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
@@ -1386,6 +1370,8 @@ mod valuation_tests {
 
     use super::*;
 
+    const TEST_POOL_VALUE: i128 = 12_500 * SCALAR_7;
+
     #[test]
     fn enforces_weight_range_and_accepts_independent_tier_weights() {
         let e = Env::default();
@@ -1453,6 +1439,29 @@ mod valuation_tests {
             ],
         );
         assert!(client.try_pool_data(&ascending).is_ok());
+    }
+
+    #[test]
+    fn empty_config_reports_zero_backstop_value_and_rejects_tier_operations() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        let backstop = create_backstop(&e);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        let pool = Address::generate(&e);
+        let user = Address::generate(&e);
+        factory.set_pool_config(&pool, &soroban_sdk::Vec::new(&e));
+
+        let client = BackstopClient::new(&e, &backstop);
+        let data = client.pool_data(&pool);
+        assert!(data.tiers.is_empty());
+        assert_eq!(data.active_value, 0);
+        assert_eq!(data.q4w_pct, 0);
+        assert!(client
+            .try_backstop_token(&BackstopTier::FirstLoss, &pool)
+            .is_err());
+        assert!(client
+            .try_deposit(&BackstopTier::FirstLoss, &user, &pool, &1)
+            .is_err());
     }
 
     #[test]
@@ -1575,27 +1584,10 @@ mod valuation_tests {
         assert_eq!(emission_tier, Some(BackstopTier::SecondLoss));
     }
 
-    fn values(e: &Env, blnt_usdc: i128, blnt_xlm: i128, usdc: i128) -> ActivationValues {
-        ActivationValues {
+    fn values(e: &Env, blnt_usdc: i128, blnt_xlm: i128, usdc: i128) -> TierValues {
+        TierValues {
             tiers: soroban_sdk::vec![e, blnt_xlm, blnt_usdc, usdc],
         }
-    }
-
-    #[test]
-    fn activation_values_all_tiers_equally_and_uses_one_threshold() {
-        let e = Env::default();
-        let threshold = values(&e, 4_000 * SCALAR_7, 3_500 * SCALAR_7, 5_000 * SCALAR_7);
-        assert_eq!(
-            quote_activation(&e, &threshold),
-            ActivationQuote {
-                eligible_value: ACTIVATION_THRESHOLD_USDC,
-                meets_threshold: true,
-                required_value: ACTIVATION_THRESHOLD_USDC,
-            }
-        );
-
-        let below_threshold = values(&e, 0, 0, ACTIVATION_THRESHOLD_USDC - 1);
-        assert!(!quote_activation(&e, &below_threshold).meets_threshold);
     }
 
     #[test]
@@ -1714,14 +1706,8 @@ mod valuation_tests {
         assert_eq!(usdc_data.shares, 6_500 * SCALAR_7);
         assert_eq!(usdc_data.value, 6_500 * SCALAR_7);
         assert_eq!(usdc_data.take_rate_weight, 2);
-        assert_eq!(pool_data.active_value, ACTIVATION_THRESHOLD_USDC);
+        assert_eq!(pool_data.active_value, TEST_POOL_VALUE);
         assert_eq!(pool_data.q4w_pct, 1_935_484);
-        let quote = e.as_contract(&backstop, || {
-            let valuation = build_pool_valuation(&e, &pool);
-            quote_activation(&e, &valuation.active_values)
-        });
-        assert_eq!(quote.eligible_value, ACTIVATION_THRESHOLD_USDC);
-        assert!(quote.meets_threshold);
     }
 
     #[test]
@@ -1745,39 +1731,22 @@ mod valuation_tests {
                 },
             ],
         );
-        usdc_client.mint(&user, &ACTIVATION_THRESHOLD_USDC);
+        usdc_client.mint(&user, &TEST_POOL_VALUE);
         let client = BackstopClient::new(&e, &backstop);
-        client.deposit(
-            &BackstopTier::FirstLoss,
-            &user,
-            &pool,
-            &ACTIVATION_THRESHOLD_USDC,
-        );
+        client.deposit(&BackstopTier::FirstLoss, &user, &pool, &TEST_POOL_VALUE);
 
-        assert_eq!(
-            client.pool_data(&pool).active_value,
-            ACTIVATION_THRESHOLD_USDC
-        );
+        assert_eq!(client.pool_data(&pool).active_value, TEST_POOL_VALUE);
         StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &false);
 
         let deauthorized = client.pool_data(&pool);
         assert_eq!(deauthorized.active_value, 0);
         assert_eq!(deauthorized.q4w_pct, 0);
-        assert_eq!(
-            deauthorized.tiers.first().unwrap().tokens,
-            ACTIVATION_THRESHOLD_USDC
-        );
-        assert_eq!(
-            deauthorized.tiers.first().unwrap().shares,
-            ACTIVATION_THRESHOLD_USDC
-        );
+        assert_eq!(deauthorized.tiers.first().unwrap().tokens, TEST_POOL_VALUE);
+        assert_eq!(deauthorized.tiers.first().unwrap().shares, TEST_POOL_VALUE);
         assert_eq!(deauthorized.tiers.first().unwrap().value, 0);
 
         StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &true);
-        assert_eq!(
-            client.pool_data(&pool).active_value,
-            ACTIVATION_THRESHOLD_USDC
-        );
+        assert_eq!(client.pool_data(&pool).active_value, TEST_POOL_VALUE);
     }
 
     #[test]
@@ -1804,7 +1773,7 @@ mod valuation_tests {
         );
         e.as_contract(&backstop, || set_test_valuation_override(&e, None));
 
-        let amount = ACTIVATION_THRESHOLD_USDC;
+        let amount = TEST_POOL_VALUE;
         xlm_client.mint(&user, &amount);
         let client = BackstopClient::new(&e, &backstop);
         client.deposit(&BackstopTier::FirstLoss, &user, &pool, &amount);
@@ -1816,7 +1785,7 @@ mod valuation_tests {
         assert_eq!(tier.token, xlm);
         assert_eq!(tier.take_rate_weight, 100);
         assert!(!tier.blnt_emission_eligible);
-        assert_eq!(tier.value, ACTIVATION_THRESHOLD_USDC);
-        assert_eq!(data.active_value, ACTIVATION_THRESHOLD_USDC);
+        assert_eq!(tier.value, TEST_POOL_VALUE);
+        assert_eq!(data.active_value, TEST_POOL_VALUE);
     }
 }
