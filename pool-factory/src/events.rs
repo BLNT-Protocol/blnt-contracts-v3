@@ -1,4 +1,9 @@
-use soroban_sdk::{Address, Env, Symbol};
+use soroban_sdk::{contractevent, Address, Env};
+
+#[contractevent(topics = ["deploy"], data_format = "single-value")]
+struct PoolFactoryDeployEvent {
+    pool_address: Address,
+}
 
 pub struct PoolFactoryEvents {}
 
@@ -11,7 +16,6 @@ impl PoolFactoryEvents {
     /// ### Arguments
     /// * `pool_address` - The address of the pool
     pub fn deploy(e: &Env, pool_address: Address) {
-        let topics = (Symbol::new(e, "deploy"),);
-        e.events().publish(topics, pool_address);
+        PoolFactoryDeployEvent { pool_address }.publish(e);
     }
 }

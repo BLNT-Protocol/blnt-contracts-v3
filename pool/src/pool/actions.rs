@@ -31,6 +31,7 @@ pub enum RequestType {
     FillBadDebtAuction = 7,
     FillInterestAuction = 8,
     DeleteLiquidationAuction = 9,
+    FillProtocolFeeAuction = 10,
 }
 
 impl RequestType {
@@ -50,6 +51,7 @@ impl RequestType {
             7 => RequestType::FillBadDebtAuction,
             8 => RequestType::FillInterestAuction,
             9 => RequestType::DeleteLiquidationAuction,
+            10 => RequestType::FillProtocolFeeAuction,
             _ => panic_with_error!(e, PoolError::BadRequest),
         }
     }
@@ -208,7 +210,7 @@ pub fn build_actions_from_request(
                 let filled_auction = auctions::fill(
                     e,
                     pool,
-                    0,
+                    AuctionType::UserLiquidation as u32,
                     &request.address,
                     from_state,
                     request.amount as u64,
@@ -225,20 +227,18 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillBadDebtAuction => {
-                // Note: will fail if input address is not the backstop since there cannot be a bad debt auction for a different address in storage
                 let filled_auction = auctions::fill(
                     e,
                     pool,
-                    1,
+                    AuctionType::BadDebtAuction as u32,
                     &request.address,
                     from_state,
-                    request.amount as u64,
+                    u64::from(request_fill_percent(e, request.amount)),
                 );
                 actions.do_check_health();
-
                 PoolEvents::fill_auction(
                     e,
-                    1u32,
+                    AuctionType::BadDebtAuction as u32,
                     request.address.clone(),
                     from_state.address.clone(),
                     request.amount,
@@ -246,18 +246,35 @@ pub fn build_actions_from_request(
                 );
             }
             RequestType::FillInterestAuction => {
-                // Note: will fail if input address is not the backstop since there cannot be an interest auction for a different address in storage
                 let filled_auction = auctions::fill(
                     e,
                     pool,
-                    2,
+                    AuctionType::InterestAuction as u32,
                     &request.address,
                     from_state,
-                    request.amount as u64,
+                    u64::from(request_fill_percent(e, request.amount)),
                 );
                 PoolEvents::fill_auction(
                     e,
-                    2u32,
+                    AuctionType::InterestAuction as u32,
+                    request.address.clone(),
+                    from_state.address.clone(),
+                    request.amount,
+                    filled_auction,
+                );
+            }
+            RequestType::FillProtocolFeeAuction => {
+                let filled_auction = auctions::fill(
+                    e,
+                    pool,
+                    AuctionType::ProtocolFeeAuction as u32,
+                    &request.address,
+                    from_state,
+                    u64::from(request_fill_percent(e, request.amount)),
+                );
+                PoolEvents::fill_auction(
+                    e,
+                    AuctionType::ProtocolFeeAuction as u32,
                     request.address.clone(),
                     from_state.address.clone(),
                     request.amount,
@@ -278,6 +295,13 @@ pub fn build_actions_from_request(
     }
 
     actions
+}
+
+fn request_fill_percent(e: &Env, amount: i128) -> u32 {
+    if amount <= 0 || amount > 100 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    amount as u32
 }
 
 /// Apply a "supply" request to the pool
@@ -1630,7 +1654,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_bad_debt_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_fill_bad_debt_auction_requires_prepared_tier_state() {
         let e = Env::default();
 
         e.mock_all_auths();
@@ -1655,15 +1680,12 @@ mod tests {
 
         // creating reserves for a pool exhausts the budget
         e.cost_estimate().budget().reset_unlimited();
+        let (blnt_id, _) = testutils::create_token_contract(&e, &bombadil);
+        let (usdc_id, _) = testutils::create_token_contract(&e, &bombadil);
         let (backstop_token_id, backstop_token_client) =
-            testutils::create_token_contract(&e, &bombadil);
-        let (backstop_address, backstop_client) = testutils::create_backstop(
-            &e,
-            &pool_address,
-            &backstop_token_id,
-            &Address::generate(&e),
-            &Address::generate(&e),
-        );
+            testutils::create_comet_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
+        let (backstop_address, backstop_client) =
+            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnt_id);
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();
         reserve_data_0.last_time = 12345;
@@ -1702,7 +1724,7 @@ mod tests {
         };
         let auction_data = AuctionData {
             bid: map![&e, (underlying_0, 10_0000000), (underlying_1, 2_5000000)],
-            lot: map![&e, (backstop_token_id, 95_2000000)],
+            lot: map![&e, (backstop_token_id.clone(), 95_2000000)],
             block: 51,
         };
         let positions: Positions = Positions {
@@ -1714,9 +1736,18 @@ mod tests {
             ],
             supply: map![&e],
         };
-        backstop_token_client.mint(&samwise, &95_2000000);
+        sep_41_token::TokenClient::new(&e, &backstop_token_id).transfer(
+            &bombadil,
+            &samwise,
+            &95_2000000,
+        );
         backstop_token_client.approve(&samwise, &backstop_address, &i128::MAX, &1000000);
-        backstop_client.deposit(&samwise, &pool_address, &95_2000000);
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &samwise,
+            &pool_address,
+            &95_2000000,
+        );
         e.as_contract(&pool_address, || {
             storage::set_pool_config(&e, &pool_config);
             storage::set_user_positions(&e, &backstop_address, &positions);
@@ -1751,7 +1782,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_interest_auction() {
+    #[should_panic(expected = "Error(Contract, #1200)")]
+    fn test_fill_interest_auction_requires_tier_interest_state() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -1772,23 +1804,28 @@ mod tests {
 
         let pool_address = create_pool(&e);
         let (usdc_id, usdc_client) = testutils::create_token_contract(&e, &bombadil);
-        let (blnd_id, blnd_client) = testutils::create_blnd_token(&e, &pool_address, &bombadil);
+        let (blnt_id, blnt_client) = testutils::create_blnt_token(&e, &pool_address, &bombadil);
 
         let (backstop_token_id, backstop_token_client) =
-            create_comet_lp_pool(&e, &bombadil, &blnd_id, &usdc_id);
+            create_comet_lp_pool(&e, &bombadil, &blnt_id, &usdc_id);
         let (backstop_address, backstop_client) =
-            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnd_id);
-        blnd_client.mint(&samwise, &10_000_0000000);
+            testutils::create_backstop(&e, &pool_address, &backstop_token_id, &usdc_id, &blnt_id);
+        blnt_client.mint(&samwise, &10_000_0000000);
         usdc_client.mint(&samwise, &250_0000000);
         let exp_ledger = e.ledger().sequence() + 100;
-        blnd_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
+        blnt_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
         usdc_client.approve(&bombadil, &backstop_token_id, &2_000_0000000, &exp_ledger);
         backstop_token_client.join_pool(
             &(100 * SCALAR_7),
             &vec![&e, 10_000_0000000, 250_0000000],
             &samwise,
         );
-        backstop_client.deposit(&bombadil, &pool_address, &(50 * SCALAR_7));
+        backstop_client.deposit(
+            &backstop::BackstopTier::SecondLoss,
+            &bombadil,
+            &pool_address,
+            &(50 * SCALAR_7),
+        );
 
         let (underlying_0, underlying_0_client) = testutils::create_token_contract(&e, &bombadil);
         let (mut reserve_config_0, mut reserve_data_0) = testutils::default_reserve_meta();

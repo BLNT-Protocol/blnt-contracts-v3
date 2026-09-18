@@ -33,7 +33,7 @@ pub struct PoolConfig {
 
 /// The pool's emission config
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct PoolEmissionConfig {
     pub config: u128,
     pub last_time: u64,
@@ -59,7 +59,7 @@ pub struct ReserveConfig {
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct QueuedReserveInit {
     pub new_config: ReserveConfig,
     pub unlock_time: u64,
@@ -76,6 +76,17 @@ pub struct ReserveData {
     pub d_supply: i128, // the total supply of d tokens, in the underlying token's decimals
     pub backstop_credit: i128, // the amount of underlying tokens currently owed to the backstop
     pub last_time: u64, // the last block the data was updated
+}
+
+/// Additive protocol-fee accounting kept outside the v2-compatible
+/// `ReserveData` encoding.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype(export = false)]
+pub struct ProtocolFeeData {
+    /// Underlying reserve tokens owed to the protocol-fee auction lane.
+    pub credit: i128,
+    /// Fixed-point numerator remainder retained across borrower-interest accruals.
+    pub carry: i128,
 }
 
 /// The emission data for the reserve b or d token
@@ -96,33 +107,66 @@ pub struct UserEmissionData {
     pub accrued: i128,
 }
 
+/// Exact carry retained alongside v2-compatible reserve emission data.
+#[derive(Clone)]
+#[contracttype(export = false)]
+pub struct ReserveEmissionCarry {
+    /// Exact division numerator not yet represented by the reserve index.
+    pub index_carry: i128,
+    /// Exact unvested BLNT remaining in the current seven-day stream.
+    pub remaining: i128,
+}
+
+#[derive(Clone)]
+#[contracttype]
+struct StoredReserveEmissionData {
+    carry_initialized: bool,
+    expiration: u64,
+    eps: u64,
+    index: i128,
+    index_carry: i128,
+    last_time: u64,
+    remaining: i128,
+}
+
+#[derive(Clone)]
+#[contracttype]
+struct StoredUserEmissionData {
+    accrued: i128,
+    carry: i128,
+    index: i128,
+}
+
 /********** Storage Key Types **********/
 
 const ADMIN_KEY: &str = "Admin";
 const PROPOSED_ADMIN_KEY: &str = "PropAdmin";
 const NAME_KEY: &str = "Name";
 const BACKSTOP_KEY: &str = "Backstop";
-const BLND_TOKEN_KEY: &str = "BLNDTkn";
+const BLNT_TOKEN_KEY: &str = "BLNTTkn";
+const ACCESS_CONTROLLER_KEY: &str = "AccessCtrl";
 const POOL_CONFIG_KEY: &str = "Config";
 const RES_LIST_KEY: &str = "ResList";
 const POOL_EMIS_KEY: &str = "PoolEmis";
+const POOL_EMIS_CARRY_KEY: &str = "PoolEmisC";
+const RES_EMIS_CONFIGURED_KEY: &str = "ResEmisSet";
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct UserReserveKey {
     user: Address,
     reserve_id: u32,
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub struct AuctionKey {
     user: Address,  // the Address whose assets are involved in the auction
     auct_type: u32, // the type of auction taking place
 }
 
 #[derive(Clone)]
-#[contracttype]
+#[contracttype(export = false)]
 pub enum PoolDataKey {
     // A map of underlying asset's contract address to reserve config
     ResConfig(Address),
@@ -138,6 +182,10 @@ pub enum PoolDataKey {
     UserEmis(UserReserveKey),
     // The auction's data
     Auction(AuctionKey),
+    // Marks a user-liquidation auction created by permission revocation.
+    BorrowExit(Address),
+    // Reserve-addressed additive protocol-interest fee data, separate from ReserveData.
+    ProtocolFees,
 }
 
 /********** Storage **********/
@@ -282,24 +330,41 @@ pub fn set_backstop(e: &Env, backstop: &Address) {
         .set::<Symbol, Address>(&Symbol::new(e, BACKSTOP_KEY), backstop);
 }
 
-/********** External Token Contracts **********/
+/********** Access Controller **********/
 
-/// Fetch the BLND token ID
-pub fn get_blnd_token(e: &Env) -> Address {
+/// Fetch the pool's immutable optional access-controller binding.
+pub fn get_access_controller(e: &Env) -> Option<Address> {
     e.storage()
         .instance()
-        .get(&Symbol::new(e, BLND_TOKEN_KEY))
+        .get(&Symbol::new(e, ACCESS_CONTROLLER_KEY))
+        .unwrap_or(None)
+}
+
+/// Bind the pool's optional access controller during construction.
+pub fn set_access_controller(e: &Env, access_controller: &Option<Address>) {
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, ACCESS_CONTROLLER_KEY), access_controller);
+}
+
+/********** External Token Contracts **********/
+
+/// Fetch the BLNT token ID
+pub fn get_blnt_token(e: &Env) -> Address {
+    e.storage()
+        .instance()
+        .get(&Symbol::new(e, BLNT_TOKEN_KEY))
         .unwrap_optimized()
 }
 
-/// Set a new BLND token ID
+/// Set a new BLNT token ID
 ///
 /// ### Arguments
-/// * `blnd_token_id` - The ID of the BLND token
-pub fn set_blnd_token(e: &Env, blnd_token_id: &Address) {
+/// * `blnt_token_id` - The ID of the BLNT token
+pub fn set_blnt_token(e: &Env, blnt_token_id: &Address) {
     e.storage()
         .instance()
-        .set::<Symbol, Address>(&Symbol::new(e, BLND_TOKEN_KEY), blnd_token_id);
+        .set::<Symbol, Address>(&Symbol::new(e, BLNT_TOKEN_KEY), blnt_token_id);
 }
 
 /********** Pool Config **********/
@@ -455,6 +520,65 @@ pub fn set_res_data(e: &Env, asset: &Address, data: &ReserveData) {
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
+/// Return additive protocol-fee accounting for one reserve.
+pub fn get_protocol_fee_data(e: &Env, asset: &Address) -> ProtocolFeeData {
+    get_protocol_fee_map(e)
+        .get(asset.clone())
+        .unwrap_or(ProtocolFeeData {
+            credit: 0,
+            carry: 0,
+        })
+}
+
+/// Return the bounded reserve-addressed protocol-fee map.
+pub(crate) fn get_protocol_fee_map(e: &Env) -> Map<Address, ProtocolFeeData> {
+    let key = PoolDataKey::ProtocolFees;
+    get_persistent_default(
+        e,
+        &key,
+        || Map::new(e),
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+}
+
+/// Store additive protocol-fee accounting for one reserve.
+#[cfg(test)]
+pub fn set_protocol_fee_data(e: &Env, asset: &Address, data: &ProtocolFeeData) {
+    if data.credit < 0 || !(0..crate::constants::SCALAR_7).contains(&data.carry) {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let mut protocol_fees = get_protocol_fee_map(e);
+    if data.credit == 0 && data.carry == 0 {
+        protocol_fees.remove(asset.clone());
+    } else {
+        protocol_fees.set(asset.clone(), data.clone());
+    }
+    set_protocol_fee_map(e, &protocol_fees);
+}
+
+/// Store the complete bounded protocol-fee map in one ledger entry.
+pub(crate) fn set_protocol_fee_map(e: &Env, protocol_fees: &Map<Address, ProtocolFeeData>) {
+    let key = PoolDataKey::ProtocolFees;
+    let mut nonzero = Map::new(e);
+    for (asset, data) in protocol_fees.iter() {
+        if data.credit < 0 || !(0..crate::constants::SCALAR_7).contains(&data.carry) {
+            panic_with_error!(e, PoolError::BadRequest);
+        }
+        if data.credit != 0 || data.carry != 0 {
+            nonzero.set(asset, data);
+        }
+    }
+    if nonzero.is_empty() {
+        e.storage().persistent().remove(&key);
+    } else {
+        e.storage().persistent().set(&key, &nonzero);
+        e.storage()
+            .persistent()
+            .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+    }
+}
+
 /********** Reserve List (ResList) **********/
 
 /// Fetch the list of reserves
@@ -510,6 +634,32 @@ pub fn get_res_emis_data(e: &Env, res_token_index: &u32) -> Option<ReserveEmissi
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,
     )
+    .map(|stored: StoredReserveEmissionData| ReserveEmissionData {
+        expiration: stored.expiration,
+        eps: stored.eps,
+        index: stored.index,
+        last_time: stored.last_time,
+    })
+}
+
+/// Return whether a reserve stream has ever had emission data.
+///
+/// The compact index avoids a separate negative ledger read for every
+/// unconfigured stream during bounded multi-reserve operations. Bits remain
+/// set after an allocation changes so accrued historical emissions continue
+/// to use the inherited update path. The index is instance storage so it
+/// cannot expire independently from the pool contract while persistent
+/// emission data remains live.
+pub fn is_res_emis_configured(e: &Env, res_token_index: &u32) -> bool {
+    if *res_token_index >= 2 * MAX_RESERVES {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let configured = e
+        .storage()
+        .instance()
+        .get::<Symbol, u128>(&Symbol::new(e, RES_EMIS_CONFIGURED_KEY))
+        .unwrap_or(0);
+    configured & (1_u128 << *res_token_index) != 0
 }
 
 /// Set the emission data for the reserve b or d token
@@ -518,10 +668,82 @@ pub fn get_res_emis_data(e: &Env, res_token_index: &u32) -> Option<ReserveEmissi
 /// * `res_token_index` - The d/bToken index for the reserve
 /// * `res_emis_data` - The new emission data for the reserve token
 pub fn set_res_emis_data(e: &Env, res_token_index: &u32, res_emis_data: &ReserveEmissionData) {
+    if *res_token_index >= 2 * MAX_RESERVES {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let configured_key = Symbol::new(e, RES_EMIS_CONFIGURED_KEY);
+    let mut configured = e
+        .storage()
+        .instance()
+        .get::<Symbol, u128>(&configured_key)
+        .unwrap_or(0);
+    let mask = 1_u128 << *res_token_index;
+    if configured & mask == 0 {
+        configured |= mask;
+        e.storage()
+            .instance()
+            .set::<Symbol, u128>(&configured_key, &configured);
+    }
+
     let key = PoolDataKey::EmisData(*res_token_index);
+    let prior = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredReserveEmissionData>(&key);
+    let stored = StoredReserveEmissionData {
+        carry_initialized: prior
+            .as_ref()
+            .is_some_and(|stored| stored.carry_initialized),
+        expiration: res_emis_data.expiration,
+        eps: res_emis_data.eps,
+        index: res_emis_data.index,
+        index_carry: prior.as_ref().map(|stored| stored.index_carry).unwrap_or(0),
+        last_time: res_emis_data.last_time,
+        remaining: prior.map(|stored| stored.remaining).unwrap_or(0),
+    };
     e.storage()
         .persistent()
-        .set::<PoolDataKey, ReserveEmissionData>(&key, res_emis_data);
+        .set::<PoolDataKey, StoredReserveEmissionData>(&key, &stored);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
+/// Fetch exact carry paired with a reserve emission stream.
+pub fn get_res_emis_carry(e: &Env, res_token_index: &u32) -> Option<ReserveEmissionCarry> {
+    let key = PoolDataKey::EmisData(*res_token_index);
+    get_persistent_default::<_, Option<StoredReserveEmissionData>, _>(
+        e,
+        &key,
+        || None,
+        LEDGER_THRESHOLD_SHARED,
+        LEDGER_BUMP_SHARED,
+    )
+    .and_then(|stored| {
+        stored.carry_initialized.then_some(ReserveEmissionCarry {
+            index_carry: stored.index_carry,
+            remaining: stored.remaining,
+        })
+    })
+}
+
+/// Store exact carry paired with a reserve emission stream.
+pub fn set_res_emis_carry(e: &Env, res_token_index: &u32, carry: &ReserveEmissionCarry) {
+    if carry.index_carry < 0 || carry.remaining < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let key = PoolDataKey::EmisData(*res_token_index);
+    let mut stored = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredReserveEmissionData>(&key)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
+    stored.carry_initialized = true;
+    stored.index_carry = carry.index_carry;
+    stored.remaining = carry.remaining;
+    e.storage()
+        .persistent()
+        .set::<PoolDataKey, StoredReserveEmissionData>(&key, &stored);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
@@ -543,7 +765,12 @@ pub fn get_user_emissions(
         user: user.clone(),
         reserve_id: *res_token_index,
     });
-    get_persistent_default(e, &key, || None, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER)
+    get_persistent_default(e, &key, || None, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER).map(
+        |stored: StoredUserEmissionData| UserEmissionData {
+            accrued: stored.accrued,
+            index: stored.index,
+        },
+    )
 }
 
 /// Set the users emission data for a reserve's d or d token
@@ -557,9 +784,60 @@ pub fn set_user_emissions(e: &Env, user: &Address, res_token_index: &u32, data: 
         user: user.clone(),
         reserve_id: *res_token_index,
     });
+    let carry = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredUserEmissionData>(&key)
+        .map(|stored| stored.carry)
+        .unwrap_or(0);
+    let stored = StoredUserEmissionData {
+        accrued: data.accrued,
+        carry,
+        index: data.index,
+    };
     e.storage()
         .persistent()
-        .set::<PoolDataKey, UserEmissionData>(&key, data);
+        .set::<PoolDataKey, StoredUserEmissionData>(&key, &stored);
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/// Fetch sub-base-unit carry for a user's reserve emission checkpoint.
+pub fn get_user_emission_carry(e: &Env, user: &Address, res_token_index: &u32) -> i128 {
+    let key = PoolDataKey::UserEmis(UserReserveKey {
+        user: user.clone(),
+        reserve_id: *res_token_index,
+    });
+    get_persistent_default::<_, Option<StoredUserEmissionData>, _>(
+        e,
+        &key,
+        || None,
+        LEDGER_THRESHOLD_USER,
+        LEDGER_BUMP_USER,
+    )
+    .map(|stored| stored.carry)
+    .unwrap_or(0)
+}
+
+/// Store sub-base-unit carry for a user's reserve emission checkpoint.
+pub fn set_user_emission_carry(e: &Env, user: &Address, res_token_index: &u32, carry: i128) {
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    let key = PoolDataKey::UserEmis(UserReserveKey {
+        user: user.clone(),
+        reserve_id: *res_token_index,
+    });
+    let mut stored = e
+        .storage()
+        .persistent()
+        .get::<PoolDataKey, StoredUserEmissionData>(&key)
+        .unwrap_or_else(|| panic_with_error!(e, PoolError::BadRequest));
+    stored.carry = carry;
+    e.storage()
+        .persistent()
+        .set::<PoolDataKey, StoredUserEmissionData>(&key, &stored);
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
@@ -592,6 +870,29 @@ pub fn set_pool_emissions(e: &Env, emissions: &Map<u32, u64>) {
         LEDGER_THRESHOLD_SHARED,
         LEDGER_BUMP_SHARED,
     );
+}
+
+/// Fetch unallocated BLNT base-unit carry from the prior pool-tranche gulp.
+pub fn get_pool_emission_carry(e: &Env) -> i128 {
+    let carry = e
+        .storage()
+        .instance()
+        .get::<Symbol, i128>(&Symbol::new(e, POOL_EMIS_CARRY_KEY))
+        .unwrap_or(0);
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    carry
+}
+
+/// Store unallocated BLNT base-unit carry for the next pool-tranche gulp.
+pub fn set_pool_emission_carry(e: &Env, carry: i128) {
+    if carry < 0 {
+        panic_with_error!(e, PoolError::BadRequest);
+    }
+    e.storage()
+        .instance()
+        .set(&Symbol::new(e, POOL_EMIS_CARRY_KEY), &carry);
 }
 
 /********** Auctions ***********/
@@ -647,6 +948,20 @@ pub fn set_auction(e: &Env, auction_type: &u32, user: &Address, auction_data: &A
         .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
 }
 
+pub fn has_borrower_exit_auction(e: &Env, user: &Address) -> bool {
+    e.storage()
+        .temporary()
+        .has(&PoolDataKey::BorrowExit(user.clone()))
+}
+
+pub fn set_borrower_exit_auction(e: &Env, user: &Address) {
+    let key = PoolDataKey::BorrowExit(user.clone());
+    e.storage().temporary().set(&key, &true);
+    e.storage()
+        .temporary()
+        .extend_ttl(&key, LEDGER_THRESHOLD_SHARED, LEDGER_BUMP_SHARED);
+}
+
 /// Remove an auction
 ///
 /// ### Arguments
@@ -658,4 +973,47 @@ pub fn del_auction(e: &Env, auction_type: &u32, user: &Address) {
         auct_type: *auction_type,
     });
     e.storage().temporary().remove(&key);
+    if *auction_type == 0 {
+        e.storage()
+            .temporary()
+            .remove(&PoolDataKey::BorrowExit(user.clone()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutils;
+
+    #[test]
+    fn reserve_emission_configuration_index_is_instance_bound() {
+        let e = Env::default();
+        let pool = testutils::create_pool(&e);
+
+        e.as_contract(&pool, || {
+            let stream = 59;
+            assert!(!is_res_emis_configured(&e, &stream));
+
+            set_res_emis_data(
+                &e,
+                &stream,
+                &ReserveEmissionData {
+                    expiration: 100,
+                    eps: 1,
+                    index: 0,
+                    last_time: 0,
+                },
+            );
+
+            assert!(is_res_emis_configured(&e, &stream));
+            assert!(e
+                .storage()
+                .instance()
+                .has(&Symbol::new(&e, RES_EMIS_CONFIGURED_KEY)));
+            assert!(!e
+                .storage()
+                .persistent()
+                .has(&Symbol::new(&e, RES_EMIS_CONFIGURED_KEY)));
+        });
+    }
 }

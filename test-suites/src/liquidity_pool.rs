@@ -8,7 +8,7 @@ pub use lp_contract::{Client as LPClient, WASM as LP_WASM};
 
 use sep_41_token::testutils::MockTokenClient;
 
-/// Deploy a test Comet LP pool of 80% token_1 / 20% token_2. The admin must be the
+/// Deploy a test Comet v2 LP pool of 80% token_1 / 20% token_2. The admin must be the
 /// admin of both of the token contracts used.
 ///
 /// Initializes the pool with the following settings:
@@ -16,7 +16,7 @@ use sep_41_token::testutils::MockTokenClient;
 /// - Token 1: 1,000
 /// - Token 2: 25
 /// - Shares: 100
-pub(crate) fn create_lp_pool<'a>(
+pub fn create_lp_pool<'a>(
     e: &Env,
     admin: &Address,
     token_1: &Address,

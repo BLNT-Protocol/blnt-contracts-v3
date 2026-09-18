@@ -2,23 +2,48 @@ use crate::{contract::require_nonnegative, emissions, storage, BackstopError};
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env};
 
-use super::require_is_from_pool_factory;
+use super::{require_registered_pool, tier_token, BackstopTier};
 
-/// Perform a deposit into the backstop module
-pub fn execute_deposit(e: &Env, from: &Address, pool_address: &Address, amount: i128) -> i128 {
+/// Perform a deposit into one configured backstop tier.
+pub fn execute_deposit(
+    e: &Env,
+    tier: BackstopTier,
+    from: &Address,
+    pool_address: &Address,
+    amount: i128,
+) -> i128 {
     require_nonnegative(e, amount);
     if from == pool_address || from == &e.current_contract_address() {
         panic_with_error!(e, &BackstopError::BadRequest)
     }
-    let mut pool_balance = storage::get_pool_balance(e, pool_address);
-    require_is_from_pool_factory(e, pool_address, pool_balance.shares);
-    let mut user_balance = storage::get_user_balance(e, pool_address, from);
-
-    emissions::update_emissions(e, pool_address, &pool_balance, from, &user_balance);
-
-    let backstop_token_client = TokenClient::new(e, &storage::get_backstop_token(e));
+    require_registered_pool(e, pool_address);
+    let emission_eligible = emissions::prepare_pool_weight_change(e, tier, pool_address);
+    emissions::checkpoint_user_ongoing_for_weight_change(
+        e,
+        tier,
+        from,
+        pool_address,
+        emission_eligible,
+    );
+    let backstop_token_client = TokenClient::new(e, &tier_token(e, pool_address, tier));
     backstop_token_client.transfer(from, &e.current_contract_address(), &amount);
 
+    let to_mint = credit_tier_shares(e, tier, from, pool_address, amount);
+    emissions::finish_pool_weight_change(e, pool_address, emission_eligible);
+
+    to_mint
+}
+
+/// Credit tier tokens already held by the backstop and mint user shares.
+pub(crate) fn credit_tier_shares(
+    e: &Env,
+    tier: BackstopTier,
+    user: &Address,
+    pool_address: &Address,
+    amount: i128,
+) -> i128 {
+    let mut pool_balance = storage::get_pool_balance_for_tier(e, tier, pool_address);
+    let mut user_balance = storage::get_user_balance_for_tier(e, tier, pool_address, user);
     let to_mint = pool_balance.convert_to_shares(amount);
     if to_mint <= 0 {
         panic_with_error!(e, &BackstopError::InvalidShareMintAmount);
@@ -26,9 +51,8 @@ pub fn execute_deposit(e: &Env, from: &Address, pool_address: &Address, amount: 
     pool_balance.deposit(amount, to_mint);
     user_balance.add_shares(to_mint);
 
-    storage::set_pool_balance(e, pool_address, &pool_balance);
-    storage::set_user_balance(e, pool_address, from, &user_balance);
-
+    storage::set_pool_balance_for_tier(e, tier, pool_address, &pool_balance);
+    storage::set_user_balance_for_tier(e, tier, pool_address, user, &user_balance);
     to_mint
 }
 
@@ -73,13 +97,25 @@ mod tests {
         );
         // initialize pool 0 with funds + some profit
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &frodo, &pool_0_id, 25_0000000);
-            execute_donate(&e, &frodo, &pool_0_id, 25_0000000);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 25_0000000);
+            execute_donate(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, 25_0000000);
         });
 
         e.as_contract(&backstop_address, || {
-            let shares_0 = execute_deposit(&e, &samwise, &pool_0_id, 30_0000000);
-            let shares_1 = execute_deposit(&e, &samwise, &pool_1_id, 70_0000000);
+            let shares_0 = execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
+                &samwise,
+                &pool_0_id,
+                30_0000000,
+            );
+            let shares_1 = execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
+                &samwise,
+                &pool_1_id,
+                70_0000000,
+            );
 
             let new_pool_0_balance = storage::get_pool_balance(&e, &pool_0_id);
             assert_eq!(new_pool_0_balance.shares, 40_0000000);
@@ -125,7 +161,13 @@ mod tests {
         mock_pool_factory_client.set_pool(&pool_0_id);
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &samwise, &pool_0_id, 100_0000001);
+            execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
+                &samwise,
+                &pool_0_id,
+                100_0000001,
+            );
 
             assert!(false);
         });
@@ -149,7 +191,7 @@ mod tests {
         mock_pool_factory_client.set_pool(&pool_0_id);
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &samwise, &pool_0_id, -100);
+            execute_deposit(&e, BackstopTier::SecondLoss, &samwise, &pool_0_id, -100);
         });
     }
 
@@ -171,7 +213,7 @@ mod tests {
         mock_pool_factory_client.set_pool(&pool_0_id);
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &pool_0_id, &pool_0_id, 100);
+            execute_deposit(&e, BackstopTier::SecondLoss, &pool_0_id, &pool_0_id, 100);
         });
     }
 
@@ -193,7 +235,13 @@ mod tests {
         mock_pool_factory_client.set_pool(&pool_0_id);
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &backstop_address, &pool_0_id, 100);
+            execute_deposit(
+                &e,
+                BackstopTier::SecondLoss,
+                &backstop_address,
+                &pool_0_id,
+                100,
+            );
         });
     }
 
@@ -214,7 +262,7 @@ mod tests {
         create_mock_pool_factory(&e, &backstop_address);
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &samwise, &pool_0_id, 100);
+            execute_deposit(&e, BackstopTier::SecondLoss, &samwise, &pool_0_id, 100);
         });
     }
 
@@ -248,12 +296,18 @@ mod tests {
         );
         // initialize pool 0 with funds + some profit
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &frodo, &pool_0_id, SCALAR_7);
-            execute_donate(&e, &frodo, &pool_0_id, 10_000_000 * SCALAR_7);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, SCALAR_7);
+            execute_donate(
+                &e,
+                BackstopTier::SecondLoss,
+                &frodo,
+                &pool_0_id,
+                10_000_000 * SCALAR_7,
+            );
         });
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &samwise, &pool_0_id, SCALAR_7);
+            execute_deposit(&e, BackstopTier::SecondLoss, &samwise, &pool_0_id, SCALAR_7);
         });
     }
 
@@ -287,12 +341,12 @@ mod tests {
         );
         // initialize pool 0 with funds than drain the backstop
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &frodo, &pool_0_id, SCALAR_7);
-            execute_draw(&e, &pool_0_id, SCALAR_7, &frodo);
+            execute_deposit(&e, BackstopTier::SecondLoss, &frodo, &pool_0_id, SCALAR_7);
+            execute_draw(&e, BackstopTier::SecondLoss, &pool_0_id, SCALAR_7, &frodo);
         });
 
         e.as_contract(&backstop_address, || {
-            execute_deposit(&e, &samwise, &pool_0_id, SCALAR_7);
+            execute_deposit(&e, BackstopTier::SecondLoss, &samwise, &pool_0_id, SCALAR_7);
         });
     }
 }
