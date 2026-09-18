@@ -99,6 +99,9 @@ impl PoolFactory for PoolFactoryContract {
         }
 
         validate_backstop_config(&e, &backstop_config);
+        if backstop_config.is_empty() && backstop_take_rate != 0 {
+            panic_with_error!(&e, PoolFactoryError::InvalidPoolInitArgs);
+        }
 
         let mut as_u8s: [u8; 56] = [0; 56];
         admin.to_string().copy_into_slice(&mut as_u8s);
@@ -139,7 +142,7 @@ impl PoolFactory for PoolFactoryContract {
 }
 
 pub(crate) fn validate_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>) {
-    if config.is_empty() || config.len() > MAX_BACKSTOP_TIERS {
+    if config.len() > MAX_BACKSTOP_TIERS {
         panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
     }
     for (index, tier) in config.iter().enumerate() {

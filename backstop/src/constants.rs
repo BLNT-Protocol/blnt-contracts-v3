@@ -27,6 +27,3 @@ pub const MAX_MIGRATION_DROP: i128 = 50_000_000 * SCALAR_7;
 /// initial recipient. The remaining allowance is reserved for migration
 /// backfill in the same emitter `drop` call.
 pub const MAX_MIGRATION_DROP_LIST: i128 = MAX_MIGRATION_DROP - MAX_BACKFILLED_EMISSIONS;
-
-/// The verified USDC value required for pool activation.
-pub const ACTIVATION_THRESHOLD_USDC: i128 = 12_500 * SCALAR_7;

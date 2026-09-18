@@ -124,7 +124,7 @@ fn test_wasm_deauthorized_usdc_loses_value_and_releases_selected_auction() {
     StellarAssetClient::new(&fixture.env, &usdc.address)
         .set_authorized(&fixture.backstop.address, &false);
     assert_eq!(fixture.backstop.pool_data(&pool.address).active_value, 0);
-    assert_eq!(pool.update_status(), 3);
+    assert_eq!(pool.update_status(), 1);
     assert!(fixture
         .backstop
         .try_add_reward(&pool.address, &None)
@@ -139,7 +139,10 @@ fn test_wasm_deauthorized_usdc_loses_value_and_releases_selected_auction() {
         amount
     );
     assert_eq!(pool.update_status(), 1);
-    fixture.backstop.add_reward(&pool.address, &None);
+    assert!(fixture
+        .backstop
+        .try_add_reward(&pool.address, &None)
+        .is_err());
 }
 
 #[test]

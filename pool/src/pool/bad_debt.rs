@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bad_debt_backstop_defaults_after_verified_tier_exhaustion() {
+    fn test_unbackstopped_pool_bad_debt_defaults_directly_to_suppliers() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths();
@@ -468,7 +468,8 @@ mod tests {
         let (blnt, _) = create_blnt_token(&e, &pool, &bombadil);
         let (usdc, _) = create_token_contract(&e, &bombadil);
         let (lp_token, _) = create_comet_lp_pool(&e, &bombadil, &blnt, &usdc);
-        let (backstop_address, _) = create_backstop(&e, &pool, &lp_token, &usdc, &blnt);
+        let (backstop_address, _) =
+            testutils::create_backstop_with_config(&e, &pool, &lp_token, &usdc, &blnt, &vec![&e]);
 
         let (underlying_0, _) = testutils::create_token_contract(&e, &bombadil);
         let (reserve_config, reserve_data_0) = testutils::default_reserve_meta();
@@ -491,7 +492,7 @@ mod tests {
         let pool_config = PoolConfig {
             oracle: Address::generate(&e),
             min_collateral: 1_0000000,
-            bstop_rate: 0_1000000,
+            bstop_rate: 0,
             status: 1,
             max_positions: 5,
         };
