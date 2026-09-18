@@ -101,10 +101,14 @@ pub fn tier_asset(e: &Env, pool: &Address, tier: BackstopTier) -> BackstopAsset 
     from_factory_asset(tier_config(e, pool, tier).asset)
 }
 
-pub fn tier_for_token(e: &Env, pool: &Address, token: &Address) -> Option<BackstopTier> {
+pub fn emission_tier_for_token(e: &Env, pool: &Address, token: &Address) -> Option<BackstopTier> {
     let config = pool_backstop_config(e, pool);
     for (index, tier) in config.iter().enumerate() {
-        if asset_token(e, from_factory_asset(tier.asset)) == *token {
+        if matches!(
+            tier.asset,
+            FactoryBackstopAsset::BlntXlm | FactoryBackstopAsset::BlntUsdc
+        ) && asset_token(e, from_factory_asset(tier.asset)) == *token
+        {
             return Some(tier_from_index(e, index as u32));
         }
     }
@@ -680,7 +684,11 @@ fn validate_pool_backstop_config(e: &Env, config: &soroban_sdk::Vec<BackstopTier
             panic_with_error!(e, BackstopError::InvalidBackstopValuation);
         }
         for later in config.iter().skip(index + 1) {
-            if tier.asset == later.asset {
+            if matches!(
+                tier.asset,
+                FactoryBackstopAsset::BlntXlm | FactoryBackstopAsset::BlntUsdc
+            ) && tier.asset == later.asset
+            {
                 panic_with_error!(e, BackstopError::AssetConfigurationCollision);
             }
         }
@@ -1165,6 +1173,68 @@ mod tier_tests {
     }
 
     #[test]
+    fn repeated_usdc_tiers_keep_pool_and_user_accounting_isolated() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool = Address::generate(&e);
+        let backstop = create_backstop(&e);
+        let (usdc, usdc_client) = create_usdc_token(&e, &backstop, &admin);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                mock_pool_factory::BackstopTierConfig {
+                    asset: mock_pool_factory::BackstopAsset::Usdc,
+                    take_rate_weight: 2,
+                },
+                mock_pool_factory::BackstopTierConfig {
+                    asset: mock_pool_factory::BackstopAsset::Usdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        usdc_client.mint(&user, &300);
+
+        let client = BackstopClient::new(&e, &backstop);
+        assert_eq!(
+            client.deposit(&BackstopTier::FirstLoss, &user, &pool, &100),
+            100
+        );
+        assert_eq!(
+            client.deposit(&BackstopTier::SecondLoss, &user, &pool, &200),
+            200
+        );
+
+        assert_eq!(client.backstop_token(&BackstopTier::FirstLoss, &pool), usdc);
+        assert_eq!(
+            client.backstop_token(&BackstopTier::SecondLoss, &pool),
+            usdc
+        );
+        let pool_data = client.pool_data(&pool);
+        assert_eq!(pool_data.tiers.get(0).unwrap().tokens, 100);
+        assert_eq!(pool_data.tiers.get(0).unwrap().shares, 100);
+        assert_eq!(pool_data.tiers.get(1).unwrap().tokens, 200);
+        assert_eq!(pool_data.tiers.get(1).unwrap().shares, 200);
+        assert_eq!(
+            client
+                .user_balance(&BackstopTier::FirstLoss, &pool, &user)
+                .shares,
+            100
+        );
+        assert_eq!(
+            client
+                .user_balance(&BackstopTier::SecondLoss, &pool, &user)
+                .shares,
+            200
+        );
+        assert_eq!(usdc_client.balance(&backstop), 300);
+    }
+
+    #[test]
     fn q4w_limit_is_aggregate_and_withdrawal_is_tier_specific() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
@@ -1383,6 +1453,126 @@ mod valuation_tests {
             ],
         );
         assert!(client.try_pool_data(&ascending).is_ok());
+    }
+
+    #[test]
+    fn accepts_repeated_plain_assets_and_rejects_repeated_blnt_assets() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        let backstop = create_backstop(&e);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        let client = BackstopClient::new(&e, &backstop);
+
+        let repeated_plain = Address::generate(&e);
+        factory.set_pool_config(
+            &repeated_plain,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 3,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 2,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Xlm,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&repeated_plain).is_ok());
+
+        let repeated_xlm = Address::generate(&e);
+        factory.set_pool_config(
+            &repeated_xlm,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Xlm,
+                    take_rate_weight: 2,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Xlm,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&repeated_xlm).is_ok());
+
+        let repeated_blnt_xlm = Address::generate(&e);
+        factory.set_pool_config(
+            &repeated_blnt_xlm,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntXlm,
+                    take_rate_weight: 2,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntXlm,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&repeated_blnt_xlm).is_err());
+
+        let repeated_blnt_usdc = Address::generate(&e);
+        factory.set_pool_config(
+            &repeated_blnt_usdc,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntUsdc,
+                    take_rate_weight: 2,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntUsdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+        assert!(client.try_pool_data(&repeated_blnt_usdc).is_err());
+    }
+
+    #[test]
+    fn emission_lookup_ignores_repeated_plain_assets() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        let backstop = create_backstop(&e);
+        let (_, factory) = create_mock_pool_factory(&e, &backstop);
+        let pool = Address::generate(&e);
+        factory.set_pool_config(
+            &pool,
+            &vec![
+                &e,
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 3,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::BlntXlm,
+                    take_rate_weight: 2,
+                },
+                BackstopTierConfig {
+                    asset: FactoryBackstopAsset::Usdc,
+                    take_rate_weight: 1,
+                },
+            ],
+        );
+
+        let (usdc, blnt_xlm) = e.as_contract(&backstop, || {
+            (storage::get_usdc_token(&e), storage::get_blnt_xlm_token(&e))
+        });
+        let (plain_tier, emission_tier) = e.as_contract(&backstop, || {
+            (
+                emission_tier_for_token(&e, &pool, &usdc),
+                emission_tier_for_token(&e, &pool, &blnt_xlm),
+            )
+        });
+        assert_eq!(plain_tier, None);
+        assert_eq!(emission_tier, Some(BackstopTier::SecondLoss));
     }
 
     fn values(e: &Env, blnt_usdc: i128, blnt_xlm: i128, usdc: i128) -> ActivationValues {

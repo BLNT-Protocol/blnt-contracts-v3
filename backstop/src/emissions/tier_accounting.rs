@@ -1,5 +1,5 @@
 use crate::{
-    backstop::{is_blnt_emission_tier, tier_for_token, BackstopTier},
+    backstop::{emission_tier_for_token, is_blnt_emission_tier, BackstopTier},
     constants::{MAX_BACKFILLED_EMISSIONS, SCALAR_7},
     errors::BackstopError,
     migration,
@@ -20,7 +20,7 @@ pub(crate) fn pool_weight(e: &Env, pool: &Address) -> i128 {
         pool_spot_blnt_emission_weight(e, pool)
     } else {
         let token = storage::get_blnt_usdc_token(e);
-        tier_for_token(e, pool, &token)
+        emission_tier_for_token(e, pool, &token)
             .map(|tier| pool_active_emission_assets(e, tier, pool))
             .unwrap_or(0)
     }
@@ -198,10 +198,10 @@ pub(crate) fn get_pool_ongoing_emissions(e: &Env, pool: &Address) -> PoolOngoing
 
 pub(crate) fn refresh_pool_ongoing_assets(e: &Env, pool: &Address) {
     let mut state = get_pool_ongoing_emissions(e, pool);
-    state.active_blnt_usdc = tier_for_token(e, pool, &storage::get_blnt_usdc_token(e))
+    state.active_blnt_usdc = emission_tier_for_token(e, pool, &storage::get_blnt_usdc_token(e))
         .map(|tier| pool_active_emission_assets(e, tier, pool))
         .unwrap_or(0);
-    state.active_blnt_xlm = tier_for_token(e, pool, &storage::get_blnt_xlm_token(e))
+    state.active_blnt_xlm = emission_tier_for_token(e, pool, &storage::get_blnt_xlm_token(e))
         .map(|tier| pool_active_emission_assets(e, tier, pool))
         .unwrap_or(0);
     set_pool_ongoing_emissions(e, pool, &state);

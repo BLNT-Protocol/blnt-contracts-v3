@@ -196,8 +196,7 @@ fn test_pool_factory_rejects_empty_backstop_config() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #1300)")]
-fn test_pool_factory_rejects_duplicate_backstop_tokens() {
+fn test_pool_factory_accepts_repeated_plain_backstop_tokens() {
     let e = Env::default();
     validate_backstop_config(
         &e,
@@ -209,6 +208,50 @@ fn test_pool_factory_rejects_duplicate_backstop_tokens() {
             },
             BackstopTierConfig {
                 asset: BackstopAsset::Xlm,
+                take_rate_weight: 2,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::Usdc,
+                take_rate_weight: 3,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_duplicate_blnt_xlm_tiers() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntXlm,
+                take_rate_weight: 2,
+            },
+        ],
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #1300)")]
+fn test_pool_factory_rejects_duplicate_blnt_usdc_tiers() {
+    let e = Env::default();
+    validate_backstop_config(
+        &e,
+        &vec![
+            &e,
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntUsdc,
+                take_rate_weight: 1,
+            },
+            BackstopTierConfig {
+                asset: BackstopAsset::BlntUsdc,
                 take_rate_weight: 2,
             },
         ],

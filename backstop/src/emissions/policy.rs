@@ -1,7 +1,7 @@
 use soroban_sdk::{panic_with_error, Address, Env, I256};
 
 use crate::{
-    backstop::{tier_for_token, BackstopTier},
+    backstop::{emission_tier_for_token, BackstopTier},
     dependencies::CometClient,
     errors::BackstopError,
     storage,
@@ -92,7 +92,7 @@ pub(crate) fn pool_spot_blnt_emission_weight(e: &Env, pool: &Address) -> i128 {
 }
 
 fn spot_underlying_blnt_for_token(e: &Env, pool: &Address, token: &Address) -> i128 {
-    if let Some(tier) = tier_for_token(e, pool, token) {
+    if let Some(tier) = emission_tier_for_token(e, pool, token) {
         spot_underlying_blnt(e, token, pool_active_emission_assets(e, tier, pool))
     } else {
         0

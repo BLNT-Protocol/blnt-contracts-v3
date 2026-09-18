@@ -47,11 +47,13 @@ This section replaces `V2-BACKSTOP-001`'s single token and extends
 
 At deployment, each pool operator supplies an ordered list of one to three
 `BackstopTierConfig` values. Entry order maps to `FirstLoss`, `SecondLoss`, and
-`ThirdLoss`; omitted trailing positions do not exist. Each entry selects one
-unique asset from canonical BLNT:XLM LP, BLNT:USDC LP, USDC, and XLM and one
-integer take-rate weight from 1 through 100. Weights are independent of loss-
-waterfall order. The factory stores this immutable configuration with the pool
-registration, and the backstop verifies and caches it before accepting the pool.
+`ThirdLoss`; omitted trailing positions do not exist. Each entry selects an
+asset from canonical BLNT:XLM LP, BLNT:USDC LP, USDC, and XLM and one integer
+take-rate weight from 1 through 100. Canonical BLNT:XLM LP and BLNT:USDC LP may
+each appear at most once, while plain USDC and plain XLM may each appear in
+multiple tiers. Weights are independent of loss-waterfall order. The factory
+stores this immutable configuration with the pool registration, and the
+backstop verifies and caches it before accepting the pool.
 
 The candidate also immutably binds the canonical BLNT:USDC and BLNT:XLM 80:20
 Comet v2 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is

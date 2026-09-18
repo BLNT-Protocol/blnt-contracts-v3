@@ -164,7 +164,7 @@ configuration and exposes that configuration to the backstop and clients.
 | --- | --- | --- | --- |
 | `PoolInitMeta` | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnd_id":"C_BLND"}</code> | <code>{"pool_hash":"HASH_POOL", "backstop":"C_BACKSTOP", "blnt_id":"C_BLNT"}</code> | V3 changes the field name and emission token binding to BLNT. |
 | `BackstopAsset` | Not present | One of `"BlntXlm"`, `"BlntUsdc"`, `"Usdc"`, or `"Xlm"` | Canonical asset selector shared with the backstop ABI. |
-| `BackstopTierConfig` | Not present | <code>{"asset":"BlntXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |
+| `BackstopTierConfig` | Not present | <code>{"asset":"BlntXlm", "take_rate_weight":4}</code> | One immutable loss-waterfall entry. Each BLNT-bearing LP may appear at most once; plain USDC and XLM may repeat. Each weight is an independent integer from 1 through 100; no backstop oracle is configured. |
 | `PoolBackstopConfig` | Not present | <code>{"access_controller":null, "tiers":[{"asset":"BlntXlm", "take_rate_weight":4}]}</code> | Factory-attested configuration consumed by the shared backstop. |
 
 ## Access controller
