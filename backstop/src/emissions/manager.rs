@@ -1,6 +1,6 @@
 use crate::{
     backstop::{
-        build_pool_valuation, quote_activation, require_registered_pool, tier_for_token,
+        build_pool_valuation, emission_tier_for_token, quote_activation, require_registered_pool,
         BackstopTier,
     },
     constants::MAX_RZ_SIZE,
@@ -247,7 +247,7 @@ fn set_token_emission_eps(e: &Env, pool: &Address, token: &Address, pending: i12
     if pending == 0 {
         return;
     }
-    let tier = tier_for_token(e, pool, token)
+    let tier = emission_tier_for_token(e, pool, token)
         .unwrap_or_else(|| panic_with_error!(e, BackstopError::InvalidEmissionValue));
     set_backstop_emission_eps(e, tier, pool, pending);
 }

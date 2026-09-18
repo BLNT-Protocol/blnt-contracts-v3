@@ -1,7 +1,7 @@
 use crate::{
     errors::PoolFactoryError,
     events::PoolFactoryEvents,
-    storage::{self, BackstopTierConfig, PoolBackstopConfig, PoolInitMeta},
+    storage::{self, BackstopAsset, BackstopTierConfig, PoolBackstopConfig, PoolInitMeta},
 };
 use soroban_sdk::{
     contract, contractclient, contractimpl, panic_with_error, Address, Bytes, BytesN, Env, IntoVal,
@@ -147,7 +147,9 @@ pub(crate) fn validate_backstop_config(e: &Env, config: &Vec<BackstopTierConfig>
             panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
         }
         for later in config.iter().skip(index + 1) {
-            if tier.asset == later.asset {
+            if matches!(tier.asset, BackstopAsset::BlntXlm | BackstopAsset::BlntUsdc)
+                && tier.asset == later.asset
+            {
                 panic_with_error!(e, PoolFactoryError::InvalidPoolInitArgs);
             }
         }

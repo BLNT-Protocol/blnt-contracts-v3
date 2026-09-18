@@ -69,9 +69,10 @@ Preserve these specified v3 boundaries unless the specification is changed
 first:
 
 - Each pool immutably configures one to three positional backstop tiers from
-  the canonical BLND:XLM LP, BLND:USDC LP, USDC, and XLM assets. Configured
-  assets are unique, integer take-rate weights are 1 through 100, and tier
-  order is the strict loss waterfall before suppliers.
+  the canonical BLNT:XLM LP, BLNT:USDC LP, USDC, and XLM assets. Configured
+  BLNT-bearing LP assets may each appear at most once, while plain USDC and XLM
+  may repeat. Integer take-rate weights are 1 through 100, and tier order is
+  the strict loss waterfall before suppliers.
 - One tier per auction and at most one active interest auction per pool.
   Interest requires at least 200 USDC; bad debt uses every positively valued
   tier before suppliers.

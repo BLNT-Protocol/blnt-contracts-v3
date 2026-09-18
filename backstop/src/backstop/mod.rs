@@ -15,8 +15,8 @@ mod pool;
 #[cfg(any(test, feature = "testutils"))]
 pub use pool::set_test_valuation_override;
 pub(crate) use pool::{
-    build_pool_valuation, is_blnt_emission_tier, load_pool_backstop_data, quote_activation,
-    tier_for_token, tier_token, validate_backstop_assets,
+    build_pool_valuation, emission_tier_for_token, is_blnt_emission_tier, load_pool_backstop_data,
+    quote_activation, tier_token, validate_backstop_assets,
 };
 pub use pool::{
     quote_blnt_price, require_is_from_pool_factory, require_registered_pool, BackstopAsset,
