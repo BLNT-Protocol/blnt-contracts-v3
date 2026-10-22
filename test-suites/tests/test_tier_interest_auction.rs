@@ -947,6 +947,162 @@ fn tier_interest_auctions_cover_all_tiers_optimized_wasm() {
     exercise_tier_interest_auctions(true);
 }
 
+fn exercise_repeated_usdc_tier_interest_auction(wasm: bool) {
+    let mut fixture = TestFixture::create(wasm);
+    let e = fixture.env.clone();
+    let operator = fixture.users.first().unwrap().clone();
+    fixture.backstop_config = vec![
+        &e,
+        BackstopTierConfig {
+            asset: FactoryBackstopAsset::Usdc,
+            take_rate_weight: 1,
+        },
+        BackstopTierConfig {
+            asset: FactoryBackstopAsset::Usdc,
+            take_rate_weight: 1,
+        },
+    ];
+    fixture.create_pool(String::from_str(&e, "Repeated USDC"), 0_1000000, 4, 0);
+
+    let reserve_config = ReserveConfig {
+        c_factor: 0_9000000,
+        decimals: 7,
+        index: 0,
+        l_factor: 0_9000000,
+        max_util: 1_0000000,
+        reactivity: 0,
+        r_base: 0_1000000,
+        r_one: 0,
+        r_two: 0,
+        r_three: 0,
+        util: 0_5000000,
+        supply_cap: i64::MAX as i128,
+        enabled: true,
+    };
+    fixture.create_pool_reserve(0, TokenIndex::USDC, &reserve_config);
+    let pool = &fixture.pools[0].pool;
+    let pool_address = pool.address.clone();
+    let usdc = &fixture.tokens[TokenIndex::USDC];
+    usdc.mint(&operator, &(30_000 * SCALAR_7));
+    usdc.approve(
+        &operator,
+        &fixture.backstop.address,
+        &i128::MAX,
+        &e.ledger().sequence().saturating_add(10_000),
+    );
+    for tier in [BackstopTier::FirstLoss, BackstopTier::SecondLoss] {
+        fixture
+            .backstop
+            .deposit(&tier, &operator, &pool_address, &(13_000 * SCALAR_7));
+    }
+    pool.set_status(&0);
+
+    let credit = 300 * SCALAR_7;
+    usdc.mint(&pool_address, &credit);
+    assert_eq!(pool.gulp(&usdc.address), credit);
+    let starting = fixture.backstop.pool_data(&pool_address);
+    let starting_first = starting.tiers.get(0).unwrap();
+    let starting_second = starting.tiers.get(1).unwrap();
+    assert_eq!(starting_first.token, usdc.address);
+    assert_eq!(starting_second.token, usdc.address);
+
+    let auction = pool.new_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+        &vec![&e],
+        &vec![&e, usdc.address.clone()],
+        &100,
+    );
+    assert_eq!(auction.lot.get(usdc.address.clone()), Some(300 * SCALAR_7));
+    assert_eq!(auction.bid.get(usdc.address.clone()), Some(360 * SCALAR_7));
+    assert_eq!(
+        interest_reserve_state(&e, &pool_address, &usdc.address),
+        InterestReserveState {
+            carry: 0,
+            first_loss: 150 * SCALAR_7,
+            second_loss: 150 * SCALAR_7,
+            third_loss: 0,
+        }
+    );
+
+    e.ledger()
+        .set_sequence_number(auction.block.saturating_add(200));
+    let operator_before = usdc.balance(&operator);
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 50);
+    assert_eq!(usdc.balance(&operator), operator_before - 30 * SCALAR_7);
+    let after_half = fixture.backstop.pool_data(&pool_address);
+    assert_eq!(
+        after_half.tiers.get(0).unwrap().tokens - starting_first.tokens,
+        90 * SCALAR_7
+    );
+    assert_eq!(
+        after_half.tiers.get(1).unwrap().tokens - starting_second.tokens,
+        90 * SCALAR_7
+    );
+    let remaining = pool.get_auction(
+        &(AuctionType::InterestAuction as u32),
+        &fixture.backstop.address,
+    );
+    assert_eq!(
+        remaining.lot.get(usdc.address.clone()),
+        Some(150 * SCALAR_7)
+    );
+    assert_eq!(
+        remaining.bid.get(usdc.address.clone()),
+        Some(180 * SCALAR_7)
+    );
+    assert_eq!(
+        interest_reserve_state(&e, &pool_address, &usdc.address),
+        InterestReserveState {
+            carry: 0,
+            first_loss: 75 * SCALAR_7,
+            second_loss: 75 * SCALAR_7,
+            third_loss: 0,
+        }
+    );
+
+    let operator_before = usdc.balance(&operator);
+    fill_interest(&e, pool, &fixture.backstop.address, &operator, 100);
+    assert_eq!(usdc.balance(&operator), operator_before - 30 * SCALAR_7);
+    let ending = fixture.backstop.pool_data(&pool_address);
+    assert_eq!(
+        ending.tiers.get(0).unwrap().tokens - starting_first.tokens,
+        180 * SCALAR_7
+    );
+    assert_eq!(
+        ending.tiers.get(1).unwrap().tokens - starting_second.tokens,
+        180 * SCALAR_7
+    );
+    assert_eq!(ending.tiers.get(0).unwrap().shares, starting_first.shares);
+    assert_eq!(ending.tiers.get(1).unwrap().shares, starting_second.shares);
+    assert_eq!(
+        interest_reserve_state(&e, &pool_address, &usdc.address),
+        InterestReserveState {
+            carry: 0,
+            first_loss: 0,
+            second_loss: 0,
+            third_loss: 0,
+        }
+    );
+    assert_eq!(pool.get_reserve(&usdc.address).data.backstop_credit, 0);
+    assert!(pool
+        .try_get_auction(
+            &(AuctionType::InterestAuction as u32),
+            &fixture.backstop.address,
+        )
+        .is_err());
+}
+
+#[test]
+fn repeated_usdc_tiers_share_one_interest_auction_native() {
+    exercise_repeated_usdc_tier_interest_auction(false);
+}
+
+#[test]
+fn repeated_usdc_tiers_share_one_interest_auction_optimized_wasm() {
+    exercise_repeated_usdc_tier_interest_auction(true);
+}
+
 #[test]
 fn xlm_interest_donation_credits_full_payment_optimized_wasm() {
     let mut fixture = TestFixture::create(true);

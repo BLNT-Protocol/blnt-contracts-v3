@@ -9,7 +9,8 @@ use soroban_sdk::{contracttype, map, panic_with_error, Address, Env, Map, Vec};
 
 use super::{
     backstop_interest_auction::{
-        create_interest_auction_data, fill_interest_auction, get_interest_auction,
+        create_interest_auction_data, delete_interest_auction, fill_interest_auction,
+        get_interest_auction,
     },
     bad_debt_auction::{create_bad_debt_auction_data, fill_bad_debt_auction, get_bad_debt_auction},
     math::{auction_modifiers, scale_bid_amount, scale_lot_amount},
@@ -73,8 +74,9 @@ pub struct AuctionData {
 ///
 /// For bad debt, `bid = []` or `lot = []` accepts the corresponding canonical
 /// asset set; a nonempty vector asserts an exact match. For interest, `bid = []`
-/// accepts the canonically selected tier token and a nonempty `bid` asserts it;
-/// `lot` must be a nonempty reserve-asset input, so `lot = []` is invalid.
+/// accepts the canonically selected backstop-token group and a nonempty `bid`
+/// asserts its one shared token; `lot` must be a nonempty reserve-asset input,
+/// so `lot = []` is invalid.
 /// Liquidation keeps the inherited requirement that both vectors are nonempty
 /// inputs.
 /// Assertions do not influence asset selection, amounts, or pricing.
@@ -118,7 +120,7 @@ pub fn create_auction(
         }
         AuctionType::InterestAuction => {
             require_backstop_auction_args(e, user, percent);
-            let auction = create_interest_auction_data(e, lot).auction;
+            let auction = create_interest_auction_data(e, lot);
             require_optional_asset_match(e, bid, &auction.bid, PoolError::InvalidBid);
             auction
         }
@@ -150,7 +152,7 @@ pub fn get_auction(e: &Env, auction_type: u32, user: &Address) -> AuctionData {
         }
         AuctionType::InterestAuction => {
             require_backstop_auction_user(e, user);
-            get_interest_auction(e).auction
+            get_interest_auction(e)
         }
         AuctionType::ProtocolFeeAuction => {
             require_backstop_auction_user(e, user);
@@ -172,9 +174,13 @@ pub fn delete_stale_auction(e: &Env, auction_type: u32, user: &Address) {
             }
             storage::del_auction(e, &auction_type, user);
         }
-        kind @ (AuctionType::BadDebtAuction | AuctionType::InterestAuction) => {
+        kind @ AuctionType::BadDebtAuction => {
             require_backstop_auction_user(e, user);
             del_tier_auction(e, kind);
+        }
+        AuctionType::InterestAuction => {
+            require_backstop_auction_user(e, user);
+            delete_interest_auction(e);
         }
         AuctionType::ProtocolFeeAuction => {
             require_backstop_auction_user(e, user);
@@ -439,25 +445,12 @@ pub(crate) fn del_tier_auction(e: &Env, auction_type: AuctionType) {
         .block
         .checked_add(AUCTION_STALE_LEDGERS)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
-    let reserve_deauthorized = auction_type == AuctionType::InterestAuction
-        && interest_lot_contains_deauthorized_reserve(e, &auction);
     if e.ledger().sequence() < stale_at
         && !selected_usdc_tier_has_no_transferable_value(e, &auction)
-        && !reserve_deauthorized
     {
         panic_with_error!(e, PoolError::BadRequest);
     }
     remove_tier_auction(e, auction_type);
-}
-
-fn interest_lot_contains_deauthorized_reserve(e: &Env, auction: &TierAuctionData) -> bool {
-    let mut pool = Pool::load(e);
-    for asset in auction.auction.lot.keys() {
-        if !pool.load_reserve(e, &asset, false).is_authorized(e) {
-            return true;
-        }
-    }
-    false
 }
 
 fn selected_usdc_tier_has_no_transferable_value(e: &Env, auction: &TierAuctionData) -> bool {
@@ -543,20 +536,33 @@ mod tests {
         );
 
         e.as_contract(&pool_address, || {
-            for auction_type in [AuctionType::BadDebtAuction, AuctionType::InterestAuction] {
-                set_tier_auction(
-                    &e,
-                    auction_type,
-                    &TierAuctionData {
-                        auction: AuctionData {
-                            bid: map![&e],
-                            lot: map![&e, (usdc.clone(), 100 * SCALAR_7)],
-                            block: 51,
-                        },
-                        tier: BackstopTier::ThirdLoss,
+            set_tier_auction(
+                &e,
+                AuctionType::BadDebtAuction,
+                &TierAuctionData {
+                    auction: AuctionData {
+                        bid: map![&e],
+                        lot: map![&e, (usdc.clone(), 100 * SCALAR_7)],
+                        block: 51,
                     },
-                );
-            }
+                    tier: BackstopTier::ThirdLoss,
+                },
+            );
+            super::super::tier_interest::set_interest_auction(
+                &e,
+                &super::super::tier_interest::InterestAuctionData {
+                    bid_token: usdc.clone(),
+                    block: 51,
+                    tiers: vec![
+                        &e,
+                        super::super::tier_interest::InterestTierAuctionData {
+                            bid_amount: 120 * SCALAR_7,
+                            lot: map![&e, (usdc.clone(), 100 * SCALAR_7)],
+                            tier: BackstopTier::ThirdLoss,
+                        },
+                    ],
+                },
+            );
         });
 
         StellarAssetClient::new(&e, &usdc).set_authorized(&backstop, &false);

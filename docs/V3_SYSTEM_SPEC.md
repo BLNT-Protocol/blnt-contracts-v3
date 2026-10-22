@@ -255,8 +255,8 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
     vector MUST exactly match the canonical debt-asset or selected-tier-token
     set, respectively.
   - For interest, `bid = []` means no caller assertion and a nonempty `bid` MUST
-    contain exactly the selected tier token. `lot` remains a required, nonempty
-    reserve-asset input; `lot = []` is invalid.
+    contain exactly the selected backstop-token group's one shared token. `lot`
+    remains a required, nonempty reserve-asset input; `lot = []` is invalid.
   - For protocol fee, `bid = []` means no caller assertion and a nonempty `bid`
     MUST contain exactly canonical BLNT. `lot` remains a required, nonempty
     reserve-asset input; `lot = []` is invalid.
@@ -578,18 +578,22 @@ inherited.
 ### 5.1 Tier-auction lifecycle
 
 `V2-AUCTION-001` applies. Each pool retains at most one active auction of each
-backstop type under the inherited public key and privately binds its selected
-tier and settlement metadata. It may independently retain one protocol-fee
-auction under public auction type 3. Private metadata has a 46-day temporary
-lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
+backstop type under the inherited public key. A bad-debt auction privately
+binds one selected tier. An interest auction privately binds one selected
+backstop-token group and the separate lot and bid contribution of every
+included tier. It may independently retain one protocol-fee auction under
+public auction type 3. Private metadata has a 46-day temporary lifetime; reads
+do not renew it. Pool records renew at 45 days to 46 days.
 
-Each tier uses Section 4 valuation and `V2-AUCTION-004`'s inclusive 200-USDC
-interest minimum. Interest fills donate to the selected tier; bad-debt fills
-draw from it. Stale deletion releases the selection without changing
-liabilities, pending credit, balances, or tier assets. If a selected
-plain-USDC tier becomes deauthorized, the same deletion entry point may release
-it immediately so the next permissionless creation can continue with a
-transferable tier.
+Each unique backstop-token group uses Section 4 valuation and
+`V2-AUCTION-004`'s inclusive 200-USDC interest minimum. Tiers with different
+backstop tokens MUST NOT share one interest auction. Interest fills donate each
+tier's realized bid contribution to that same tier; bad-debt fills draw from
+one selected tier. Stale deletion releases the selection without changing
+liabilities, pending credit, balances, or tier assets. If a selected plain-USDC
+group becomes deauthorized, the same deletion entry point may release it
+immediately so the next permissionless creation can continue with a
+transferable group.
 
 ### 5.2 Bad-debt waterfall
 
@@ -667,30 +671,33 @@ With no active interest auction, any caller may invoke
 `min(max_positions - 1, 4)` unique configured reserves. The transaction follows
 this atomic pipeline:
 
-`bid = []` accepts whichever tier the canonical cursor and value checks
-select. A caller MAY instead provide the exact expected selected-tier token.
+`bid = []` accepts whichever unique backstop-token group the canonical cursor
+and value checks select. A caller MAY instead provide that group's exact token.
 A mismatch fails atomically and does not redirect the auction.
 
 | Phase | Required behavior |
 | --- | --- |
 | Checkpoint | Accrue and persist the supplied reserves. Omitted reserves remain pending or uncheckpointed. |
 | Allocate | Use one canonical `pool_data` snapshot and the formula above to move new credit into persistent tier amounts. |
-| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first transferable tier meeting the inclusive 200-USDC minimum. Previously allocated amounts for a deauthorized tier remain pending until reauthorization. |
-| Create | Store the selected persistent amounts in a next-ledger auction, privately bind its tier, and advance the cursor. No second interest auction may start before fill or stale deletion. |
-| Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically transfer and account for the realized bid under the selected tier's rules below. |
+| Select | Value pending reserve baskets with the immutable reserve oracle, group transferable tiers by exact backstop-token address, and, from the cyclic configured-tier cursor, choose the first unique-token group whose combined value meets the inclusive 200-USDC minimum. A tier contributes only when its own pending basket has positive value and its backstop position has positive transferable value. Previously allocated amounts for an unavailable tier remain pending until it becomes available. |
+| Create | Sum the selected tiers' reserve lots into one public next-ledger lot and sum their independently ceiling-rounded 120% bid contributions into one public amount of the shared token. Privately bind every tier's exact base lot and bid contribution, then advance the cursor to the next different token group. No second interest auction may start before fill or stale deletion. |
+| Fill | Require a filler other than the pool or backstop and sufficient shared-token allowance. Apply the inherited percentage and time modifiers once to the public aggregate bid and lot, then allocate those exact base and realized amounts proportionally to the privately bound tier contributions. Deterministic configured-tier order receives any indivisible base-unit remainder. Transfer each reserve asset once at its aggregate realized amount and donate every allocated realized bid contribution in full to its originating tier. Partial-fill base consumption, realized transfers, pending-credit reductions, remaining auction state, and tier donations MUST conserve independently and in aggregate, and the public `AuctionData` MUST continue to predict exact aggregate fill amounts. |
 | Recover | Stale deletion releases the selection; unfilled amounts remain in their original pending and credit accumulators. |
 
 Public lookup and deletion remain `get_auction(2, backstop)` and
-`del_auction(2, backstop)`, and fill validates the private tier. If the selected
-plain-USDC tier becomes deauthorized, `del_auction` may cancel the auction
-immediately rather than waiting for ordinary staleness. Selected amounts remain
-pending so expiry cannot lose or reweight them; ordinary share operations
-remain available. A partial fill releases its base-lot discount,
-and only reserve assets actually transferred reduce pending amounts and
-accrued credit. Every selected-tier bid is donated in full. Donation mints
-no shares or user claim but appreciates active and queued shares and assumes
-the tier's protocol roles. Configured weights govern credit allocation, not
-necessarily the timing of realized donations.
+`del_auction(2, backstop)`, and fill validates the private token group and
+per-tier contributions. If the selected plain-USDC group becomes deauthorized,
+`del_auction` may cancel the auction immediately rather than waiting for
+ordinary staleness. Selected amounts remain pending so expiry cannot lose or
+reweight them; ordinary share operations remain available. A partial fill
+releases each tier's base-lot discount, and only reserve assets actually
+transferred reduce that tier's pending amounts and the corresponding aggregate
+credit. Every tier's realized bid contribution is donated in full to that tier.
+Donation mints no shares or user claim but appreciates active and queued shares
+and assumes the tier's protocol roles. Grouping never reallocates take-rate
+credit, donation proceeds, shares, or loss priority between tiers. Configured
+weights govern credit allocation, not necessarily the timing of realized
+donations.
 
 No type-2 settlement haircut, pending buyback balance, or legacy backstop
 buy-and-burn entry point exists. Protocol-fee auctions are the sole BLNT

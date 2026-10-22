@@ -332,7 +332,7 @@ fn checked_sub(e: &Env, left: i128, right: i128) -> i128 {
 #[cfg(test)]
 mod tests {
     use crate::{
-        auctions::{has_tier_auction, set_tier_auction, BackstopTier, TierAuctionData},
+        auctions::BackstopTier,
         storage::{PoolConfig, ProtocolFeeData},
         testutils,
     };
@@ -411,16 +411,19 @@ mod tests {
                     carry: 0,
                 },
             );
-            set_tier_auction(
+            super::super::tier_interest::set_interest_auction(
                 &e,
-                AuctionType::InterestAuction,
-                &TierAuctionData {
-                    auction: AuctionData {
-                        bid: map![&e, (Address::generate(&e), SCALAR_7)],
-                        lot: map![&e, (reserve_asset.clone(), SCALAR_7)],
-                        block: 51,
-                    },
-                    tier: BackstopTier::FirstLoss,
+                &super::super::tier_interest::InterestAuctionData {
+                    bid_token: Address::generate(&e),
+                    block: 51,
+                    tiers: vec![
+                        &e,
+                        super::super::tier_interest::InterestTierAuctionData {
+                            bid_amount: SCALAR_7,
+                            lot: map![&e, (reserve_asset.clone(), SCALAR_7)],
+                            tier: BackstopTier::FirstLoss,
+                        },
+                    ],
                 },
             );
 
@@ -431,7 +434,7 @@ mod tests {
                 map![&e, (reserve_asset.clone(), 200 * SCALAR_7)]
             );
             assert_eq!(auction.block, 51);
-            assert!(has_tier_auction(&e, AuctionType::InterestAuction));
+            assert!(super::super::tier_interest::has_interest_auction(&e));
             assert!(storage::has_auction(
                 &e,
                 &(AuctionType::ProtocolFeeAuction as u32),
@@ -464,7 +467,7 @@ mod tests {
                 &(AuctionType::ProtocolFeeAuction as u32),
                 &backstop
             ));
-            assert!(has_tier_auction(&e, AuctionType::InterestAuction));
+            assert!(super::super::tier_interest::has_interest_auction(&e));
         });
     }
 }

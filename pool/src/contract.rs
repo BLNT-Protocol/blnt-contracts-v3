@@ -291,8 +291,8 @@ pub trait Pool {
     /// - Bad debt: either may be `[]`, meaning the caller accepts the corresponding canonical
     ///   asset set. A nonempty `bid` must exactly match the canonical debt assets, and a nonempty
     ///   `lot` must exactly match the selected waterfall-tier token.
-    /// - Interest: `bid` may be `[]`, meaning the caller accepts the canonically selected tier
-    ///   token, or nonempty to assert that exact token. `lot` is the required, nonempty list of
+    /// - Interest: `bid` may be `[]`, meaning the caller accepts the canonically selected
+    ///   backstop-token group, or nonempty to assert that exact token. `lot` is the required, nonempty list of
     ///   reserve assets to checkpoint and offer; `lot = []` is invalid.
     /// - Protocol fee: `bid` may be `[]`, meaning the caller accepts canonical BLNT, or nonempty
     ///   to assert that exact token. `lot` is the required, nonempty list of reserve assets to

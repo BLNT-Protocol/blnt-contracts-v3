@@ -74,9 +74,12 @@ first:
   may repeat. Integer take-rate weights are 1 through 100, and tier order is
   the strict loss waterfall before suppliers. A zero-tier pool is explicitly
   unbackstopped and must keep its backstop take rate at zero.
-- One tier per auction and at most one active interest auction per pool.
-  Interest requires at least 200 USDC; bad debt uses every positively valued
-  tier before suppliers.
+- One unique backstop-token group per interest auction and at most one active
+  interest auction per pool. Tiers that use the same token aggregate only for
+  interest-auction eligibility and settlement; their pending credit, donated
+  proceeds, shares, and loss priority remain tier-local. Interest requires at
+  least 200 USDC across the selected token group; bad debt continues to use one
+  positively valued tier at a time before suppliers.
 - Pool status depends on the inherited queued-withdrawal ratio and admin state,
   not a minimum backstop value. Backstop valuation, take-rate allocation, and
   the loss waterfall use the same authorization-aware transferable values.
