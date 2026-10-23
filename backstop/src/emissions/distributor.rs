@@ -1,167 +1,233 @@
-//! Methods for distributing backstop emissions to depositors
+//! V2-style backstop emission indexes generalized by pool and tier.
 
-use cast::i128;
-use soroban_fixed_point_math::FixedPoint;
-use soroban_sdk::{panic_with_error, unwrap::UnwrapOptimized, Address, Env};
+use soroban_sdk::{panic_with_error, Address, Env, I256};
 
 use crate::{
-    backstop::{PoolBalance, UserBalance},
+    backstop::{BackstopTier, PoolBalance, UserBalance},
     constants::{SCALAR_14, SCALAR_7},
-    require_nonnegative,
     storage::{self, BackstopEmissionData, UserEmissionData},
     BackstopError,
 };
 
-/// Update the backstop emissions index for the user and pool
+pub(super) const STREAM_SECONDS: u64 = 7 * 24 * 60 * 60;
+
 pub fn update_emissions(
     e: &Env,
-    pool_id: &Address,
-    pool_balance: &PoolBalance,
-    user_id: &Address,
-    user_balance: &UserBalance,
-) {
-    if let Some(emis_data) = update_emission_data(e, pool_id, pool_balance) {
-        update_user_emissions(e, pool_id, user_id, &emis_data, user_balance, false);
-    }
-}
-
-/// Update for claiming emissions for a user and pool
-///
-/// DOES NOT SEND CLAIMED TOKENS TO THE USER. The caller
-/// is expected to handle sending the tokens once all claimed pools
-/// have been processed.
-///
-/// Returns the number of tokens that need to be transferred to `user`
-///
-/// Panics if the pool's backstop never had emissions configured
-pub(super) fn claim_emissions(
-    e: &Env,
-    pool_id: &Address,
-    pool_balance: &PoolBalance,
-    user_id: &Address,
-    user_balance: &UserBalance,
-) -> i128 {
-    if let Some(emis_data) = update_emission_data(e, pool_id, pool_balance) {
-        update_user_emissions(e, pool_id, user_id, &emis_data, user_balance, true)
-    } else {
-        panic_with_error!(e, BackstopError::BadRequest)
-    }
-}
-
-/// Update the backstop emissions index for deposits
-pub fn update_emission_data(
-    e: &Env,
-    pool_id: &Address,
-    pool_balance: &PoolBalance,
-) -> Option<BackstopEmissionData> {
-    match storage::get_backstop_emis_data(e, pool_id) {
-        Some(emis_data) => {
-            if emis_data.last_time >= emis_data.expiration
-                || e.ledger().timestamp() == emis_data.last_time
-                || emis_data.eps == 0
-                || pool_balance.shares == 0
-            {
-                // emis_data already updated or expired
-                return Some(emis_data);
-            }
-
-            let max_timestamp = if e.ledger().timestamp() > emis_data.expiration {
-                emis_data.expiration
-            } else {
-                e.ledger().timestamp()
-            };
-
-            let unqueued_shares = pool_balance.shares - pool_balance.q4w;
-            require_nonnegative(e, unqueued_shares);
-            let additional_idx: i128;
-            if unqueued_shares == 0 {
-                // all shares q4w, omit emissions
-                additional_idx = 0;
-            } else {
-                // Eps is in 14 decimals and needs to be converted to 7 decimals to match emission token decimals
-                additional_idx = (i128(max_timestamp - emis_data.last_time) * i128(emis_data.eps))
-                    .fixed_div_floor(unqueued_shares, SCALAR_7)
-                    .unwrap_optimized();
-            }
-            let new_data = BackstopEmissionData {
-                eps: emis_data.eps,
-                expiration: emis_data.expiration,
-                index: additional_idx + emis_data.index,
-                last_time: e.ledger().timestamp(),
-            };
-
-            storage::set_backstop_emis_data(e, pool_id, &new_data);
-            Some(new_data)
-        }
-        None => return None, // no emission exist, no update is required
-    }
-}
-
-/// Update the user's emissions. If `to_claim` is true, the user's accrued emissions will be returned and
-/// a value of zero will be stored to the ledger.
-///
-/// ### Returns
-/// The number of emitted tokens the caller needs to send to the user
-fn update_user_emissions(
-    e: &Env,
+    tier: BackstopTier,
     pool: &Address,
     user: &Address,
-    emis_data: &BackstopEmissionData,
-    user_balance: &UserBalance,
-    to_claim: bool,
-) -> i128 {
-    if let Some(user_data) = storage::get_user_emis_data(e, pool, user) {
-        if user_data.index != emis_data.index || to_claim {
-            let mut accrual = user_data.accrued;
-            if user_balance.shares != 0 {
-                let delta_index = emis_data.index - user_data.index;
-                require_nonnegative(e, delta_index);
-                let to_accrue = (user_balance.shares)
-                    .fixed_mul_floor(delta_index, SCALAR_14)
-                    .unwrap_optimized();
-                accrual += to_accrue;
-            }
-            return set_user_emissions(e, pool, user, emis_data.index, accrual, to_claim);
-        }
-        // no accrual occured and no claim requested
-        return 0;
-    } else if user_balance.shares == 0 {
-        // first time the user registered an action with the asset since emissions were added
-        return set_user_emissions(e, pool, user, emis_data.index, 0, to_claim);
-    } else {
-        // user had tokens before emissions began, they are due any historical emissions
-        let to_accrue = user_balance
-            .shares
-            .fixed_mul_floor(emis_data.index, SCALAR_14)
-            .unwrap_optimized();
-        return set_user_emissions(e, pool, user, emis_data.index, to_accrue, to_claim);
-    }
-}
-
-fn set_user_emissions(
-    e: &Env,
-    pool_id: &Address,
-    user: &Address,
-    index: i128,
-    accrued: i128,
-    to_claim: bool,
-) -> i128 {
-    if to_claim {
-        storage::set_user_emis_data(e, pool_id, user, &UserEmissionData { index, accrued: 0 });
-        accrued
-    } else {
-        storage::set_user_emis_data(e, pool_id, user, &UserEmissionData { index, accrued });
-        0
-    }
+) -> UserEmissionData {
+    let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    let user_balance = storage::get_user_balance_for_tier(e, tier, pool, user);
+    let Some(emission_data) = update_emission_data(e, tier, pool, &pool_balance) else {
+        return storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data());
+    };
+    let user_data = update_user_emissions(
+        e,
+        storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data()),
+        &user_balance,
+        emission_data.index,
+    );
+    storage::set_user_emis_data(e, tier, pool, user, &user_data);
+    user_data
 }
 
 #[cfg(test)]
+pub(crate) fn preview_user_emissions(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    user: &Address,
+) -> UserEmissionData {
+    let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    let user_balance = storage::get_user_balance_for_tier(e, tier, pool, user);
+    let current_index = storage::get_backstop_emis_data(e, tier, pool)
+        .map(|data| advance_emission_data(e, data, &pool_balance).index)
+        .unwrap_or(0);
+    update_user_emissions(
+        e,
+        storage::get_user_emis_data(e, tier, pool, user).unwrap_or(empty_user_data()),
+        &user_balance,
+        current_index,
+    )
+}
+
+pub(crate) fn claim_emissions(e: &Env, tier: BackstopTier, pool: &Address, user: &Address) -> i128 {
+    let mut user_data = update_emissions(e, tier, pool, user);
+    let accrued = user_data.accrued;
+    if accrued > 0 {
+        user_data.accrued = 0;
+        storage::set_user_emis_data(e, tier, pool, user, &user_data);
+    }
+    accrued
+}
+
+pub(crate) fn set_backstop_emission_eps(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    pending: i128,
+) {
+    if pending < 0 {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    let now = e.ledger().timestamp();
+    let pool_balance = storage::get_pool_balance_for_tier(e, tier, pool);
+    let existing = update_emission_data(e, tier, pool, &pool_balance);
+    if pending == 0 {
+        return;
+    }
+    let mut data = existing.unwrap_or(BackstopEmissionData {
+        eps: 0,
+        expiration: 0,
+        index: 0,
+        index_carry: 0,
+        last_time: now,
+        schedule_carry: 0,
+    });
+    let remaining_seconds = data.expiration.saturating_sub(now);
+    let scaled_total = I256::from_i128(e, pending)
+        .mul(&I256::from_i128(e, SCALAR_7))
+        .add(
+            &I256::from_i128(e, i128::from(remaining_seconds))
+                .mul(&I256::from_i128(e, i128::from(data.eps))),
+        )
+        .add(&I256::from_i128(e, data.schedule_carry));
+    let duration = I256::from_i128(e, i128::from(STREAM_SECONDS));
+    let eps = scaled_total
+        .div(&duration)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    data.schedule_carry = scaled_total
+        .sub(&I256::from_i128(e, eps).mul(&duration))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    data.eps =
+        u64::try_from(eps).unwrap_or_else(|_| panic_with_error!(e, BackstopError::OverflowError));
+    data.expiration = now
+        .checked_add(STREAM_SECONDS)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    data.last_time = now;
+    validate_emission_data(e, &data);
+    storage::set_backstop_emis_data(e, tier, pool, &data);
+}
+
+fn update_emission_data(
+    e: &Env,
+    tier: BackstopTier,
+    pool: &Address,
+    pool_balance: &PoolBalance,
+) -> Option<BackstopEmissionData> {
+    let data = storage::get_backstop_emis_data(e, tier, pool)?;
+    let data = advance_emission_data(e, data, pool_balance);
+    storage::set_backstop_emis_data(e, tier, pool, &data);
+    Some(data)
+}
+
+fn advance_emission_data(
+    e: &Env,
+    mut data: BackstopEmissionData,
+    pool_balance: &PoolBalance,
+) -> BackstopEmissionData {
+    validate_emission_data(e, &data);
+    let now = e.ledger().timestamp();
+    if data.last_time > now || pool_balance.shares < pool_balance.q4w {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    let stream_end = now.min(data.expiration);
+    let active_shares = pool_balance.shares - pool_balance.q4w;
+    if active_shares > 0 && stream_end > data.last_time {
+        let emitted_scaled = I256::from_i128(e, i128::from(stream_end - data.last_time))
+            .mul(&I256::from_i128(e, i128::from(data.eps)))
+            .add(&if stream_end == data.expiration {
+                I256::from_i128(e, data.schedule_carry)
+            } else {
+                I256::from_i128(e, 0)
+            });
+        let numerator = emitted_scaled
+            .mul(&I256::from_i128(e, SCALAR_7))
+            .add(&I256::from_i128(e, data.index_carry));
+        let denominator = I256::from_i128(e, active_shares);
+        let increment = numerator
+            .div(&denominator)
+            .to_i128()
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        data.index_carry = numerator
+            .sub(&I256::from_i128(e, increment).mul(&denominator))
+            .to_i128()
+            .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+        data.index = checked_add(e, data.index, increment);
+    }
+    if stream_end == data.expiration && stream_end > data.last_time {
+        data.schedule_carry = 0;
+    }
+    data.last_time = now;
+    data
+}
+
+fn update_user_emissions(
+    e: &Env,
+    mut data: UserEmissionData,
+    balance: &UserBalance,
+    current_index: i128,
+) -> UserEmissionData {
+    if balance.shares < 0 || current_index < data.index {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+    let numerator = I256::from_i128(e, balance.shares)
+        .mul(&I256::from_i128(e, current_index - data.index))
+        .add(&I256::from_i128(e, data.carry));
+    let scale = I256::from_i128(e, SCALAR_14);
+    let accrued = numerator
+        .div(&scale)
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    data.carry = numerator
+        .sub(&I256::from_i128(e, accrued).mul(&scale))
+        .to_i128()
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError));
+    data.accrued = checked_add(e, data.accrued, accrued);
+    data.index = current_index;
+    validate_user_data(e, &data);
+    data
+}
+
+fn empty_user_data() -> UserEmissionData {
+    UserEmissionData {
+        accrued: 0,
+        carry: 0,
+        index: 0,
+    }
+}
+
+fn validate_emission_data(e: &Env, data: &BackstopEmissionData) {
+    if data.index < 0
+        || data.index_carry < 0
+        || data.schedule_carry < 0
+        || data.schedule_carry >= i128::from(STREAM_SECONDS)
+    {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+}
+
+fn validate_user_data(e: &Env, data: &UserEmissionData) {
+    if data.accrued < 0 || data.carry < 0 || data.carry >= SCALAR_14 || data.index < 0 {
+        panic_with_error!(e, BackstopError::InvalidEmissionValue);
+    }
+}
+
+fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
+    left.checked_add(right)
+        .unwrap_or_else(|| panic_with_error!(e, BackstopError::OverflowError))
+}
+#[cfg(test)]
 mod tests {
-    use crate::{testutils::create_backstop, Q4W};
+    use crate::{backstop::BackstopTier, testutils::create_backstop, Q4W};
 
     use super::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
+        unwrap::UnwrapOptimized,
         vec,
     };
 
@@ -191,32 +257,66 @@ mod tests {
             eps: 0_10000000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 111110000000,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
                 tokens: 200_0000000,
                 q4w: 0,
             };
-            storage::set_pool_balance(&e, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             let user_balance = UserBalance {
                 shares: 9_0000000,
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 82488886666666);
             assert_eq!(new_user_data.accrued, 7_4140001);
@@ -244,8 +344,6 @@ mod tests {
         let samwise = Address::generate(&e);
 
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
                 tokens: 200_0000000,
@@ -256,10 +354,25 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1);
-            let new_user_data = storage::get_user_emis_data(&e, &pool_1, &samwise);
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1);
+            let new_user_data =
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
             assert!(new_backstop_data.is_none());
             assert!(new_user_data.is_none());
         });
@@ -289,11 +402,16 @@ mod tests {
             eps: 0_04200000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -305,11 +423,27 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 345882220000000);
             assert_eq!(new_user_data.accrued, 0);
@@ -341,11 +475,16 @@ mod tests {
             eps: 0_04200000000000,
             index: 0,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -357,11 +496,27 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 345660000000000);
             assert_eq!(new_user_data.accrued, 31_1094000);
@@ -393,16 +548,28 @@ mod tests {
             eps: 0_10000000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 111110000000,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -418,11 +585,27 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 85033216563573);
             assert_eq!(new_user_data.accrued, 38214950);
@@ -454,16 +637,28 @@ mod tests {
             eps: 0_10000000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 111110000000,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -479,11 +674,27 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, backstop_emissions_data.index);
             assert_eq!(new_user_data.accrued, 50002);
@@ -515,33 +726,66 @@ mod tests {
             eps: 0_10000000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 111110000000,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
                 tokens: 200_0000000,
                 q4w: 0,
             };
-            storage::set_pool_balance(&e, &pool_1, &pool_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
             let user_balance = UserBalance {
                 shares: 9_0000000,
                 q4w: vec![&e],
             };
 
-            let result = claim_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            let result = claim_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
 
-            let new_backstop_data = storage::get_backstop_emis_data(&e, &pool_1).unwrap_optimized();
+            let new_backstop_data =
+                storage::get_backstop_emis_data(&e, BackstopTier::SecondLoss, &pool_1)
+                    .unwrap_optimized();
             let new_user_data =
-                storage::get_user_emis_data(&e, &pool_1, &samwise).unwrap_optimized();
+                storage::get_user_emis_data(&e, BackstopTier::SecondLoss, &pool_1, &samwise)
+                    .unwrap_optimized();
             assert_eq!(result, 7_4140001);
             assert_eq!(new_backstop_data.last_time, block_timestamp);
             assert_eq!(new_backstop_data.index, 82488886666666);
@@ -550,48 +794,11 @@ mod tests {
         });
     }
 
-    #[test]
-    #[should_panic(expected = "Error(Contract, #1000)")]
-    fn test_claim_emissions_no_config() {
-        let e = Env::default();
-        let block_timestamp = 1713139200 + 1234;
-        e.ledger().set(LedgerInfo {
-            timestamp: block_timestamp,
-            protocol_version: 27,
-            sequence_number: 0,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 10,
-            min_persistent_entry_ttl: 10,
-            max_entry_ttl: 3110400,
-        });
-
-        let backstop_id = create_backstop(&e);
-        let pool_1 = Address::generate(&e);
-        let samwise = Address::generate(&e);
-
-        e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            let pool_balance = PoolBalance {
-                shares: 150_0000000,
-                tokens: 200_0000000,
-                q4w: 0,
-            };
-            let user_balance = UserBalance {
-                shares: 9_0000000,
-                q4w: vec![&e],
-            };
-
-            claim_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
-        });
-    }
-
     // @dev: The below tests should be impossible states to reach, but are left
     //       in to ensure any bad state does not result in incorrect emissions.
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #8)")]
+    #[should_panic(expected = "Error(Contract, #1027)")]
     fn test_update_emissions_more_q4w_than_shares_panics() {
         let e = Env::default();
         let block_timestamp = 1713139200 + 1234;
@@ -615,16 +822,28 @@ mod tests {
             eps: 0_10000000000000,
             index: 22222,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 11111,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -640,12 +859,25 @@ mod tests {
                 q4w: vec![&e, q4w],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 
     #[test]
-    #[should_panic(expected = "attempt to subtract with overflow")]
+    #[should_panic(expected = "Error(Contract, #1027)")]
     fn test_update_emissions_negative_time_dif() {
         let e = Env::default();
         let block_timestamp = 1713139200 + 1234;
@@ -669,16 +901,28 @@ mod tests {
             eps: 0_10000000000000,
             index: 22222,
             last_time: block_timestamp + 1,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 11111,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -690,12 +934,25 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #8)")]
+    #[should_panic(expected = "Error(Contract, #1027)")]
     fn test_update_emissions_negative_user_index() {
         let e = Env::default();
         let block_timestamp = 1713139200 + 1234;
@@ -719,16 +976,28 @@ mod tests {
             eps: 0_10000000000000,
             index: 222220000000,
             last_time: 1713139200,
+            index_carry: 0,
+            schedule_carry: 0,
         };
         let user_emissions_data = UserEmissionData {
             index: 345660000000000 + 1,
             accrued: 3,
+            carry: 0,
         };
         e.as_contract(&backstop_id, || {
-            storage::set_last_distribution_time(&e, &1713139200);
-
-            storage::set_backstop_emis_data(&e, &pool_1, &backstop_emissions_data);
-            storage::set_user_emis_data(&e, &pool_1, &samwise, &user_emissions_data);
+            storage::set_backstop_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &backstop_emissions_data,
+            );
+            storage::set_user_emis_data(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_emissions_data,
+            );
 
             let pool_balance = PoolBalance {
                 shares: 150_0000000,
@@ -740,7 +1009,20 @@ mod tests {
                 q4w: vec![&e],
             };
 
-            update_emissions(&e, &pool_1, &pool_balance, &samwise, &user_balance);
+            storage::set_pool_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &pool_balance,
+            );
+            storage::set_user_balance_for_tier(
+                &e,
+                BackstopTier::SecondLoss,
+                &pool_1,
+                &samwise,
+                &user_balance,
+            );
+            update_emissions(&e, BackstopTier::SecondLoss, &pool_1, &samwise);
         });
     }
 }

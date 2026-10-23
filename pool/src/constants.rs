@@ -3,8 +3,17 @@
 /// Fixed-point scalar for 12 decimal numbers
 pub const SCALAR_12: i128 = 1_000_000_000_000;
 
+/// Minimum bToken exchange rate that permits risk-increasing reserve actions
+pub const MIN_OPERATIONAL_B_RATE: i128 = SCALAR_12 / 10;
+
 /// Fixed-point scalar for 7 decimal numbers
 pub const SCALAR_7: i128 = 1_0000000;
+
+/// Immutable 0.2% fee applied to positive gross borrower-interest accrual.
+pub const PROTOCOL_INTEREST_FEE_RATE: i128 = 20_000;
+
+/// Inclusive USDC-value minimum for interest and protocol-fee auction lots.
+pub const MIN_AUCTION_LOT_VALUE_USDC: i128 = 20 * SCALAR_7;
 
 /// Seconds per year
 pub const SECONDS_PER_YEAR: i128 = 31536000;
