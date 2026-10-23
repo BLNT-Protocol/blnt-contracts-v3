@@ -48,6 +48,9 @@ silently create a new v3 policy.
   `rust-toolchain.toml` and the committed lockfiles.
 - Do not add SDK 22 or SDK 26 build lanes to the v3 workspace.
 - Never disable release overflow checks.
+- Keep `comet.wasm` equal to the official Comet V1.1
+  `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact with SHA-256
+  `d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
 
 ## Contract guardrails
 
@@ -90,7 +93,7 @@ first:
   weight, removes zero-weight members, uses strict BLNT-weight replacement
   when full, and applies a 70/30 BLNT split.
 - Ongoing BLNT weight only for active, nonqueued underlying BLNT held in the
-  exact canonical BLNT:USDC or BLNT:XLM Comet v2 LPs, regardless of tier position.
+  exact canonical BLNT:USDC or BLNT:XLM Comet V1.1 LPs, regardless of tier position.
 - Migration backfill starts with the first pre-replacement `distribute`, not
   with an emitter queue, and remains capped at 10 million BLNT.
 - A compatible BLNT:XLM emitter queue must be attested no earlier than its
@@ -98,9 +101,9 @@ first:
   unlock.
 - Backstop BLNT claims compound into the originating canonical BLNT-bearing
   tier and credit active shares to the same user and pool.
-- Backstop value comes only from current canonical Comet v2 reserves. BLNT:USDC
+- Backstop value comes only from current canonical Comet V1.1 reserves. BLNT:USDC
   is the USDC anchor, canonical USDC is one-for-one, and canonical XLM is
-  priced by the BLNT reserve ratio between the two Comet v2 pools. Backstop valuation
+  priced by the BLNT reserve ratio between the two Comet V1.1 pools. Backstop valuation
   has no oracle input.
 - Every interest-auction bid is donated in full. Protocol-fee auctions are the
   sole BLNT buy-and-burn path; no legacy pending-balance accounting remains.

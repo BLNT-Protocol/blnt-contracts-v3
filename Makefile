@@ -1,7 +1,8 @@
 override MAX_WASM_BYTES := 120000
 PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
+COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 
-.PHONY: default test build wasm-sizes wasm-size-report fmt clean generate-js
+.PHONY: default test build verify-comet-v1.1 wasm-sizes wasm-size-report fmt clean generate-js
 
 default: build
 
@@ -9,7 +10,10 @@ test: build
 	cargo test --workspace --tests --locked
 	cargo check --manifest-path test-suites/fuzz/Cargo.toml --all-targets --locked
 
-build:
+verify-comet-v1.1:
+	test "$$(shasum -a 256 comet.wasm | cut -d ' ' -f 1)" = "$(COMET_V1_1_WASM_SHA256)"
+
+build: verify-comet-v1.1
 	mkdir -p target/wasm32v1-none/optimized
 	stellar contract build --package pool-factory --locked \
 		--out-dir target/wasm32v1-none/optimized
