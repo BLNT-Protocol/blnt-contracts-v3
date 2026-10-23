@@ -83,7 +83,7 @@ pub trait Backstop {
     /// * `pool_address` - The address of the pool
     fn pool_data(e: Env, pool: Address) -> PoolBackstopData;
 
-    /// Return the canonical Comet v2-implied seven-decimal BLNT price in USDC.
+    /// Return the canonical Comet V1.1-implied seven-decimal BLNT price in USDC.
     fn blnt_price(e: Env) -> i128;
 
     /// Fetch the token contract bound to one pool's loss-waterfall position.

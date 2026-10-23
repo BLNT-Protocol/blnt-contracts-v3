@@ -439,7 +439,7 @@ pub(crate) fn build_pool_valuation(e: &Env, pool: &Address) -> PoolValuation {
 }
 
 /// Return the seven-decimal USDC value of one BLNT implied by the canonical
-/// 80:20 BLNT:USDC Comet v2 pool's current reserves.
+/// 80:20 BLNT:USDC Comet V1.1 pool's current reserves.
 pub fn quote_blnt_price(e: &Env) -> i128 {
     let anchor = read_comet(
         e,

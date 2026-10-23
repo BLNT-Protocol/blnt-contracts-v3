@@ -43,6 +43,13 @@ Soroban SDK 27.0.3, and `wasm32v1-none`.
 This section replaces `V2-BACKSTOP-001`'s single token and extends
 `V2-BACKSTOP-002` and `V2-BACKSTOP-003` per tier.
 
+Canonical V3 liquidity uses the official Comet V1.1
+`v1.1.0_contracts_pkg1.0.0_cli25.1.0` release WASM, SHA-256
+`d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
+Its reviewed upstream source is tag `v1.1.0` commit
+`b3a2d827ed6c158341f8e67ea91eb3b0395d3871`. A rebuilt or modified Comet
+artifact is not canonical for V3.
+
 ### 3.1 Asset configuration
 
 At deployment, each pool operator supplies an ordered list of zero to three
@@ -62,12 +69,12 @@ entitlement, or BLNT-emission weight, and its bad debt passes directly to
 inherited supplier default.
 
 The candidate also immutably binds the canonical BLNT:USDC and BLNT:XLM 80:20
-Comet v2 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is
+Comet V1.1 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is
 accepted and no backstop tier has an oracle configuration. Each canonical
-Comet v2 pool MUST be initialized unfrozen and then bound to a classic-account
+Comet V1.1 pool MUST be initialized unfrozen and then bound to a classic-account
 controller whose signer weights are all zero and whose authorization
 thresholds are positive. Deployment verification MUST reject any other
-controller state. This makes the Comet v2 pool's controller-only freeze and controller-
+controller state. This makes the Comet V1.1 pool's controller-only freeze and controller-
 replacement operations permanently unreachable.
 
 Every transferable tier counts equally per verified USDC for valuation,
@@ -75,7 +82,7 @@ participates in take-rate allocation using its configured weight, and absorbs
 loss in configured order without a protocol-level haircut or concentration
 limit. A deauthorized plain-USDC tier has zero transferable value under
 Section 4 until the issuer reauthorizes the backstop balance.
-Only exact canonical BLNT:USDC and BLNT:XLM Comet v2 tiers are BLNT-emission
+Only exact canonical BLNT:USDC and BLNT:XLM Comet V1.1 tiers are BLNT-emission
 eligible. A pool with neither receives no BLNT emissions. Plain-USDC and
 plain-XLM interest-auction proceeds, like canonical-LP proceeds, are donated
 in full. The protocol-interest fee and independent buy-and-burn auction are
@@ -124,10 +131,10 @@ that every relevant issuer-controlled contract balance was created
 non-clawbackable before accepting the deployment:
 
 - the shared backstop's plain-USDC balance;
-- each BLNT and paired-asset SAC balance held by the canonical Comet v2 pools; and
+- each BLNT and paired-asset SAC balance held by the canonical Comet V1.1 pools; and
 - any issued-XLM backstop balance used by a non-production fixture.
 
-Native XLM has no issuer clawback, and the canonical Comet v2 LP contracts expose
+Native XLM has no issuer clawback, and the canonical Comet V1.1 LP contracts expose
 no issuer-clawback operation. Because a SAC does not expose its stored contract-
 balance clawback flag through a public method, deployment verification MUST
 read the exact persistent balance entry and fail closed unless it exists, is
@@ -151,11 +158,11 @@ or keep borrowing enabled; suppliers independently evaluate the configured and
 funded loss protection.
 
 The backstop immutably binds distinct BLNT, USDC, and XLM tokens and the exact
-BLNT:USDC and BLNT:XLM Comet v2 pools. All five token interfaces MUST use seven
-decimals. Construction rejects a Comet v2 pool unless it contains exactly its expected
+BLNT:USDC and BLNT:XLM Comet V1.1 pools. All five token interfaces MUST use seven
+decimals. Construction rejects a Comet V1.1 pool unless it contains exactly its expected
 pair at normalized weights 80% BLNT and 20% paired asset.
 
-Let the BLNT:USDC Comet v2 pool hold BLNT reserve \(B_u\), USDC reserve \(U\), and LP
+Let the BLNT:USDC Comet V1.1 pool hold BLNT reserve \(B_u\), USDC reserve \(U\), and LP
 supply \(S_u\). Its current reserve composition implies total USDC value
 \(T_u=5U\). For BLNT:USDC LP amount \(A_u\):
 
@@ -163,7 +170,7 @@ supply \(S_u\). Its current reserve composition implies total USDC value
 V_u(A_u)=\left\lfloor A_u\frac{5U}{S_u}\right\rfloor
 \]
 
-The same Comet v2 pool implies a BLNT price of \(4U/B_u\). Let the BLNT:XLM Comet v2 pool hold
+The same Comet V1.1 pool implies a BLNT price of \(4U/B_u\). Let the BLNT:XLM Comet V1.1 pool hold
 BLNT reserve \(B_x\), XLM reserve \(X\), and LP supply \(S_x\). Its implied
 total USDC value and the value of BLNT:XLM LP amount \(A_x\) are:
 
@@ -173,12 +180,12 @@ T_x=\left\lfloor\frac{5B_xU}{B_u}\right\rfloor,
 V_x(A_x)=\left\lfloor A_x\frac{T_x}{S_x}\right\rfloor
 \]
 
-For either Comet v2 pool, underlying BLNT is
+For either Comet V1.1 pool, underlying BLNT is
 \(B(A)=\lfloor AR_b/S\rfloor\). Every quote rechecks positive LP supply and
 reserves and the immutable weights. Canonical USDC is valued one-for-one only
 while the USDC SAC reports the backstop contract as authorized. A deauthorized
 plain-USDC tier has zero value without changing its token, share, queue, or
-pending-interest accounting. The same two Comet v2 pools imply the USDC-equivalent
+pending-interest accounting. The same two Comet V1.1 pools imply the USDC-equivalent
 value of plain-XLM amount \(A\):
 
 \[
@@ -188,14 +195,14 @@ A\frac{UB_x}{B_uX}
 \]
 
 Active and queued amounts are quoted separately. A zero amount has zero value
-without reading an otherwise unnecessary Comet v2 pool. No backstop valuation uses a
+without reading an otherwise unnecessary Comet V1.1 pool. No backstop valuation uses a
 pool oracle, separate oracle, or caller-supplied price.
 
 Each operation MUST obtain all backstop values it consumes from one canonical
 snapshot. A verified zero is the only skippable result; unavailable,
 incompatible, negative, inconsistent, or overflowing inputs fail atomically.
 
-Canonical LP values deliberately reflect current Comet v2 composition rather
+Canonical LP values deliberately reflect current Comet V1.1 composition rather
 than an external fair-market price. Swaps, one-sided liquidity changes, and
 donations can change them; BLNT:USDC remains the USDC and BLNT-price anchor.
 Plain-USDC authorization is read directly from its SAC on every valuation. A
@@ -709,7 +716,7 @@ and each authorized reserve contributes its complete currently unpaid
 combined lot MUST meet the inclusive 20-USDC reserve-oracle minimum.
 
 The backstop exposes the seven-decimal current BLNT price implied by the
-canonical 80:20 BLNT:USDC Comet v2 pool. For positive BLNT reserve \(B_u\) and USDC
+canonical 80:20 BLNT:USDC Comet V1.1 pool. For positive BLNT reserve \(B_u\) and USDC
 reserve \(U\):
 
 \[
@@ -743,7 +750,7 @@ reconciliation that reduces included protocol credit cancels the auction. Type
 ### 6.1 V3 emitter launch and replacement — **Replaced and extended**
 
 `V2-EMISSIONS-004` is replaced for the initial v3 launch. V3 deploys a new
-emitter already configured for the v3 backstop and canonical BLNT:XLM Comet v2
+emitter already configured for the v3 backstop and canonical BLNT:XLM Comet V1.1
 LP. It does not replace, reconfigure, or depend on any earlier emitter.
 
 The v3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
@@ -818,7 +825,7 @@ The inherited reward zone changes as follows:
 
 A pool without either canonical BLNT LP, including an unbackstopped pool, has
 zero weight and cannot enter the reward zone. For active canonical LP amount
-\(A_t\), current Comet v2 BLNT reserve \(R_t\), and LP supply \(S_t\), eligible
+\(A_t\), current Comet V1.1 BLNT reserve \(R_t\), and LP supply \(S_t\), eligible
 weight is:
 
 \[
@@ -878,7 +885,7 @@ only `claim` is authoritative. Plain-USDC and plain-XLM tiers are ineligible.
 
 The inherited owner-authorized claim selects one eligible tier and a nonempty
 unique pool list. It aggregates that tier's accrual, performs one single-sided
-BLNT Comet v2 deposit, and credits the resulting LP proportionally to the same
+BLNT Comet V1.1 deposit, and credits the resulting LP proportionally to the same
 owner and pool positions using v2 rounding. Exact BLNT and LP balance deltas
 govern settlement; zero output or a mismatch fails atomically. A successful
 claim increments the backstop-claimed BLNT counter. Compounded shares are
