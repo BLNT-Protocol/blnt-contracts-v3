@@ -327,11 +327,11 @@ fn protocol_fee_auction_burns_blnt_optimized_wasm() {
     let filler = fixture.users[0].clone();
 
     // Checkpoint both halves of reserve accounting before installing an exact
-    // $200 protocol-credit boundary for this optimized-WASM settlement test.
+    // $20 protocol-credit boundary for this optimized-WASM settlement test.
     stable.mint(&pool.address, &1);
     assert_eq!(pool.gulp(&stable_address), 1);
     let mut fee = protocol_fee_data(&e, &pool.address, &stable_address);
-    let target_credit = 200 * 10i128.pow(6);
+    let target_credit = 20 * 10i128.pow(6);
     assert!(fee.credit <= target_credit);
     stable.mint(&pool.address, &(target_credit - fee.credit));
     fee.credit = target_credit;

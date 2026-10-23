@@ -583,10 +583,11 @@ tier and settlement metadata. It may independently retain one protocol-fee
 auction under public auction type 3. Private metadata has a 46-day temporary
 lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
 
-Each tier uses Section 4 valuation and `V2-AUCTION-004`'s inclusive 200-USDC
-interest minimum. Interest fills donate to the selected tier; bad-debt fills
-draw from it. Stale deletion releases the selection without changing
-liabilities, pending credit, balances, or tier assets. If a selected
+Each tier uses Section 4 valuation. As an approved economic exception to
+`V2-AUCTION-004`, v3 lowers the inclusive interest minimum from 200 USDC to
+20 USDC. Interest fills donate to the selected tier; bad-debt fills draw from
+it. Stale deletion releases the selection without changing liabilities,
+pending credit, balances, or tier assets. If a selected
 plain-USDC tier becomes deauthorized, the same deletion entry point may release
 it immediately so the next permissionless creation can continue with a
 transferable tier.
@@ -675,7 +676,7 @@ A mismatch fails atomically and does not redirect the auction.
 | --- | --- |
 | Checkpoint | Accrue and persist the supplied reserves. Omitted reserves remain pending or uncheckpointed. |
 | Allocate | Use one canonical `pool_data` snapshot and the formula above to move new credit into persistent tier amounts. |
-| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first transferable tier meeting the inclusive 200-USDC minimum. Previously allocated amounts for a deauthorized tier remain pending until reauthorization. |
+| Select | Value pending reserve baskets with the immutable reserve oracle and, from the cyclic configured-tier cursor, choose the first transferable tier meeting the inclusive 20-USDC minimum. Previously allocated amounts for a deauthorized tier remain pending until reauthorization. |
 | Create | Store the selected persistent amounts in a next-ledger auction, privately bind its tier, and advance the cursor. No second interest auction may start before fill or stale deletion. |
 | Fill | Require a filler other than the pool or backstop and sufficient tier-token allowance. Derive a seven-decimal selected-tier bid worth 120% of the reserve lot, rounded up, transfer the realized reserve lot, and atomically transfer and account for the realized bid under the selected tier's rules below. |
 | Recover | Stale deletion releases the selection; unfilled amounts remain in their original pending and credit accumulators. |
@@ -705,7 +706,7 @@ to `min(max_positions - 1, 4)` unique configured reserves. A nonempty `bid`
 MUST contain exactly canonical BLNT. The supplied reserves are checkpointed,
 and each authorized reserve contributes its complete currently unpaid
 `protocol_credit`; omitted and deauthorized reserves remain pending. The
-combined lot MUST meet the inclusive 200-USDC reserve-oracle minimum.
+combined lot MUST meet the inclusive 20-USDC reserve-oracle minimum.
 
 The backstop exposes the seven-decimal current BLNT price implied by the
 canonical 80:20 BLNT:USDC Comet v2 pool. For positive BLNT reserve \(B_u\) and USDC
