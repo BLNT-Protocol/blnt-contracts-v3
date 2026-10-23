@@ -1,5 +1,5 @@
 use crate::{
-    constants::SCALAR_7,
+    constants::{MIN_AUCTION_LOT_VALUE_USDC, SCALAR_7},
     dependencies::BackstopClient,
     errors::PoolError,
     pool::{Pool, User},
@@ -15,7 +15,6 @@ use super::{
 };
 
 const MAX_PROTOCOL_FEE_LOT_ASSETS: u32 = 4;
-const PROTOCOL_FEE_AUCTION_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
 
 /// Create one independent protocol-fee auction whose filler bids BLNT for
 /// reserve assets already recognized as protocol credit.
@@ -62,9 +61,7 @@ pub(crate) fn create_protocol_fee_auction_data(e: &Env, lot_assets: &Vec<Address
         }
         pool.cache_reserve(reserve);
     }
-    if lot.is_empty() || lot_value < PROTOCOL_FEE_AUCTION_MINIMUM_VALUE_USDC {
-        panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
-    }
+    require_protocol_fee_auction_capacity(e, &lot, lot_value);
 
     let blnt_price = BackstopClient::new(e, &backstop).blnt_price();
     if blnt_price <= 0 {
@@ -319,6 +316,12 @@ fn value_reserve_amount(
     oracle_value.fixed_mul_floor(e, &SCALAR_7, &oracle_scalar)
 }
 
+fn require_protocol_fee_auction_capacity(e: &Env, lot: &Map<Address, i128>, lot_value: i128) {
+    if lot.is_empty() || lot_value < MIN_AUCTION_LOT_VALUE_USDC {
+        panic_with_error!(e, PoolError::NoInterestAuctionCapacity);
+    }
+}
+
 fn checked_add(e: &Env, left: i128, right: i128) -> i128 {
     left.checked_add(right)
         .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError))
@@ -345,7 +348,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn protocol_fee_auction_bids_blnt_and_coexists_with_interest_auction() {
+    fn protocol_fee_auction_accepts_twenty_usdc_and_coexists_with_interest_auction() {
         let e = Env::default();
         e.mock_all_auths_allowing_non_root_auth();
         e.cost_estimate().budget().reset_unlimited();
@@ -389,8 +392,8 @@ mod tests {
             &300,
         );
         oracle_client.set_price_stable(&vec![&e, SCALAR_7]);
-        reserve_token.mint(&pool_address, &(200 * SCALAR_7));
-        blnt_client.mint(&filler, &(2_400 * SCALAR_7));
+        reserve_token.mint(&pool_address, &(20 * SCALAR_7));
+        blnt_client.mint(&filler, &(240 * SCALAR_7));
 
         e.as_contract(&pool_address, || {
             storage::set_pool_config(
@@ -407,7 +410,7 @@ mod tests {
                 &e,
                 &reserve_asset,
                 &ProtocolFeeData {
-                    credit: 200 * SCALAR_7,
+                    credit: 20 * SCALAR_7,
                     carry: 0,
                 },
             );
@@ -425,10 +428,10 @@ mod tests {
             );
 
             let auction = create_protocol_fee_auction_data(&e, &vec![&e, reserve_asset.clone()]);
-            assert_eq!(auction.bid, map![&e, (blnt.clone(), 2_400 * SCALAR_7)]);
+            assert_eq!(auction.bid, map![&e, (blnt.clone(), 240 * SCALAR_7)]);
             assert_eq!(
                 auction.lot,
-                map![&e, (reserve_asset.clone(), 200 * SCALAR_7)]
+                map![&e, (reserve_asset.clone(), 20 * SCALAR_7)]
             );
             assert_eq!(auction.block, 51);
             assert!(has_tier_auction(&e, AuctionType::InterestAuction));
@@ -453,9 +456,9 @@ mod tests {
             let fill = fill_protocol_fee_auction(&e, &mut pool, &backstop, &filler_state, 100);
             pool.store_cached_reserves(&e);
 
-            assert_eq!(fill.bid, map![&e, (blnt.clone(), 2_400 * SCALAR_7)]);
-            assert_eq!(fill.lot, map![&e, (reserve_asset.clone(), 200 * SCALAR_7)]);
-            assert_eq!(reserve_token.balance(&filler), 200 * SCALAR_7);
+            assert_eq!(fill.bid, map![&e, (blnt.clone(), 240 * SCALAR_7)]);
+            assert_eq!(fill.lot, map![&e, (reserve_asset.clone(), 20 * SCALAR_7)]);
+            assert_eq!(reserve_token.balance(&filler), 20 * SCALAR_7);
             assert_eq!(blnt_client.balance(&filler), 0);
             assert_eq!(blnt_client.balance(&pool_address), 0);
             assert_eq!(storage::get_protocol_fee_data(&e, &reserve_asset).credit, 0);
@@ -466,5 +469,13 @@ mod tests {
             ));
             assert!(has_tier_auction(&e, AuctionType::InterestAuction));
         });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1228)")]
+    fn protocol_fee_auction_rejects_value_below_twenty_usdc() {
+        let e = Env::default();
+        let lot = map![&e, (Address::generate(&e), 1_i128)];
+        require_protocol_fee_auction_capacity(&e, &lot, MIN_AUCTION_LOT_VALUE_USDC - 1);
     }
 }

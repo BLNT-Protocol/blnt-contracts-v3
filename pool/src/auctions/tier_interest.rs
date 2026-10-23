@@ -1,5 +1,5 @@
 use crate::{
-    constants::SCALAR_7,
+    constants::{MIN_AUCTION_LOT_VALUE_USDC, SCALAR_7},
     dependencies::{BackstopClient, BackstopPoolData},
     errors::PoolError,
     pool::{Pool, User},
@@ -21,7 +21,6 @@ use super::{
 
 const ONE_DAY_LEDGERS: u32 = 17_280;
 const MAX_INTEREST_LOT_ASSETS: u32 = 4;
-const INTEREST_AUCTION_MINIMUM_VALUE_USDC: i128 = 200 * SCALAR_7;
 const INTEREST_STATE_TTL_THRESHOLD: u32 = 179 * ONE_DAY_LEDGERS;
 const INTEREST_STATE_TTL_BUMP: u32 = 180 * ONE_DAY_LEDGERS;
 
@@ -551,7 +550,7 @@ fn select_interest_tier(e: &Env, cursor: u32, tier_values: &Vec<i128>) -> super:
     }
     for offset in 0..tier_values.len() {
         let index = (cursor + offset) % tier_values.len();
-        if tier_values.get(index).unwrap() >= INTEREST_AUCTION_MINIMUM_VALUE_USDC {
+        if tier_values.get(index).unwrap() >= MIN_AUCTION_LOT_VALUE_USDC {
             return tier_from_index(e, index);
         }
     }
@@ -672,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn interest_threshold_includes_exactly_two_hundred_usdc() {
+    fn interest_threshold_includes_exactly_twenty_usdc() {
         let e = Env::default();
         assert_eq!(
             select_interest_tier(
@@ -680,8 +679,8 @@ mod tests {
                 0,
                 &vec![
                     &e,
-                    INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
-                    INTEREST_AUCTION_MINIMUM_VALUE_USDC,
+                    MIN_AUCTION_LOT_VALUE_USDC - 1,
+                    MIN_AUCTION_LOT_VALUE_USDC,
                     0,
                 ],
             ),
@@ -691,16 +690,16 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1228)")]
-    fn interest_threshold_rejects_values_below_two_hundred_usdc() {
+    fn interest_threshold_rejects_values_below_twenty_usdc() {
         let e = Env::default();
         select_interest_tier(
             &e,
             0,
             &vec![
                 &e,
-                INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
-                INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
-                INTEREST_AUCTION_MINIMUM_VALUE_USDC - 1,
+                MIN_AUCTION_LOT_VALUE_USDC - 1,
+                MIN_AUCTION_LOT_VALUE_USDC - 1,
+                MIN_AUCTION_LOT_VALUE_USDC - 1,
             ],
         );
     }

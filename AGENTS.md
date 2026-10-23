@@ -75,7 +75,7 @@ first:
   the strict loss waterfall before suppliers. A zero-tier pool is explicitly
   unbackstopped and must keep its backstop take rate at zero.
 - One tier per auction and at most one active interest auction per pool.
-  Interest requires at least 200 USDC; bad debt uses every positively valued
+  Interest requires at least 20 USDC; bad debt uses every positively valued
   tier before suppliers.
 - Pool status depends on the inherited queued-withdrawal ratio and admin state,
   not a minimum backstop value. Backstop valuation, take-rate allocation, and
