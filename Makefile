@@ -1,8 +1,9 @@
 override MAX_WASM_BYTES := 120000
 PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
+SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-contracts-v3
 
-.PHONY: default test build verify-comet-v1.1 wasm-sizes wasm-size-report fmt clean generate-js
+.PHONY: default test build verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
 
 default: build
 
@@ -16,12 +17,16 @@ verify-comet-v1.1:
 build: verify-comet-v1.1
 	mkdir -p target/wasm32v1-none/optimized
 	stellar contract build --package pool-factory --locked \
+		--meta $(SOURCE_REPO_META) \
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package backstop --locked \
+		--meta $(SOURCE_REPO_META) \
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package emitter --locked \
+		--meta $(SOURCE_REPO_META) \
 		--out-dir target/wasm32v1-none/optimized
 	stellar contract build --package pool --locked \
+		--meta $(SOURCE_REPO_META) \
 		--out-dir target/wasm32v1-none/optimized
 	@for wasm in $(PRODUCTION_WASMS); do \
 		size="$$(wc -c < "target/wasm32v1-none/optimized/$$wasm")"; \
@@ -33,6 +38,15 @@ build: verify-comet-v1.1
 		for i in $(PRODUCTION_WASMS) ; do \
 			ls -l "$$i"; \
 		done
+	$(MAKE) --no-print-directory verify-source-metadata
+
+verify-source-metadata:
+	@for wasm in $(PRODUCTION_WASMS); do \
+		stellar contract info meta \
+			--wasm "target/wasm32v1-none/optimized/$$wasm" 2>/dev/null | \
+			grep -Fq "source_repo: github:BLNT-Protocol/blnt-contracts-v3" || \
+			{ printf 'error: missing source_repo metadata in %s\n' "$$wasm" >&2; exit 1; }; \
+	done
 
 wasm-sizes: build
 	@$(MAKE) --no-print-directory wasm-size-report
