@@ -357,6 +357,7 @@ impl Backstop for BackstopContract {
     }
 
     fn migration_token(e: Env) -> Address {
+        storage::extend_instance(&e);
         storage::get_blnt_xlm_token(&e)
     }
 
