@@ -35,7 +35,7 @@ jobs:
     with:
       release_name: ${{ github.ref_name }}
       release_description: 'Blend Emitter Release'
-      package: 'emitter'
+      relative_path: 'emitter'
     secrets:
       release_token: ${{ secrets.GITHUB_TOKEN }}
 
