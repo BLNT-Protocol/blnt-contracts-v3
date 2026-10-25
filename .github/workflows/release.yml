@@ -26,6 +26,7 @@ jobs:
       release_name: ${{ github.ref_name }}
       release_description: 'Blend Pool Release'
       package: 'pool'
+      make_target: 'build-pool-dependency'
     secrets:
       release_token: ${{ secrets.GITHUB_TOKEN }}
 

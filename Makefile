@@ -3,9 +3,12 @@ PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-contracts-v3
 
-.PHONY: default test build verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
+.PHONY: default test build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
 
 default: build
+
+build-pool-dependency:
+	cargo build --target wasm32v1-none --release --locked --package backstop
 
 test: build
 	cargo test --workspace --tests --locked
