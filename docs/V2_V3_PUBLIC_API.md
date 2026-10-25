@@ -37,7 +37,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 | `distribute() -> i128` | Same | Extended | Mints BLNT at the inherited one-token-per-second rate and requires the current backstop; callers use the backstop's permissionless checkpoint. |
 | `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
 | `get_backstop() -> Address` | Same | Unchanged | Returns the current BLNT recipient backstop. |
-| `queue_swap_backstop(new_backstop, new_backstop_token)` | Same | Unchanged | Preserves strict raw-balance qualification and the 31-day future-upgrade queue. |
+| `queue_swap_backstop(new_backstop, new_backstop_token)` | Same | Extended | Preserves strict raw-balance qualification and the 31-day future-upgrade queue while requiring the supplied token to match the candidate's declared `migration_token`. |
 | `get_queued_swap() -> Option<Swap>` | Same | Unchanged | Preserves the queued-swap view. |
 | `cancel_swap_backstop()` | Same | Extended | Preserves invalid-queue cancellation and also permits cancellation through the same entry point after the seven-day execution window expires. |
 | `swap_backstop()` | Same | Extended | Preserves final distribution, revalidation, and recipient replacement while limiting execution to the seven days after unlock. |
@@ -60,6 +60,7 @@ the v3 emitter adds only constructor-bound initialization authority.
 | `pool_data(pool) -> PoolBackstopData` | Same | Extended | Replaces the single-LP fields with an ordered zero-to-three-tier vector, aggregate transferable active USDC-equivalent value, and transferable-value-weighted Q4W. [V3 §3.2](V3_SYSTEM_SPEC.md#32-position-accounting) |
 | — | `blnt_price() -> i128` | Added | Returns the seven-decimal BLNT price implied by the canonical 80:20 BLNT:USDC Comet V1.1 reserves for protocol-fee auction construction. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
 | `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| — | `migration_token() -> Address` | Added | Declares the immutable token that the emitter must install as the comparison token if this backstop wins a future replacement contest. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; admission, removal, allocation, and full-zone replacement use eligible underlying BLNT weight. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh v3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | `gulp_emissions(pool) -> i128` | Same | Extended | Retains the 70/30 gulp while scheduling the eligible tier streams. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |

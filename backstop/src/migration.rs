@@ -354,7 +354,7 @@ mod tests {
     use mock_pool::{MockPool, MockPoolClient};
     use sep_41_token::{testutils::MockTokenClient, TokenClient};
     use soroban_sdk::{
-        testutils::{Address as _, Ledger},
+        testutils::{storage::Instance as _, Address as _, Ledger},
         vec, Address, Env, Vec,
     };
 
@@ -374,6 +374,9 @@ mod tests {
 
     const QUEUE_SECONDS: u64 = 31 * DAY_IN_SECONDS;
     const MAX_BACKFILL_SECONDS: u64 = (MAX_BACKFILLED_EMISSIONS / SCALAR_7) as u64;
+    const DAY_IN_LEDGERS: u32 = 17_280;
+    const COMPLETE_SWAP_WINDOW_LEDGERS: u32 = 38 * DAY_IN_LEDGERS;
+    const NEAR_EXPIRY_LEDGERS: u32 = 30 * DAY_IN_LEDGERS;
 
     struct Fixture {
         admin: Address,
@@ -814,18 +817,43 @@ mod tests {
     }
 
     #[test]
-    fn observed_queue_must_target_the_candidate_and_blnt_xlm() {
+    fn emitter_rejects_queue_with_noncanonical_candidate_token() {
         let fixture = Fixture::create();
         assert_eq!(fixture.client().distribute(), 0);
+        assert!(fixture
+            .emitter()
+            .try_queue_swap_backstop(&fixture.backstop, &Address::generate(&fixture.e))
+            .is_err());
+        assert!(fixture.emitter().get_queued_swap().is_none());
+        assert_eq!(fixture.migration_state().status, MigrationStatus::Open);
+    }
+
+    #[test]
+    fn emitter_queue_extends_candidate_ttl_through_complete_swap_window() {
+        let fixture = Fixture::create();
+        assert_eq!(fixture.client().distribute(), 0);
+
+        let initial_ttl = fixture.e.as_contract(&fixture.backstop, || {
+            fixture.e.storage().instance().get_ttl()
+        });
+        assert!(initial_ttl > NEAR_EXPIRY_LEDGERS);
+        fixture
+            .e
+            .ledger()
+            .set_sequence_number(fixture.e.ledger().sequence() + initial_ttl - NEAR_EXPIRY_LEDGERS);
+        let ttl_before_queue = fixture.e.as_contract(&fixture.backstop, || {
+            fixture.e.storage().instance().get_ttl()
+        });
+        assert_eq!(ttl_before_queue, NEAR_EXPIRY_LEDGERS);
+
         fixture
             .emitter()
-            .queue_swap_backstop(&fixture.backstop, &Address::generate(&fixture.e));
-        assert!(fixture.client().try_distribute().is_err());
-        let unlock = fixture.unlock();
-        fixture.e.ledger().set_timestamp(unlock);
-        fixture.emitter().swap_backstop();
-        assert!(fixture.client().try_distribute().is_err());
-        assert_eq!(fixture.migration_state().status, MigrationStatus::Open);
+            .queue_swap_backstop(&fixture.backstop, &fixture.blnt_xlm);
+
+        let ttl_after_queue = fixture.e.as_contract(&fixture.backstop, || {
+            fixture.e.storage().instance().get_ttl()
+        });
+        assert!(ttl_after_queue >= COMPLETE_SWAP_WINDOW_LEDGERS);
     }
 
     #[test]

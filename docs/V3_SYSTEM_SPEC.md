@@ -788,21 +788,24 @@ combined-backfill sums MUST use checked arithmetic.
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
 the current designated token than the incumbent; for the initial v3 binding,
-that token is canonical BLNT:XLM LP. Equality is insufficient. The existing
+that token is canonical BLNT:XLM LP. Equality is insufficient. Every candidate
+MUST expose an immutable `migration_token() -> Address` view. The token supplied
+to `queue_swap_backstop` MUST equal that candidate-declared token, and the
+emitter MUST revalidate the declaration before finalization. The existing
 31-day queue remains unchanged. Finalization is available from the unlock
-through exactly seven days after it and revalidates the strict balance before
-the final incumbent distribution, recipient switch, new-recipient checkpoint,
-and caller-selected next designated-token update. Before expiration, the
-existing cancellation rule still requires the candidate to lose its strict
-balance qualification. After expiration, anyone may use the same
-`cancel_swap_backstop` entry point regardless of balance and may then create a
-fresh queue through the same `queue_swap_backstop` entry point. The stored
-`Swap` shape and all existing method encodings remain unchanged. Recipient
-activation remains a separate permissionless backstop checkpoint; the emitter
-stores no activation or pause state, and an inactive recipient does not gate a
-later qualified queue or replacement. This is the only protocol-upgrade route
-retained by the emitter; v3 introduces no administrator or privileged
-replacement entry point.
+through exactly seven days after it and revalidates the strict balance and
+candidate token before the final incumbent distribution, recipient switch,
+new-recipient checkpoint, and next designated-token update. Before expiration,
+the existing cancellation rule still requires the candidate to lose its strict
+balance qualification or token attestation. After expiration, anyone may use
+the same `cancel_swap_backstop` entry point regardless of balance and may then
+create a fresh queue through the same `queue_swap_backstop` entry point. The
+stored `Swap` shape and all existing emitter method encodings remain unchanged.
+Recipient activation remains a separate permissionless backstop checkpoint;
+the emitter stores no activation or pause state, and an inactive recipient does
+not gate a later qualified queue or replacement. This is the only
+protocol-upgrade route retained by the emitter; v3 introduces no administrator
+or privileged replacement entry point.
 
 ### 6.2 Backstop-depositor emissions — **Extended**
 

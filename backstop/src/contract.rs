@@ -89,6 +89,10 @@ pub trait Backstop {
     /// Fetch the token contract bound to one pool's loss-waterfall position.
     fn backstop_token(e: Env, tier: BackstopTier, pool: Address) -> Address;
 
+    /// Return the immutable token this backstop designates for the next emitter
+    /// replacement contest.
+    fn migration_token(e: Env) -> Address;
+
     /// Fetch the reward zone for the backstop
     fn reward_zone(e: Env) -> Vec<Address>;
 
@@ -350,6 +354,11 @@ impl Backstop for BackstopContract {
 
     fn backstop_token(e: Env, tier: BackstopTier, pool: Address) -> Address {
         tier_token(&e, &pool, tier)
+    }
+
+    fn migration_token(e: Env) -> Address {
+        storage::extend_instance(&e);
+        storage::get_blnt_xlm_token(&e)
     }
 
     fn reward_zone(e: Env) -> Vec<Address> {
