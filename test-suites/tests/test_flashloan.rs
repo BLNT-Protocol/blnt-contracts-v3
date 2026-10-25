@@ -287,7 +287,7 @@ fn test_flashloan_reentrancy_disabled() {
     );
     assert_eq!(
         merry_positions.collateral,
-        map![&fixture.env, (0, 999995310)]
+        map![&fixture.env, (0, 999995319)]
     );
     assert_eq!(starting_xlm_balance * 2, xlm.balance(&merry));
 

@@ -2,10 +2,11 @@ use moderc3156::FlashLoanClient;
 use sep_41_token::TokenClient;
 use soroban_sdk::{panic_with_error, Address, Env, Map, Vec};
 
-use crate::{events::PoolEvents, storage, AuctionType, PoolError};
+use crate::{access, events::PoolEvents, storage, AuctionType, PoolError};
 
 use super::{
     actions::{build_actions_from_request, Actions, Request},
+    gulp::reserve_accounting_balance,
     health_factor::PositionData,
     pool::Pool,
     FlashLoan, Positions, RequestType, User,
@@ -36,6 +37,8 @@ pub fn execute_submit(
     {
         panic_with_error!(e, &PoolError::BadRequest);
     }
+    access::require_permissions(e, from, access::request_permissions(e, &requests));
+
     let mut pool = Pool::load(e);
     let mut from_state = User::load(e, from);
 
@@ -51,12 +54,14 @@ pub fn execute_submit(
         actions.check_health,
         &actions.check_max_util,
     );
+    let expected_balances = snapshot_expected_reserve_balances(e, &pool, &actions, None);
 
     if use_allowance {
         handle_transfer_with_allowance(e, &actions, spender, to);
     } else {
         handle_transfers(e, &actions, spender, to);
     }
+    require_expected_reserve_balances(e, &expected_balances);
 
     // store updated info to ledger
     pool.store_cached_reserves(e);
@@ -76,6 +81,9 @@ pub fn execute_submit_with_flash_loan(
     if from == &e.current_contract_address() {
         panic_with_error!(e, &PoolError::BadRequest);
     }
+    let required = access::request_permissions(e, &requests) | access::RESERVE_BORROW_ALLOWED;
+    access::require_permissions(e, from, required);
+
     let mut pool = Pool::load(e);
     let mut from_state = User::load(e, from);
 
@@ -119,6 +127,8 @@ pub fn execute_submit_with_flash_loan(
         true,
         &actions.check_max_util,
     );
+    let expected_balances =
+        snapshot_expected_reserve_balances(e, &pool, &actions, Some(&flash_loan));
 
     // we deal with the flashloan transfer before the others to allow the flash
     // loan to yield the repaid or supplied amount in the transfers.
@@ -141,12 +151,62 @@ pub fn execute_submit_with_flash_loan(
     // we just have to make sure that they have the balances they are claiming to have through the transfers.
 
     handle_transfer_with_allowance(e, &actions, from, from);
+    require_expected_reserve_balances(e, &expected_balances);
 
     // store updated info to ledger
     pool.store_cached_reserves(e);
     from_state.store(e);
 
     from_state.positions
+}
+
+/// Snapshot the exact final custody balance expected for every reserve touched
+/// by the submission and require the projected balances to fully back the
+/// post-action accounting. A flash-loan transfer is included separately
+/// because it occurs before the ordinary transfer batch.
+fn snapshot_expected_reserve_balances(
+    e: &Env,
+    pool: &Pool,
+    actions: &Actions,
+    flash_loan: Option<&FlashLoan>,
+) -> Map<Address, i128> {
+    let pool_address = e.current_contract_address();
+    let mut expected_balances = Map::new(e);
+    for (asset, reserve) in pool.reserves.iter() {
+        let tokens_in = actions.spender_transfer.get(asset.clone()).unwrap_or(0);
+        let tokens_out = actions.pool_transfer.get(asset.clone()).unwrap_or(0);
+        let flash_out = match flash_loan {
+            Some(flash_loan) if flash_loan.asset == asset => flash_loan.amount,
+            _ => 0,
+        };
+        let balance_before = TokenClient::new(e, &asset).balance(&pool_address);
+        let expected_balance = balance_before
+            .checked_add(tokens_in)
+            .and_then(|value| value.checked_sub(tokens_out))
+            .and_then(|value| value.checked_sub(flash_out))
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        let accounting_balance =
+            reserve_accounting_balance(e, &reserve, pool.protocol_fee_data(e, &asset).credit);
+        let projected_delta = expected_balance
+            .checked_sub(accounting_balance)
+            .unwrap_or_else(|| panic_with_error!(e, PoolError::OverflowError));
+        if projected_delta < 0 {
+            panic_with_error!(e, PoolError::UnreconciledReserveLoss);
+        }
+        expected_balances.set(asset, expected_balance);
+    }
+    expected_balances
+}
+
+/// Require the completed transfer batch to produce its exact scheduled net
+/// custody change before any reserve or user accounting is stored.
+fn require_expected_reserve_balances(e: &Env, expected_balances: &Map<Address, i128>) {
+    let pool_address = e.current_contract_address();
+    for (asset, expected_balance) in expected_balances.iter() {
+        if TokenClient::new(e, &asset).balance(&pool_address) != expected_balance {
+            panic_with_error!(e, PoolError::BalanceError);
+        }
+    }
 }
 
 /// Validate submit results in a valid state for the pool and user.
@@ -247,6 +307,7 @@ fn handle_transfers(e: &Env, actions: &Actions, spender: &Address, to: &Address)
 #[cfg(test)]
 mod tests {
     use crate::{
+        constants::SCALAR_7,
         storage::{self, PoolConfig},
         testutils, AuctionData, RequestType,
     };
@@ -256,8 +317,335 @@ mod tests {
     use soroban_sdk::{
         map,
         testutils::{Address as _, Ledger, LedgerInfo},
-        vec, Symbol,
+        vec, Error, Symbol,
     };
+
+    #[test]
+    fn submissions_reject_inexact_incoming_reserve_transfers() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 600,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool_address = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (asset, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.last_time = 600;
+        testutils::create_reserve(&e, &pool_address, &asset, &reserve_config, &reserve_data);
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+        });
+
+        let amount = 10 * SCALAR_7;
+        token.mint(&user, &(2 * amount));
+        token.set_transfer_shortfall(&pool_address, &1);
+        let pool_balance_before = token.balance(&pool_address);
+        let user_balance_before = token.balance(&user);
+        let client = crate::PoolClient::new(&e, &pool_address);
+        let request = Request {
+            request_type: RequestType::Supply as u32,
+            address: asset.clone(),
+            amount,
+        };
+
+        let submit_result = client.try_submit(&user, &user, &user, &vec![&e, request.clone()]);
+        assert_eq!(
+            submit_result.err(),
+            Some(Ok(Error::from_contract_error(
+                PoolError::BalanceError as u32
+            )))
+        );
+        assert!(client.get_positions(&user).supply.is_empty());
+        assert_eq!(
+            client.get_reserve(&asset).data.b_supply,
+            reserve_data.b_supply
+        );
+        assert_eq!(token.balance(&pool_address), pool_balance_before);
+        assert_eq!(token.balance(&user), user_balance_before);
+
+        token.approve(&user, &pool_address, &amount, &10_000);
+        let allowance_before = token.allowance(&user, &pool_address);
+        let allowance_result =
+            client.try_submit_with_allowance(&user, &user, &user, &vec![&e, request]);
+        assert_eq!(
+            allowance_result.err(),
+            Some(Ok(Error::from_contract_error(
+                PoolError::BalanceError as u32
+            )))
+        );
+        assert!(client.get_positions(&user).supply.is_empty());
+        assert_eq!(
+            client.get_reserve(&asset).data.b_supply,
+            reserve_data.b_supply
+        );
+        assert_eq!(token.balance(&pool_address), pool_balance_before);
+        assert_eq!(token.balance(&user), user_balance_before);
+        assert_eq!(token.allowance(&user, &pool_address), allowance_before);
+    }
+
+    #[test]
+    fn flash_loan_rejects_inexact_settlement_transfer() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 600,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool_address = testutils::create_pool(&e);
+        let (oracle, oracle_client) = testutils::create_mock_oracle(&e);
+        let (flash_receiver, _) = testutils::create_flashloan_receiver(&e);
+
+        let (flash_asset, flash_token) = testutils::create_token_contract(&e, &admin);
+        let (mut flash_config, mut flash_data) = testutils::default_reserve_meta();
+        flash_config.max_util = 0_9500000;
+        flash_data.b_supply = 100 * SCALAR_7;
+        flash_data.d_supply = 50 * SCALAR_7;
+        flash_data.last_time = 600;
+        testutils::create_reserve(&e, &pool_address, &flash_asset, &flash_config, &flash_data);
+
+        let (collateral_asset, collateral_token) = testutils::create_token_contract(&e, &admin);
+        let (collateral_config, mut collateral_data) = testutils::default_reserve_meta();
+        collateral_data.last_time = 600;
+        testutils::create_reserve(
+            &e,
+            &pool_address,
+            &collateral_asset,
+            &collateral_config,
+            &collateral_data,
+        );
+
+        oracle_client.set_data(
+            &admin,
+            &Asset::Other(Symbol::new(&e, "USD")),
+            &vec![
+                &e,
+                Asset::Stellar(flash_asset.clone()),
+                Asset::Stellar(collateral_asset.clone()),
+            ],
+            &7,
+            &300,
+        );
+        oracle_client.set_price_stable(&vec![&e, SCALAR_7, 5 * SCALAR_7]);
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+        });
+
+        let collateral_amount = 25 * SCALAR_7;
+        collateral_token.mint(&user, &collateral_amount);
+        collateral_token.approve(&user, &pool_address, &collateral_amount, &10_000);
+        collateral_token.set_transfer_shortfall(&pool_address, &1);
+
+        let flash_pool_balance_before = flash_token.balance(&pool_address);
+        let collateral_pool_balance_before = collateral_token.balance(&pool_address);
+        let allowance_before = collateral_token.allowance(&user, &pool_address);
+        let client = crate::PoolClient::new(&e, &pool_address);
+        let result = client.try_flash_loan(
+            &user,
+            &FlashLoan {
+                contract: flash_receiver.clone(),
+                asset: flash_asset.clone(),
+                amount: 25 * SCALAR_7,
+            },
+            &vec![
+                &e,
+                Request {
+                    request_type: RequestType::SupplyCollateral as u32,
+                    address: collateral_asset.clone(),
+                    amount: collateral_amount,
+                },
+            ],
+        );
+
+        assert_eq!(
+            result.err(),
+            Some(Ok(Error::from_contract_error(
+                PoolError::BalanceError as u32
+            )))
+        );
+        assert!(client.get_positions(&user).collateral.is_empty());
+        assert!(client.get_positions(&user).liabilities.is_empty());
+        assert_eq!(
+            client.get_reserve(&flash_asset).data.d_supply,
+            flash_data.d_supply
+        );
+        assert_eq!(
+            client.get_reserve(&collateral_asset).data.b_supply,
+            collateral_data.b_supply
+        );
+        assert_eq!(
+            flash_token.balance(&pool_address),
+            flash_pool_balance_before
+        );
+        assert_eq!(flash_token.balance(&flash_receiver), 0);
+        assert_eq!(
+            collateral_token.balance(&pool_address),
+            collateral_pool_balance_before
+        );
+        assert_eq!(collateral_token.balance(&user), collateral_amount);
+        assert_eq!(
+            collateral_token.allowance(&user, &pool_address),
+            allowance_before
+        );
+    }
+
+    #[test]
+    fn deauthorized_reserve_blocks_transfer_dependent_requests() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 600,
+            protocol_version: 27,
+            sequence_number: 1234,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let pool_address = testutils::create_pool(&e);
+        let (oracle, _) = testutils::create_mock_oracle(&e);
+        let (asset, token) = testutils::create_token_contract(&e, &admin);
+        let (reserve_config, mut reserve_data) = testutils::default_reserve_meta();
+        reserve_data.last_time = 600;
+        testutils::create_reserve(&e, &pool_address, &asset, &reserve_config, &reserve_data);
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: SCALAR_7,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+        });
+        token.set_authorized(&pool_address, &false);
+
+        let client = crate::PoolClient::new(&e, &pool_address);
+        for request_type in [
+            RequestType::Supply,
+            RequestType::Withdraw,
+            RequestType::SupplyCollateral,
+            RequestType::WithdrawCollateral,
+            RequestType::Borrow,
+            RequestType::Repay,
+        ] {
+            assert!(client
+                .try_submit(
+                    &user,
+                    &user,
+                    &user,
+                    &vec![
+                        &e,
+                        Request {
+                            request_type: request_type as u32,
+                            address: asset.clone(),
+                            amount: SCALAR_7,
+                        },
+                    ],
+                )
+                .is_err());
+        }
+        assert!(client
+            .try_flash_loan(
+                &user,
+                &FlashLoan {
+                    contract: Address::generate(&e),
+                    asset: asset.clone(),
+                    amount: SCALAR_7,
+                },
+                &vec![&e],
+            )
+            .is_err());
+
+        // The allowance path may execute accounting-only changes when the
+        // incoming and outgoing amounts net to zero. No token transfer is
+        // attempted, so deauthorization does not block this risk-neutral
+        // round trip.
+        let zero_net_result = client.try_submit_with_allowance(
+            &user,
+            &user,
+            &user,
+            &vec![
+                &e,
+                Request {
+                    request_type: RequestType::Supply as u32,
+                    address: asset.clone(),
+                    amount: SCALAR_7,
+                },
+                Request {
+                    request_type: RequestType::Withdraw as u32,
+                    address: asset.clone(),
+                    amount: SCALAR_7,
+                },
+            ],
+        );
+        assert!(matches!(zero_net_result, Ok(Ok(_))));
+        assert!(client.get_positions(&user).supply.is_empty());
+
+        token.set_authorized(&pool_address, &true);
+        token.mint(&user, &SCALAR_7);
+        assert!(client
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &e,
+                    Request {
+                        request_type: RequestType::Supply as u32,
+                        address: asset,
+                        amount: SCALAR_7,
+                    },
+                ],
+            )
+            .is_ok());
+    }
 
     #[test]
     fn test_submit() {
@@ -1620,7 +2008,7 @@ mod tests {
             assert_eq!(positions.collateral.len(), 1);
             assert_eq!(positions.supply.len(), 1);
             let b_tokens_0 = positions.collateral.get_unchecked(0);
-            assert_eq!(b_tokens_0, 5_0000312);
+            assert_eq!(b_tokens_0, 5_0000311);
             let b_tokens_1 = positions.supply.get_unchecked(1);
             assert_eq!(b_tokens_1, 2_5000063);
 
@@ -2591,7 +2979,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Error(Contract, #1223)")]
-    fn test_submit_with_flash_loan_checks_reserve_status() {
+    fn test_submit_with_flash_loan_checks_operational_b_rate() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -2618,8 +3006,8 @@ mod tests {
         let (mut reserve_config, mut reserve_data) = testutils::default_reserve_meta();
         reserve_config.max_util = 9500000;
         reserve_data.b_supply = 100_0000000;
-        reserve_data.d_supply = 50_0000000;
-        reserve_config.enabled = false;
+        reserve_data.d_supply = 4_0000000;
+        reserve_data.b_rate = crate::constants::MIN_OPERATIONAL_B_RATE / 2;
         testutils::create_reserve(&e, &pool, &underlying_0, &reserve_config, &reserve_data);
 
         let (underlying_1, underlying_1_client) = testutils::create_token_contract(&e, &bombadil);
@@ -2652,8 +3040,8 @@ mod tests {
             underlying_1_client.mint(&samwise, &25_0000000);
             underlying_1_client.approve(&samwise, &pool, &100_0000000, &10000);
 
-            // pool has 100 supplied and 50 borrowed for asset_0
-            // -> max util is 95%
+            // The impaired reserve remains internally solvent so setup reaches
+            // the operational b_rate gate before the flash loan is transferred.
             let flash_loan: FlashLoan = FlashLoan {
                 contract: flash_loan_receiver,
                 asset: underlying_0,

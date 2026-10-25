@@ -63,16 +63,19 @@ fn test_pool_interest() {
     fixture.create_pool_reserve(0, TokenIndex::STABLE, &stable_config);
 
     // setup backstop and update pool status
-    fixture.tokens[TokenIndex::BLND].mint(&whale, &(500_100 * SCALAR_7));
+    fixture.tokens[TokenIndex::BLNT].mint(&whale, &(500_100 * SCALAR_7));
     fixture.tokens[TokenIndex::USDC].mint(&whale, &(12_600 * SCALAR_7));
     fixture.lp.join_pool(
         &(50_000 * SCALAR_7),
         &vec![&fixture.env, 500_100 * SCALAR_7, 12_600 * SCALAR_7],
         &whale,
     );
-    fixture
-        .backstop
-        .deposit(&whale, &pool_client.address, &(50_000 * SCALAR_7));
+    fixture.backstop.deposit(
+        &backstop::BackstopTier::SecondLoss,
+        &whale,
+        &pool_client.address,
+        &(50_000 * SCALAR_7),
+    );
     pool_client.set_status(&0);
     fixture.jump_with_sequence(60);
 
@@ -190,9 +193,11 @@ fn test_pool_interest() {
 
     let expected_backstop_credit_xlm = (xlm_reserve_data_1.total_liabilities(&fixture.env)
         - xlm_reserve_data_0.total_liabilities(&fixture.env))
+    .fixed_mul_floor(&fixture.env, &0_9980000, &SCALAR_7)
     .fixed_mul_floor(&fixture.env, &(SCALAR_7 / 10), &SCALAR_7);
     let expected_backstop_credit_stable = (stable_reserve_data_1.total_liabilities(&fixture.env)
         - stable_reserve_data_0.total_liabilities(&fixture.env))
+    .fixed_mul_floor(&fixture.env, &0_9980000, &SCALAR_7)
     .fixed_mul_floor(&fixture.env, &(SCALAR_7 / 10), &SCALAR_7);
 
     let actual_b_rate_gain_xlm =

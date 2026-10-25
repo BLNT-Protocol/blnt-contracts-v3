@@ -15,6 +15,7 @@ pub struct Positions {
 #[derive(Clone)]
 #[contracttype]
 pub enum DataKey {
+    Backstop,
     Positions(Address),
 }
 
@@ -23,6 +24,10 @@ pub struct MockPool;
 
 #[contractimpl]
 impl MockPool {
+    pub fn set_backstop(e: Env, backstop: Address) {
+        e.storage().instance().set(&DataKey::Backstop, &backstop);
+    }
+
     /// Set positions for a given address
     ///
     /// # Arguments
