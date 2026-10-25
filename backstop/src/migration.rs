@@ -814,17 +814,14 @@ mod tests {
     }
 
     #[test]
-    fn observed_queue_must_target_the_candidate_and_blnt_xlm() {
+    fn emitter_rejects_queue_with_noncanonical_candidate_token() {
         let fixture = Fixture::create();
         assert_eq!(fixture.client().distribute(), 0);
-        fixture
+        assert!(fixture
             .emitter()
-            .queue_swap_backstop(&fixture.backstop, &Address::generate(&fixture.e));
-        assert!(fixture.client().try_distribute().is_err());
-        let unlock = fixture.unlock();
-        fixture.e.ledger().set_timestamp(unlock);
-        fixture.emitter().swap_backstop();
-        assert!(fixture.client().try_distribute().is_err());
+            .try_queue_swap_backstop(&fixture.backstop, &Address::generate(&fixture.e))
+            .is_err());
+        assert!(fixture.emitter().get_queued_swap().is_none());
         assert_eq!(fixture.migration_state().status, MigrationStatus::Open);
     }
 

@@ -1,7 +1,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error,
+    contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
     token::{StellarAssetClient, TokenClient},
     Address, Env, Vec,
 };
@@ -24,6 +24,13 @@ enum EmitterError {
     SwapCannotBeCanceled = 1105,
     OverflowError = 1112,
     SwapExpired = 1113,
+    InvalidBackstopToken = 1114,
+}
+
+#[contractclient(name = "MigrationBackstopClient")]
+#[allow(dead_code)]
+trait MigrationBackstop {
+    fn migration_token(env: Env) -> Address;
 }
 
 #[derive(Clone)]
@@ -90,6 +97,7 @@ impl MockEmitter {
             panic_with_error!(&env, EmitterError::SwapAlreadyExists);
         }
         require_larger_backstop(&env, &new_backstop);
+        require_migration_token(&env, &new_backstop, &new_backstop_token);
         let unlock_time = env
             .ledger()
             .timestamp()
@@ -115,7 +123,10 @@ impl MockEmitter {
             .get(&DataKey::Swap)
             .unwrap_or_else(|| panic_with_error!(&env, EmitterError::SwapNotQueued));
         let expired = env.ledger().timestamp() > swap_deadline(&env, &swap);
-        if !expired && is_larger_backstop(&env, &swap.new_backstop) {
+        if !expired
+            && is_larger_backstop(&env, &swap.new_backstop)
+            && has_valid_migration_token(&env, &swap.new_backstop, &swap.new_backstop_token)
+        {
             panic_with_error!(&env, EmitterError::SwapCannotBeCanceled);
         }
         env.storage().persistent().remove(&DataKey::Swap);
@@ -134,6 +145,7 @@ impl MockEmitter {
             panic_with_error!(&env, EmitterError::SwapExpired);
         }
         require_larger_backstop(&env, &swap.new_backstop);
+        require_migration_token(&env, &swap.new_backstop, &swap.new_backstop_token);
 
         let incumbent = Self::get_backstop(env.clone());
         distribute_to(&env, &incumbent);
@@ -188,6 +200,19 @@ impl MockEmitter {
         env.storage()
             .persistent()
             .set(&DataKey::Dropped(backstop), &true);
+    }
+}
+
+fn has_valid_migration_token(env: &Env, candidate: &Address, token: &Address) -> bool {
+    match MigrationBackstopClient::new(env, candidate).try_migration_token() {
+        Ok(Ok(candidate_token)) => candidate_token == *token,
+        _ => false,
+    }
+}
+
+fn require_migration_token(env: &Env, candidate: &Address, token: &Address) {
+    if !has_valid_migration_token(env, candidate, token) {
+        panic_with_error!(env, EmitterError::InvalidBackstopToken);
     }
 }
 

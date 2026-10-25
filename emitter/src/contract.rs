@@ -49,7 +49,8 @@ pub trait Emitter {
     ///
     /// ### Errors
     /// If the input contract does not have more backstop deposits than the listed backstop module of the
-    /// current backstop token.
+    /// current backstop token, or if the proposed token does not match the token declared by the
+    /// candidate's `migration_token` entry point.
     fn queue_swap_backstop(e: Env, new_backstop: Address, new_backstop_token: Address);
 
     /// Fetch the queued backstop swap, or None if nothing is queued.
@@ -66,7 +67,8 @@ pub trait Emitter {
     ///
     /// ### Errors
     /// If the input contract does not have more backstop deposits than the listed backstop module,
-    /// if the queued swap has not been unlocked, or if its seven-day execution window expired.
+    /// if its declared migration token no longer matches the queue, if the queued swap has not been
+    /// unlocked, or if its seven-day execution window expired.
     fn swap_backstop(e: Env);
 
     /// (Backstop only) Distributes an initial BLNT allocation after a new backstop is set
@@ -210,6 +212,20 @@ mod tests {
         }
     }
 
+    #[contract]
+    struct ReplacementBackstop;
+
+    #[contractimpl]
+    impl ReplacementBackstop {
+        pub fn __constructor(e: Env, migration_token: Address) {
+            e.storage().instance().set(&0_u32, &migration_token);
+        }
+
+        pub fn migration_token(e: Env) -> Address {
+            e.storage().instance().get(&0_u32).unwrap()
+        }
+    }
+
     #[test]
     fn initialize_requires_the_constructor_bound_authority() {
         let e = Env::default();
@@ -310,8 +326,8 @@ mod tests {
         let comparison_token = e.register(ComparisonToken, ());
         let comparison = ComparisonTokenClient::new(&e, &comparison_token);
         let incumbent = Address::generate(&e);
-        let first_candidate = Address::generate(&e);
-        let second_candidate = Address::generate(&e);
+        let first_candidate = e.register(ReplacementBackstop, (&comparison_token,));
+        let second_candidate = e.register(ReplacementBackstop, (&comparison_token,));
         let client = EmitterClient::new(&e, &emitter);
 
         client

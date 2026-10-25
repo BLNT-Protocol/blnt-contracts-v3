@@ -22,4 +22,5 @@ pub enum EmitterError {
     InvalidEmissionToken = 1108,
     OverflowError = 1112,
     SwapExpired = 1113,
+    InvalidBackstopToken = 1114,
 }

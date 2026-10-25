@@ -1,5 +1,5 @@
 use sep_41_token::TokenClient;
-use soroban_sdk::{contracttype, panic_with_error, Address, Env};
+use soroban_sdk::{contractclient, contracttype, panic_with_error, Address, Env};
 
 use crate::{emitter, storage, EmitterError};
 
@@ -12,6 +12,14 @@ pub struct Swap {
     pub new_backstop: Address,
     pub new_backstop_token: Address,
     pub unlock_time: u64,
+}
+
+#[contractclient(name = "MigrationBackstopClient")]
+#[allow(dead_code)]
+trait MigrationBackstop {
+    /// Return the token this candidate designates for the next replacement
+    /// contest.
+    fn migration_token(e: Env) -> Address;
 }
 
 fn swap_deadline(e: &Env, swap: &Swap) -> u64 {
@@ -32,6 +40,18 @@ fn is_new_backstop_is_larger(e: &Env, new_backstop: &Address, backstop: &Address
     new_backstop_balance > backstop_balance
 }
 
+/// Require the candidate itself to bind the proposed next comparison token.
+fn has_valid_migration_token(
+    e: &Env,
+    new_backstop: &Address,
+    new_backstop_token: &Address,
+) -> bool {
+    match MigrationBackstopClient::new(e, new_backstop).try_migration_token() {
+        Ok(Ok(candidate_token)) => candidate_token == *new_backstop_token,
+        _ => false,
+    }
+}
+
 /// Perform a backstop swap
 pub fn execute_queue_swap_backstop(
     e: &Env,
@@ -46,6 +66,9 @@ pub fn execute_queue_swap_backstop(
     let backstop = storage::get_backstop(e);
     if !is_new_backstop_is_larger(e, new_backstop, &backstop) {
         panic_with_error!(e, EmitterError::InsufficientBackstopSize);
+    }
+    if !has_valid_migration_token(e, new_backstop, new_backstop_token) {
+        panic_with_error!(e, EmitterError::InvalidBackstopToken);
     }
 
     let unlock_time = e
@@ -73,7 +96,10 @@ pub fn execute_cancel_swap_backstop(e: &Env) -> Swap {
 
     let expired = e.ledger().timestamp() > swap_deadline(e, &swap);
     let backstop = storage::get_backstop(e);
-    if !expired && is_new_backstop_is_larger(e, &swap.new_backstop, &backstop) {
+    if !expired
+        && is_new_backstop_is_larger(e, &swap.new_backstop, &backstop)
+        && has_valid_migration_token(e, &swap.new_backstop, &swap.new_backstop_token)
+    {
         panic_with_error!(e, EmitterError::SwapCannotBeCanceled);
     }
 
@@ -97,6 +123,9 @@ pub fn execute_swap_backstop(e: &Env) -> Swap {
     if !is_new_backstop_is_larger(e, &swap.new_backstop, &backstop) {
         panic_with_error!(e, EmitterError::InsufficientBackstopSize);
     }
+    if !has_valid_migration_token(e, &swap.new_backstop, &swap.new_backstop_token) {
+        panic_with_error!(e, EmitterError::InvalidBackstopToken);
+    }
 
     // distribute before swapping to ensure the old backstop gets their tokens
     emitter::execute_distribute(e, &backstop);
@@ -119,7 +148,24 @@ mod tests {
 
     use super::*;
     use sep_41_token::testutils::MockTokenClient;
-    use soroban_sdk::testutils::{Address as _, Ledger, LedgerInfo};
+    use soroban_sdk::{
+        contract, contractimpl,
+        testutils::{Address as _, Ledger, LedgerInfo},
+    };
+
+    #[contract]
+    struct TestMigrationBackstop;
+
+    #[contractimpl]
+    impl TestMigrationBackstop {
+        pub fn __constructor(e: Env, token: Address) {
+            e.storage().instance().set(&0_u32, &token);
+        }
+
+        pub fn migration_token(e: Env) -> Address {
+            e.storage().instance().get(&0_u32).unwrap()
+        }
+    }
 
     /********** execute_queue_swap_backstop **********/
 
@@ -149,6 +195,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
@@ -172,6 +219,53 @@ mod tests {
             assert_eq!(swap.new_backstop, new_backstop);
             assert_eq!(swap.new_backstop_token, new_backstop_token);
             assert_eq!(swap.unlock_time, 2678400 + 12345); // 31 days
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1114)")]
+    fn test_execute_queue_swap_backstop_rejects_token_not_declared_by_candidate() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let declared_token = Address::generate(&e);
+        let proposed_token = Address::generate(&e);
+        let new_backstop = e.register(TestMigrationBackstop, (&declared_token,));
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        backstop_token_client.mint(&backstop, &1);
+        backstop_token_client.mint(&new_backstop, &2);
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            execute_queue_swap_backstop(&e, &new_backstop, &proposed_token);
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1114)")]
+    fn test_execute_queue_swap_backstop_requires_candidate_token_interface() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let new_backstop = Address::generate(&e);
+        let proposed_token = Address::generate(&e);
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        backstop_token_client.mint(&backstop, &1);
+        backstop_token_client.mint(&new_backstop, &2);
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            execute_queue_swap_backstop(&e, &new_backstop, &proposed_token);
         });
     }
 
@@ -202,6 +296,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_000 * SCALAR_7));
@@ -244,6 +339,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
@@ -284,6 +380,8 @@ mod tests {
         let new_backstop = Address::generate(&e);
         let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &1);
         backstop_token_client.mint(&new_backstop, &2);
@@ -291,7 +389,7 @@ mod tests {
         e.as_contract(&emitter, || {
             storage::set_backstop(&e, &backstop);
             storage::set_backstop_token(&e, &backstop_token);
-            execute_queue_swap_backstop(&e, &new_backstop, &Address::generate(&e));
+            execute_queue_swap_backstop(&e, &new_backstop, &new_backstop_token);
         });
     }
 
@@ -323,6 +421,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_000 * SCALAR_7));
@@ -353,6 +452,35 @@ mod tests {
     }
 
     #[test]
+    fn test_execute_cancel_swap_backstop_with_invalid_token_attestation() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let declared_token = Address::generate(&e);
+        let new_backstop = e.register(TestMigrationBackstop, (&declared_token,));
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        backstop_token_client.mint(&backstop, &1);
+        backstop_token_client.mint(&new_backstop, &2);
+        let swap = Swap {
+            new_backstop,
+            new_backstop_token: Address::generate(&e),
+            unlock_time: 1,
+        };
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            storage::set_queued_swap(&e, &swap);
+            execute_cancel_swap_backstop(&e);
+            assert!(storage::get_queued_swap(&e).is_none());
+        });
+    }
+
+    #[test]
     #[should_panic(expected = "Error(Contract, #1105)")]
     fn test_execute_cancel_swap_backstop_valid_swap() {
         let e = Env::default();
@@ -379,6 +507,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
@@ -455,6 +584,7 @@ mod tests {
         let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
@@ -477,6 +607,35 @@ mod tests {
                 replacement.unlock_time,
                 e.ledger().timestamp() + QUEUE_SECONDS
             );
+        });
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1114)")]
+    fn test_execute_swap_backstop_rechecks_candidate_token() {
+        let e = Env::default();
+        e.mock_all_auths();
+
+        let bombadil = Address::generate(&e);
+        let emitter = create_emitter(&e);
+        let backstop = Address::generate(&e);
+        let declared_token = Address::generate(&e);
+        let new_backstop = e.register(TestMigrationBackstop, (&declared_token,));
+        let backstop_token = e.register_stellar_asset_contract_v2(bombadil).address();
+        let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
+        backstop_token_client.mint(&backstop, &1);
+        backstop_token_client.mint(&new_backstop, &2);
+        let swap = Swap {
+            new_backstop,
+            new_backstop_token: Address::generate(&e),
+            unlock_time: 0,
+        };
+
+        e.as_contract(&emitter, || {
+            storage::set_backstop(&e, &backstop);
+            storage::set_backstop_token(&e, &backstop_token);
+            storage::set_queued_swap(&e, &swap);
+            execute_swap_backstop(&e);
         });
     }
 
@@ -515,6 +674,7 @@ mod tests {
             .address();
         let backstop_token_client = MockTokenClient::new(&e, &backstop_token);
         let new_backstop_token = Address::generate(&e);
+        e.register_at(&new_backstop, TestMigrationBackstop, (&new_backstop_token,));
 
         backstop_token_client.mint(&backstop, &(1_000_000 * SCALAR_7));
         backstop_token_client.mint(&new_backstop, &(1_000_001 * SCALAR_7));
