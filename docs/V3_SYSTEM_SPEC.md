@@ -251,6 +251,15 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
   Results that do not fit i128 fail the transaction.
 - Every submission verifies exact per-asset token-balance deltas; transfer
   fees, in-call rebases, or other mismatches fail atomically.
+- V3 clients MUST use a finite, bounded amount for a `Repay` request and MUST
+  NOT use `i128::MAX` as a repay-all sentinel. The custody snapshot adds the
+  scheduled incoming amount before subtracting the refund defined by
+  `V2-LENDING-002`, so the sentinel can overflow that intermediate even when
+  the net repayment is only the live debt. A client SHOULD estimate the current
+  underlying debt, add a finite buffer for accrual and rounding, and refresh
+  that bound close to submission. Repayment, over-repayment, and flash-loan
+  health semantics otherwise remain those of `V2-LENDING-002`,
+  `V2-LENDING-004`, and `V2-LENDING-005`.
 - Backstop borrow and repay synchronize the reserve-keyed withdrawal-gate
   liability without summing unlike asset units.
 - Reserve and user state use bounded persistent entries with explicit TTL

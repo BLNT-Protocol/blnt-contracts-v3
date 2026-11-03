@@ -921,7 +921,7 @@ mod tests {
     }
 
     #[test]
-    fn test_submit_use_allowance_over_repay() {
+    fn test_submit_with_allowance_bounded_repay_all() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -1006,20 +1006,25 @@ mod tests {
 
             let pre_pool_balance_1 = underlying_1_client.balance(&pool);
 
+            // A finite request comfortably above the live debt clears the
+            // position without using the unsupported i128::MAX sentinel. The
+            // allowance path nets the scheduled refund before transferring.
+            let bounded_max_repay = 100_0000000;
             let requests = vec![
                 &e,
                 Request {
                     request_type: RequestType::Repay as u32,
                     address: underlying_1,
-                    amount: 1_6000000,
+                    amount: bounded_max_repay,
                 },
             ];
-            underlying_1_client.approve(&frodo, &pool, &1_5000001, &e.ledger().sequence());
-            assert_eq!(underlying_1_client.allowance(&frodo, &pool), 1_5000001);
+            underlying_1_client.approve(&frodo, &pool, &1_6000000, &e.ledger().sequence());
+            assert_eq!(underlying_1_client.allowance(&frodo, &pool), 1_6000000);
             let positions = execute_submit(&e, &samwise, &frodo, &merry, requests, true);
 
-            // new_allowance = old_allowance - repay
-            assert_eq!(underlying_1_client.allowance(&frodo, &pool), 0);
+            // Only the live 1.5000001 debt is transferred. The unused bound is
+            // not pulled from the user.
+            assert_eq!(underlying_1_client.allowance(&frodo, &pool), 0_0999999);
 
             assert_eq!(positions.liabilities.len(), 0);
             assert_eq!(positions.collateral.len(), 1);
@@ -2258,7 +2263,7 @@ mod tests {
     }
 
     #[test]
-    fn test_submit_with_flash_loan_process_flash_loan_first() {
+    fn test_submit_with_flash_loan_bounded_repay_all() {
         let e = Env::default();
         e.cost_estimate().budget().reset_unlimited();
         e.mock_all_auths_allowing_non_root_auth();
@@ -2331,12 +2336,15 @@ mod tests {
                 amount: 25_0000000,
             };
 
+            // A finite request above the newly created flash liability clears
+            // it while keeping the custody snapshot arithmetic representable.
+            let bounded_max_repay = 100_0000000;
             let requests = vec![
                 &e,
                 Request {
                     request_type: RequestType::Repay as u32,
                     address: underlying_0.clone(),
-                    amount: 25_0000010,
+                    amount: bounded_max_repay,
                 },
             ];
             let positions = execute_submit_with_flash_loan(&e, &samwise, flash_loan, requests);
