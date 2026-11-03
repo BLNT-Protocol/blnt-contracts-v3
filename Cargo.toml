@@ -8,6 +8,7 @@ members = [
     "compat/sep-41-token",
     "compat/soroban-fixed-point-math",
     "compat/moderc3156",
+    "emitter",
     "pool",
     "mocks/mock-pool",
     "mocks/mock-pool-factory",
@@ -15,7 +16,7 @@ members = [
     "mocks/mock-emitter",
     "mocks/moderc3156",
     "pool-factory",
-    "test-suites"
+    "test-suites",
 ]
 
 [workspace.package]

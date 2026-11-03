@@ -1,11 +1,16 @@
+mod access_controller;
+pub use access_controller::AccessControllerClient;
+
 mod pool_factory;
-pub use pool_factory::Client as PoolFactoryClient;
+pub use pool_factory::{
+    BackstopAsset as FactoryBackstopAsset, BackstopTierConfig, PoolFactoryClient,
+};
 
 mod comet;
 pub use comet::Client as CometClient;
 
 mod emitter;
-pub use emitter::EmitterClient;
+pub use emitter::{EmitterClient, Swap};
 
 mod pool;
 pub use pool::PoolClient;

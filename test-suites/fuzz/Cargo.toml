@@ -21,6 +21,10 @@ path = ".."
 path = "../../pool"
 features = ["testutils"]
 
+[dependencies.backstop]
+path = "../../backstop"
+features = ["testutils"]
+
 # Prevent this from interfering with workspaces
 [workspace]
 members = ["."]
