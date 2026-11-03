@@ -11,9 +11,11 @@ safety fix, or approved exception.
 
 Scoped integer carry-forward is an approved conservation fix. Pool operation
 without mandatory backstop capital and immutable zero-tier pools are approved
-economic exceptions. V3 adds no protocol fee, protocol-wide
-admin, multisig, governance, emergency override, privileged WASM replacement,
-or alternate upgrade path. Deployment grants no continuing authority.
+economic exceptions. V3 adds an immutable 0.2% protocol-interest fee accrued
+for BLNT buy-and-burn auctions. It adds no protocol treasury,
+protocol-wide admin, multisig, governance, emergency override, privileged WASM
+replacement, or alternate upgrade path. Deployment grants no continuing
+authority.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements.
 
