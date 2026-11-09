@@ -1,9 +1,9 @@
 # Blend V2 and BLNT V3 Public API Comparison
 
 This non-normative review aid compares public contract entry points and data
-types in the frozen Blend v2 baseline with the BLNT v3 candidate. The
-[specification index](SYSTEM_SPEC.md), [v2 specification](V2_SYSTEM_SPEC.md),
-and [v3 specification](V3_SYSTEM_SPEC.md) remain authoritative.
+types in the frozen Blend V2 baseline with BLNT V3. The
+[specification index](SYSTEM_SPEC.md), [V2 specification](V2_SYSTEM_SPEC.md),
+and [V3 specification](V3_SYSTEM_SPEC.md) remain authoritative.
 
 Signatures omit the Soroban `Env` argument. Parameter names are shortened only
 where their meaning remains clear. Constructors are included because they are
@@ -13,8 +13,8 @@ Classifications have these meanings:
 
 - **Unchanged:** The public signature and caller-facing role are inherited.
 - **Extended:** V3 retains the operation but adds a tier selector, changes its
-  return shape, or adds caller-visible behavior required by the v3 spec.
-- **Added:** V3 introduces an operation with no v2 counterpart.
+  return shape, or adds caller-visible behavior required by the V3 spec.
+- **Added:** V3 introduces an operation with no V2 counterpart.
 - **Replaced:** V3 substitutes a different public operation. There are no such
   entry points in the current backstop, pool, or pool-factory API.
 
@@ -27,13 +27,13 @@ Private storage-only types are excluded.
 ## Emitter
 
 V3 deploys a separate emitter for BLNT while the legacy emitter and BLND remain
-with v1/v2. The established emitter entry points and encodings are retained;
-the v3 emitter adds only constructor-bound initialization authority.
+with V1/V2. The established emitter entry points and encodings are retained;
+the V3 emitter adds only constructor-bound initialization authority.
 
 | Legacy entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
 | No constructor | `__constructor(initializer)` | Added | Prevents first-call initialization races without creating an ongoing administrator. |
-| `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to v3 and canonical BLNT:XLM as the initial designated token. |
+| `initialize(blnd_token, backstop, backstop_token)` | Same ABI; `blnd_token` contains BLNT | Extended | Requires the constructor-bound one-time initializer, then configures BLNT emission to V3 and canonical BLNT:XLM as the initial designated token. |
 | `distribute() -> i128` | Same | Extended | Mints BLNT at the inherited one-token-per-second rate and requires the current backstop; callers use the backstop's permissionless checkpoint. |
 | `get_last_distro(backstop) -> u64` | Same | Unchanged | Preserves per-backstop distribution checkpoints. |
 | `get_backstop() -> Address` | Same | Unchanged | Returns the current BLNT recipient backstop. |
@@ -61,8 +61,8 @@ the v3 emitter adds only constructor-bound initialization authority.
 | — | `blnt_price() -> i128` | Added | Returns the seven-decimal BLNT price implied by the canonical 80:20 BLNT:USDC Comet V1.1 reserves for protocol-fee auction construction. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
 | `backstop_token() -> Address` | `backstop_token(tier, pool) -> Address` | Extended | Resolves the selected pool's immutable token at that waterfall position. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
 | — | `migration_token() -> Address` | Added | Declares the immutable token that the emitter must install as the comparison token if this backstop wins a future replacement contest. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
-| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the v2 view; admission, removal, allocation, and full-zone replacement use eligible underlying BLNT weight. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
-| `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh v3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
+| `reward_zone() -> Vec<Address>` | Same | Unchanged | Keeps the V2 view; admission, removal, allocation, and full-zone replacement use eligible underlying BLNT weight. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
+| `distribute() -> i128` | Same | Extended | Keeps the checkpoint surface, directly activates the fresh V3 emitter binding, and allocates tier-aware BLNT emissions. [V3 §6.1](V3_SYSTEM_SPEC.md#61-v3-emitter-launch-and-replacement--replaced-and-extended) |
 | `gulp_emissions(pool) -> i128` | Same | Extended | Retains the 70/30 gulp while scheduling the eligible tier streams. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `add_reward(to_add, to_remove)` | Same | Extended | Admission requires positive eligible underlying BLNT; full-zone replacement remains strictly underlying-BLNT weighted. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
 | `remove_reward(to_remove)` | Same | Extended | Permissionless removal requires zero eligible underlying BLNT and preserves the checkpoint rule. [V3 §6.2](V3_SYSTEM_SPEC.md#62-backstop-depositor-emissions--extended) |
@@ -77,8 +77,8 @@ the v3 emitter adds only constructor-bound initialization authority.
 | --- | --- | --- | --- |
 | `Q4W` | <code>{"amount":100000000, "exp":1800000000}</code> | Same | Shape is unchanged. V3 maintains an independent queue per tier under one aggregate pool-user entry bound. |
 | `UserBalance` | <code>{"shares":900000000, "q4w":[{"amount":100000000, "exp":1800000000}]}</code> | Same shape, returned for the selected `tier` | `shares` excludes queued shares in both versions. |
-| `BackstopTier` | Not present | One of `"FirstLoss"`, `"SecondLoss"`, or `"ThirdLoss"` | New public selector for a v3 loss-waterfall position. Enum declaration order is the loss-waterfall order. |
-| `BackstopAsset` | Not present | One of `"BlntXlm"`, `"BlntUsdc"`, `"Usdc"`, or `"Xlm"` | The only canonical assets assignable to a v3 tier. |
+| `BackstopTier` | Not present | One of `"FirstLoss"`, `"SecondLoss"`, or `"ThirdLoss"` | New public selector for a V3 loss-waterfall position. Enum declaration order is the loss-waterfall order. |
+| `BackstopAsset` | Not present | One of `"BlntXlm"`, `"BlntUsdc"`, `"Usdc"`, or `"Xlm"` | The only canonical assets assignable to a V3 tier. |
 | `PoolTierData` | Not present | <code>{"asset":"BlntXlm", "blnt_emission_eligible":true, "take_rate_weight":4, "token":"C_BLNT_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}</code> | New nested summary; `value` is the tier's transferable, verified seven-decimal USDC-equivalent value. A deauthorized plain-USDC tier reports zero. |
 | `PoolBackstopData` | <code>{"tokens":1000000000, "shares":1000000000, "q4w_pct":1000000, "blnd":8000000000, "usdc":200000000, "token_spot_price":10000000}</code> | <code>{"active_value":900000000, "q4w_pct":1000000, "tiers":[{"asset":"BlntXlm", "blnt_emission_eligible":true, "take_rate_weight":4, "token":"C_BLNT_XLM_LP", "tokens":500000000, "shares":500000000, "value":500000000}, {"asset":"Xlm", "blnt_emission_eligible":false, "take_rate_weight":2, "token":"C_XLM", "tokens":400000000, "shares":400000000, "value":400000000}]}</code> | Replaced view shape. V3 reports configured tiers, aggregate transferable active value, and transferable-value-weighted Q4W instead of one LP's underlying reserves and spot price. A deauthorized plain-USDC tier retains accounting but reports zero value. |
 
@@ -86,49 +86,49 @@ the v3 emitter adds only constructor-bound initialization authority.
 
 ### Entry points
 
-Except for added v3 operations and the optional constructor controller, pool
-entry-point signatures remain v2-compatible. An **Extended** row identifies
+Except for added V3 operations and the optional constructor controller, pool
+entry-point signatures remain V2-compatible. An **Extended** row identifies
 changed caller-visible validation or tier-aware behavior, not necessarily a
 signature change.
 
 | V2 entry point | V3 entry point | Classification | Reason |
 | --- | --- | --- | --- |
-| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnt, access_controller)` | Extended | Uses BLNT for v3 emissions and optionally binds one immutable external access controller; `None` preserves permissionless behavior. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
-| `propose_admin(new_admin)` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
-| `accept_admin()` | Same | Unchanged | Inherits the v2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
-| `update_pool(backstop_take_rate, max_positions, min_collateral)` | Same | Extended | Retains the v2 mutable pool parameters, but an unbackstopped pool cannot enable a nonzero backstop take rate. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
-| `queue_set_reserve(asset, metadata)` | Same | Unchanged | Retains the v2 delayed reserve setup. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
-| `cancel_set_reserve(asset)` | Same | Unchanged | Retains the v2 queued-reserve cancellation. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
-| `set_reserve(asset) -> u32` | Same | Unchanged | Retains the v2 reserve finalization and index return. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
-| `get_config() -> PoolConfig` | Same | Unchanged | Returns the v2-compatible pool configuration. |
+| `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnd)` | `__constructor(admin, name, oracle, backstop_take_rate, max_positions, min_collateral, backstop, blnt, access_controller)` | Extended | Uses BLNT for V3 emissions and optionally binds one immutable external access controller; `None` preserves permissionless behavior. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
+| `propose_admin(new_admin)` | Same | Unchanged | Inherits the V2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
+| `accept_admin()` | Same | Unchanged | Inherits the V2 two-step admin transfer. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
+| `update_pool(backstop_take_rate, max_positions, min_collateral)` | Same | Extended | Retains the V2 mutable pool parameters, but an unbackstopped pool cannot enable a nonzero backstop take rate. [V3 §3.1](V3_SYSTEM_SPEC.md#31-asset-configuration) |
+| `queue_set_reserve(asset, metadata)` | Same | Unchanged | Retains the V2 delayed reserve setup. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
+| `cancel_set_reserve(asset)` | Same | Unchanged | Retains the V2 queued-reserve cancellation. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
+| `set_reserve(asset) -> u32` | Same | Unchanged | Retains the V2 reserve finalization and index return. [V2 §4](V2_SYSTEM_SPEC.md#4-pool-lifecycle-and-administration) |
+| `get_config() -> PoolConfig` | Same | Unchanged | Returns the V2-compatible pool configuration. |
 | `get_admin() -> Address` | Same | Unchanged | Returns the current pool admin. |
 | `get_reserve_list() -> Vec<Address>` | Same | Unchanged | Returns the reserve list in index order. |
 | `get_reserve(asset) -> Reserve` | Same | Unchanged | Returns current reserve accounting. |
-| `get_positions(address) -> Positions` | Same | Unchanged | Returns v2-compatible user positions. |
-| `submit(from, spender, to, requests) -> Positions` | Same | Extended | Adds bounded requests, exact token deltas, and tier-aware auction settlement behind the v2 request ABI. V3 repay-all uses a finite client-computed bound rather than `i128::MAX`; inherited repayment settlement is unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
-| `submit_with_allowance(from, spender, to, requests) -> Positions` | Same | Extended | Applies the same v3 safety checks and bounded-repay requirement to allowance-based submission; inherited over-repayment netting is unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
-| `flash_loan(from, flash_loan, requests) -> Positions` | Same | Extended | Applies the v3 request bound, exact-balance checks, and bounded-repay requirement to flash-loan submission; inherited repayment and final-health semantics are unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
+| `get_positions(address) -> Positions` | Same | Unchanged | Returns V2-compatible user positions. |
+| `submit(from, spender, to, requests) -> Positions` | Same | Extended | Adds bounded requests, exact token deltas, and tier-aware auction settlement behind the V2 request ABI. V3 repay-all uses a finite client-computed bound rather than `i128::MAX`; inherited repayment settlement is unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
+| `submit_with_allowance(from, spender, to, requests) -> Positions` | Same | Extended | Applies the same V3 safety checks and bounded-repay requirement to allowance-based submission; inherited over-repayment netting is unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
+| `flash_loan(from, flash_loan, requests) -> Positions` | Same | Extended | Applies the V3 request bound, exact-balance checks, and bounded-repay requirement to flash-loan submission; inherited repayment and final-health semantics are unchanged. [V3 §4.2](V3_SYSTEM_SPEC.md#42-pool-integration--safety-extensions) |
 | — | `clawback(asset, from, amount)` | Added | Lets the reserve SAC administrator burn an exact clawbackable pool balance while removing the corresponding user's ordinary supply before collateral and invalidating an affected liquidation auction. [V3 §4.4](V3_SYSTEM_SPEC.md#44-reserve-clawback--added) |
 | — | `reconcile_loss(asset) -> i128` | Added | Recognizes a direct reserve-custody deficit against unpaid protocol credit first, then the affected reserve's supplier rate and unpaid take-rate credit, without creating backstop debt. Any affected type-3 auction is canceled. [V3 §4.6](V3_SYSTEM_SPEC.md#46-reserve-loss-reconciliation--safety-extension) |
 | — | `force_withdrawal(user, asset) -> i128` | Added | After supply permission is revoked for a debt-free user, burns all of that user's bTokens for one reserve and returns the exact underlying only to that user. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | — | `new_forced_exit_auction(user) -> AuctionData` | Added | After borrow permission is revoked, creates a caller-unparameterized auction for all target liabilities and proportionally required collateral. [V3 §4.7](V3_SYSTEM_SPEC.md#47-permissioned-pools--added) |
 | `update_status() -> u32` | Same | Extended | Uses transferable-value-weighted Q4W without a minimum backstop-value requirement. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
-| `set_status(pool_status)` | Same | Extended | Retains v2 admin statuses and validates them against value-weighted Q4W without a minimum backstop-value requirement. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
-| `gulp(asset) -> i128` | Same | Unchanged | Retains v2 reserve-credit reconciliation. |
-| `gulp_emissions() -> i128` | Same | Extended | Retains the pool tranche gulp with v3 carry and registered-pool checks. [V3 §6.3](V3_SYSTEM_SPEC.md#63-pool-supply-and-borrow-emissions--extended) |
-| `set_emissions_config(metadata)` | Same | Extended | Retains v2 configuration semantics with the v3 input bound. [V3 §6.3](V3_SYSTEM_SPEC.md#63-pool-supply-and-borrow-emissions--extended) |
+| `set_status(pool_status)` | Same | Extended | Retains V2 admin statuses and validates them against value-weighted Q4W without a minimum backstop-value requirement. [V3 §4.1](V3_SYSTEM_SPEC.md#41-pool-status-valuation--extended) |
+| `gulp(asset) -> i128` | Same | Unchanged | Retains V2 reserve-credit reconciliation. |
+| `gulp_emissions() -> i128` | Same | Extended | Retains the pool tranche gulp with V3 carry and registered-pool checks. [V3 §6.3](V3_SYSTEM_SPEC.md#63-pool-supply-and-borrow-emissions--extended) |
+| `set_emissions_config(metadata)` | Same | Extended | Retains V2 configuration semantics with the V3 input bound. [V3 §6.3](V3_SYSTEM_SPEC.md#63-pool-supply-and-borrow-emissions--extended) |
 | `claim(from, reserve_token_ids, to) -> i128` | Same | Extended | Retains direct pool claims with bounded unique identifiers and carry-preserving accounting. [V3 §6.3](V3_SYSTEM_SPEC.md#63-pool-supply-and-borrow-emissions--extended) |
-| `get_reserve_emissions(reserve_token_id) -> Option<ReserveEmissionData>` | Same | Unchanged | Keeps the v2-compatible reserve-emission view; v3 carries remain internal. |
-| `get_user_emissions(user, reserve_token_id) -> Option<UserEmissionData>` | Same | Unchanged | Keeps the v2-compatible user-emission view; v3 carries remain internal. |
-| `new_auction(auction_type, user, bid, lot, percent) -> AuctionData` | Same | Extended | Keeps the generic v2 API while privately selecting and settling backstop tiers for types 1 and 2 and adds independent type 3, which auctions accrued reserve-asset protocol credit for BLNT. An empty backstop-auction assertion accepts the canonical bid; a nonempty assertion must match it and never chooses assets. Types 2 and 3 require reserve addresses in `lot`. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
-| `get_auction(auction_type, user) -> AuctionData` | Same | Extended | Returns the v2-compatible public projection for inherited auctions and the new type-3 protocol-fee auction; tier metadata remains private. [V3 §5.1](V3_SYSTEM_SPEC.md#51-tier-auction-lifecycle) |
-| `del_auction(auction_type, user)` | Same | Extended | Retains v2 stale deletion, releases private tier selection, and supports stale or deauthorized-reserve deletion for type 3. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
+| `get_reserve_emissions(reserve_token_id) -> Option<ReserveEmissionData>` | Same | Unchanged | Keeps the V2-compatible reserve-emission view; V3 carries remain internal. |
+| `get_user_emissions(user, reserve_token_id) -> Option<UserEmissionData>` | Same | Unchanged | Keeps the V2-compatible user-emission view; V3 carries remain internal. |
+| `new_auction(auction_type, user, bid, lot, percent) -> AuctionData` | Same | Extended | Keeps the generic V2 API while privately selecting and settling backstop tiers for types 1 and 2 and adds independent type 3, which auctions accrued reserve-asset protocol credit for BLNT. An empty backstop-auction assertion accepts the canonical bid; a nonempty assertion must match it and never chooses assets. Types 2 and 3 require reserve addresses in `lot`. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
+| `get_auction(auction_type, user) -> AuctionData` | Same | Extended | Returns the V2-compatible public projection for inherited auctions and the new type-3 protocol-fee auction; tier metadata remains private. [V3 §5.1](V3_SYSTEM_SPEC.md#51-tier-auction-lifecycle) |
+| `del_auction(auction_type, user)` | Same | Extended | Retains V2 stale deletion, releases private tier selection, and supports stale or deauthorized-reserve deletion for type 3. [V3 §5.4](V3_SYSTEM_SPEC.md#54-protocol-fee-auction--added) |
 | `bad_debt(user)` | Same | Extended | Supplier default requires exhaustion of every configured tier. [V3 §5.2](V3_SYSTEM_SPEC.md#52-bad-debt-waterfall) |
 
 ### Data types
 
 All types in this table have the same public fields and Soroban ABI shape in
-v2 and v3. V3-only carries and tier-auction metadata remain private and do not
+V2 and V3. V3-only carries and tier-auction metadata remain private and do not
 appear in these values.
 
 | Type | V2 example | V3 example | Comparison |
@@ -138,18 +138,18 @@ appear in these values.
 | `ReserveData` | <code>{"d_rate":1000000000000, "b_rate":1000000000000, "ir_mod":0, "b_supply":10000000000, "d_supply":2500000000, "backstop_credit":50000000, "last_time":1800000000}</code> | Same | Accrued reserve-data ABI is unchanged. |
 | `Reserve` | <code>{"asset":"G_USDC", "config":"&lt;ReserveConfig above&gt;", "data":"&lt;ReserveData above&gt;", "scalar":10000000}</code> | Same | The nested reserve view is unchanged. |
 | `Positions` | <code>{"liabilities":{"0":250000000}, "collateral":{"1":500000000}, "supply":{"2":100000000}}</code> | Same | Maps remain keyed by reserve index. |
-| `Request` | <code>{"request_type":4, "address":"G_USDC", "amount":250000000}</code> | Same shape | Example is a borrow request. Discriminants 0 through 9 are inherited; v3 adds 10 to fill a type-3 protocol-fee auction. |
+| `Request` | <code>{"request_type":4, "address":"G_USDC", "amount":250000000}</code> | Same shape | Example is a borrow request. Discriminants 0 through 9 are inherited; V3 adds 10 to fill a type-3 protocol-fee auction. |
 | `FlashLoan` | <code>{"contract":"C_RECEIVER", "asset":"G_USDC", "amount":1000000000}</code> | Same | Flash-loan argument ABI is unchanged. |
 | `ReserveEmissionMetadata` | <code>{"res_index":0, "res_type":1, "share":70}</code> | Same | Example assigns relative weight 70 to reserve 0's bToken stream. |
 | `ReserveEmissionData` | <code>{"expiration":1800604800, "eps":1000000, "index":25000000000000, "last_time":1800000000}</code> | Same | V3 carry is deliberately omitted from the public view. |
 | `UserEmissionData` | <code>{"index":25000000000000, "accrued":120000000}</code> | Same | V3 user carry is deliberately omitted from the public view. |
-| `AuctionData` | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLND_USDC_LP":1000000000}, "block":1234567}</code> | <code>{"bid":{"C_BLNT":24000000000}, "lot":{"C_USDC":2000000000}, "block":1234567}</code> | Shape is unchanged. The v3 example is type 3: BLNT is bid and accrued reserve assets are the lot. |
+| `AuctionData` | <code>{"bid":{"G_USDC":1200000000}, "lot":{"C_BLND_USDC_LP":1000000000}, "block":1234567}</code> | <code>{"bid":{"C_BLNT":24000000000}, "lot":{"C_USDC":2000000000}, "block":1234567}</code> | Shape is unchanged. The V3 example is type 3: BLNT is bid and accrued reserve assets are the lot. |
 
 ## Pool factory
 
 ### Entry points
 
-The v3 factory extends deployment with each pool's immutable backstop
+The V3 factory extends deployment with each pool's immutable backstop
 configuration and exposes that configuration to the backstop and clients.
 
 | V2 entry point | V3 entry point | Classification | Reason |

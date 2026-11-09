@@ -4,8 +4,10 @@ Status: Draft 0.2
 
 ## 1. Purpose and inheritance
 
-This document defines only v3 differences. Unstated behavior inherits
-[V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md) under [SYSTEM_SPEC.md](SYSTEM_SPEC.md).
+BLNT V3 is an immutable lending protocol derived from Blend and designed to
+support real-world assets. This document defines only V3 differences. Unstated
+behavior inherits [V2_SYSTEM_SPEC.md](V2_SYSTEM_SPEC.md) under
+[SYSTEM_SPEC.md](SYSTEM_SPEC.md).
 A difference MUST be classified here as an addition, replacement, extension,
 safety fix, or approved exception.
 
@@ -70,9 +72,9 @@ It has no backstop shares, tier-funded bad-debt or interest auctions, take-rate
 entitlement, or BLNT-emission weight, and its bad debt passes directly to
 inherited supplier default.
 
-The candidate also immutably binds the canonical BLNT:USDC and BLNT:XLM 80:20
-Comet V1.1 pools and canonical BLNT, USDC, and XLM assets. No other backstop asset is
-accepted and no backstop tier has an oracle configuration. Each canonical
+The BLNT V3 backstop also immutably binds the canonical BLNT:USDC and BLNT:XLM
+80:20 Comet V1.1 pools and canonical BLNT, USDC, and XLM assets. No other
+backstop asset is accepted and no backstop tier has an oracle configuration. Each canonical
 Comet V1.1 pool MUST be initialized unfrozen and then bound to a classic-account
 controller whose signer weights are all zero and whose authorization
 thresholds are positive. Deployment verification MUST reject any other
@@ -101,7 +103,7 @@ configured weight, emission eligibility, tokens, shares, and USDC-equivalent
 value, plus aggregate active value and value-weighted Q4W. Active BLNT, queued
 value, emission data, and migration data remain internal.
 
-As a v3 liveness safety fix, expired shares in a fully drained tier MAY be
+As a V3 liveness safety fix, expired shares in a fully drained tier MAY be
 burned for zero assets. A new deposit remains prohibited while worthless
 shares exist and may initialize a fresh one-to-one exchange rate only after all
 outstanding shares are removed. No administrator or external caller can adjust
@@ -123,7 +125,7 @@ Capital state has these canonical policy effects:
 | Deauthorized plain-USDC shares | Excluded until reauthorized | Skipped | Excluded | Ineligible |
 
 Prepared, partially filled, stale, and continued bad-debt auctions MUST retain
-the corresponding v2 withdrawal-blocking liability until settlement or
+the corresponding V2 withdrawal-blocking liability until settlement or
 supplier default clears it atomically.
 
 ### 3.4 Non-clawbackable custody — **Safety requirement**
@@ -264,7 +266,7 @@ backstop-auction gate, and each status decision uses one `pool_data` snapshot.
   liability without summing unlike asset units.
 - Reserve and user state use bounded persistent entries with explicit TTL
   renewal.
-- Auction creation, lookup, and stale deletion retain the v2
+- Auction creation, lookup, and stale deletion retain the V2
   `new_auction`, `get_auction`, and `del_auction` entry points and auction-type
   discriminator. All auction fills use `submit` request discriminants; tier
   selection and settlement metadata remain private. Vector semantics for the
@@ -301,7 +303,7 @@ For every configured Stellar Asset Contract reserve, the pool MUST read the
 token's current authorization for the pool contract. A false authorization
 quarantines only that reserve; the pool and its other reserves remain
 operational. A generic SEP-41 reserve that does not expose the SAC-only
-authorization extension retains the inherited v2 behavior.
+authorization extension retains the inherited V2 behavior.
 
 While quarantined:
 
@@ -341,7 +343,7 @@ status transition is required.
   backstop without changing reserve dToken supply.
 - Accumulate each amount with any liability the backstop already holds in that
   reserve.
-- Update the configured backstop's canonical v2-style liability map.
+- Update the configured backstop's canonical V2-style liability map.
 - Clear the liquidatee's residual liabilities.
 - Emit one handoff event per affected reserve.
 
@@ -436,7 +438,7 @@ backstop waterfall and, if necessary, the inherited supplier-default path.
 Reconciliation itself has no user parameter because a direct pool-custody
 clawback does not identify which supplier funded the removed tokens.
 
-As a v3 safety fix, the minimum operational `b_rate` is 0.1 at the inherited
+As a V3 safety fix, the minimum operational `b_rate` is 0.1 at the inherited
 12-decimal rate scale. Below that threshold the affected reserve MUST reject
 new supply, collateral supply, borrowing, and flash loans, while repayment,
 withdrawal, liquidation, bad-debt resolution, interest realization, and
@@ -602,7 +604,7 @@ auction under public auction type 3. Private metadata has a 46-day temporary
 lifetime; reads do not renew it. Pool records renew at 45 days to 46 days.
 
 Each tier uses Section 4 valuation. As an approved economic exception to
-`V2-AUCTION-004`, v3 lowers the inclusive interest minimum from 200 USDC to
+`V2-AUCTION-004`, V3 lowers the inclusive interest minimum from 200 USDC to
 20 USDC. Interest fills donate to the selected tier; bad-debt fills draw from
 it. Stale deletion releases the selection without changing liabilities,
 pending credit, balances, or tier assets. If a selected
@@ -644,7 +646,7 @@ every backstop liability against the immutable reserve-index mapping and fails
 on unknown or non-positive entries. The next batch follows immutable reserve
 order and contains at most `min(max_positions - 1, 4)` reserves. The pool MUST
 use canonical `pool_data` to select the first qualifying tier, and each call
-restarts the strict tier search. It returns the v2-compatible `AuctionData`
+restarts the strict tier search. It returns the V2-compatible `AuctionData`
 projection when a tier qualifies and fails when none qualifies.
 Callers MAY replace the empty `bid` with the exact canonical debt-asset set,
 the empty `lot` with the expected selected-tier-token set, or both; a mismatch
@@ -760,16 +762,16 @@ reconciliation that reduces included protocol credit cancels the auction. Type
 
 ### 6.1 V3 emitter launch and replacement — **Replaced and extended**
 
-`V2-EMISSIONS-004` is replaced for the initial v3 launch. V3 deploys a new
-emitter already configured for the v3 backstop and canonical BLNT:XLM Comet V1.1
+`V2-EMISSIONS-004` is replaced for the initial V3 launch. V3 deploys a new
+emitter already configured for the V3 backstop and canonical BLNT:XLM Comet V1.1
 LP. It does not replace, reconfigure, or depend on any earlier emitter.
 
-The v3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
+The V3 emitter preserves the legacy `initialize`, `distribute`, `drop`,
 `get_last_distro`, `get_backstop`, and backstop-swap entry points and their
 existing argument and return encodings. The first `initialize` parameter MUST
-contain BLNT in a v3 deployment. Initialization MUST
+contain BLNT in a V3 deployment. Initialization MUST
 reject a token using decimals other than seven or a BLNT Stellar Asset Contract
-whose administrator is not the v3 emitter. The emitter constructor records a
+whose administrator is not the V3 emitter. The emitter constructor records a
 one-time initialization authority. `initialize` MUST require that authority
 and permanently discard it on success so deployment cannot be front-run and no
 ongoing emitter administrator remains. After initialization, `distribute`
@@ -779,11 +781,11 @@ retain permissionless access through the backstop's own `distribute` entry
 point. The emitter's internal final distribution during recipient replacement
 is not subject to that external authorization gate.
 
-Because the v3 emitter recognizes the v3 backstop from its first checkpoint,
+Because the V3 emitter recognizes the V3 backstop from its first checkpoint,
 the backstop's first `distribute` activates ongoing accounting directly when
 no earlier migration epoch or queue attestation exists. No emitter queue,
 strict-balance contest, backfill interval, or legacy-emitter switch is required
-for v3 launch. `drop` retains the existing one-call emitter lifecycle.
+for V3 launch. `drop` retains the existing one-call emitter lifecycle.
 Initialization MUST immutably record the initial backstop so its one-time
 launch drop may mint an immutable deployment-selected allocation whose
 aggregate does not exceed 150 million BLNT. Recipient selection, including an
@@ -798,7 +800,7 @@ combined-backfill sums MUST use checked arithmetic.
 
 Future protocol versions retain the emitter replacement mechanism. Queueing
 is permissionless and requires the candidate backstop to hold strictly more of
-the current designated token than the incumbent; for the initial v3 binding,
+the current designated token than the incumbent; for the initial V3 binding,
 that token is canonical BLNT:XLM LP. Equality is insufficient. Every candidate
 MUST expose an immutable `migration_token() -> Address` view. The token supplied
 to `queue_swap_backstop` MUST equal that candidate-declared token, and the
@@ -815,7 +817,7 @@ stored `Swap` shape and all existing emitter method encodings remain unchanged.
 Recipient activation remains a separate permissionless backstop checkpoint;
 the emitter stores no activation or pause state, and an inactive recipient does
 not gate a later qualified queue or replacement. This is the only
-protocol-upgrade route retained by the emitter; v3 introduces no administrator
+protocol-upgrade route retained by the emitter; V3 introduces no administrator
 or privileged replacement entry point.
 
 ### 6.2 Backstop-depositor emissions — **Extended**
@@ -876,7 +878,7 @@ Q=P10^7+r\epsilon+C_s,\qquad
 
 Expiration is the gulp timestamp plus \(D\). A checkpoint at expiration includes
 \(C_s'\) before clearing it, except that elapsed emissions with no active shares
-remain uncredited as in v2.
+remain uncredited as in V2.
 
 For user shares \(S\), index change \(\Delta I\), and user carry \(C_u\):
 
@@ -900,7 +902,7 @@ only `claim` is authoritative. Plain-USDC and plain-XLM tiers are ineligible.
 The inherited owner-authorized claim selects one eligible tier and a nonempty
 unique pool list. It aggregates that tier's accrual, performs one single-sided
 BLNT Comet V1.1 deposit, and credits the resulting LP proportionally to the same
-owner and pool positions using v2 rounding. Exact BLNT and LP balance deltas
+owner and pool positions using V2 rounding. Exact BLNT and LP balance deltas
 govern settlement; zero output or a mismatch fails atomically. A successful
 claim increments the backstop-claimed BLNT counter. Compounded shares are
 active but receive no retroactive credit. Canonical BLNT:USDC and BLNT:XLM
@@ -931,6 +933,6 @@ position; other tiers and the 30% pool tranche are ineligible.
 
 ## 7. Numeric and resource safety — **Extended**
 
-`V2-SAFETY-001` and `V2-SAFETY-002` apply. The candidate backstop extends code
+`V2-SAFETY-001` and `V2-SAFETY-002` apply. The BLNT V3 backstop extends code
 and instance TTL to 90 days at construction and whenever either falls below 89
 days. V3-specific bounds are fixed in the sections above.

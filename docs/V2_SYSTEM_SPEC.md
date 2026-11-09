@@ -6,16 +6,16 @@ Source commit: `ba22b487b2c5057a4ecc28b05b5193c28e4bd117`
 
 ## 1. Purpose and authority
 
-This document records the behavior inherited from the frozen Blend v2
-contracts. It is not a proposal to change deployed v2 and does not grant
+This document records the behavior inherited from the frozen Blend V2
+contracts. It is not a proposal to change deployed V2 and does not grant
 authority to upgrade those contracts.
 
 The upstream source at the pinned SDK-22 commit is the frozen source baseline.
 If this document differs from the frozen source or tests, the executable
 behavior wins and this document MUST be corrected.
 
-Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe the behavior a
-v3 candidate inherits unless the v3 specification explicitly overrides it.
+Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe the behavior
+BLNT V3 inherits unless the V3 specification explicitly overrides it.
 
 ## 2. Frozen runtime and contracts
 
@@ -28,13 +28,13 @@ The historical workspace MUST remain pinned to:
 - `wasm32-unknown-unknown`.
 - The dependency graph and artifacts recorded in `BASELINE.md`.
 
-V2 MUST NOT be recompiled against the v3 SDK merely to share a crate graph.
+V2 MUST NOT be recompiled against the V3 SDK merely to share a crate graph.
 
 ### V2-ARCH-001: Contract roles
 
 The baseline consists of:
 
-- One v2 backstop that accepts a single BLND:USDC Comet v1 LP token.
+- One V2 backstop that accepts a single BLND:USDC Comet v1 LP token.
 - One pool factory bound to that backstop and one immutable pool WASM hash.
 - Isolated lending pools deployed by the factory.
 - One immutable SEP-40 oracle binding per pool.
@@ -52,7 +52,7 @@ not protocol governance.
 
 ### V2-BACKSTOP-001: Single accepted token
 
-The v2 backstop accepts one immutable BLND:USDC Comet v1 LP token. Its BLND and
+The V2 backstop accepts one immutable BLND:USDC Comet v1 LP token. Its BLND and
 USDC assets, BLND token, and pool factory are immutable constructor bindings.
 
 An initial deposit for a pool MUST verify that the pool was deployed by the
@@ -72,7 +72,7 @@ Each pool has one backstop-token asset balance and one share supply:
 - Burning all remaining shares returns all remaining pool-attributed tokens.
 - If the pool-attributed token balance is zero while shares remain, a deposit
   converts to zero shares and fails. A withdrawal that converts to zero tokens
-  also fails; v2 does not burn a worthless queued share for zero assets.
+  also fails; V2 does not burn a worthless queued share for zero assets.
 
 A token gain or loss changes the common exchange rate for every active and
 queued share in that pool. Pool-attributed value MUST NOT be used to satisfy
@@ -110,12 +110,12 @@ token, and evaluates:
 Multiplication intentionally saturates because every saturated result is above
 the threshold. Equality qualifies.
 
-This threshold controls v2 status eligibility and reward-zone admission. It is
+This threshold controls V2 status eligibility and reward-zone admission. It is
 not a USDC market-value threshold.
 
 ### V2-BACKSTOP-005: Reward zone
 
-The v2 reward zone:
+The V2 reward zone:
 
 - Is permissionless and contains at most 30 unique pools.
 - Admits only pools meeting `V2-BACKSTOP-004`.
@@ -141,7 +141,7 @@ active shares, so new or dequeued shares do not receive earlier accrual. A
 refreshed stream checkpoints its predecessor, truncates the predecessor's
 unstreamed amount to seven decimals, adds the new allocation, and replaces it
 with a fresh seven-day rate. For seven-day duration \(D\), pending BLND \(P\),
-remaining seconds \(r\), and old scaled rate \(\epsilon\), v2 computes
+remaining seconds \(r\), and old scaled rate \(\epsilon\), V2 computes
 \(U=\lfloor r\epsilon/10^7\rfloor\) and
 \(\epsilon'=\lfloor(P+U)10^7/D\rfloor\).
 
@@ -257,7 +257,7 @@ refresh; Setup cannot be refreshed.
 
 ### V2-LENDING-001: Request model
 
-The v2 pool supports:
+The V2 pool supports:
 
 | Code | Request |
 | ---: | --- |
@@ -308,7 +308,7 @@ shares:
 - Borrow mints dTokens by rounding up.
 - Partial repayment burns dTokens by rounding down.
 - Repayment computes the rounded-down dToken burn first. A request clears the
-  complete debt when that burn is at least the position balance, but v2 treats
+  complete debt when that burn is at least the position balance, but V2 treats
   it as an over-repayment only when the burn is strictly greater. In that
   over-repayment branch, direct submission collects the requested amount from
   `spender` and transfers the excess over live debt to `to`, while allowance
@@ -355,7 +355,7 @@ supply, and borrow but permit withdrawal and repayment.
 
 ### V2-AUCTION-001: Shared price curve
 
-The public v2 auction interface identifies an auction by `(auction_type,
+The public V2 auction interface identifies an auction by `(auction_type,
 user)`: type 0 is user liquidation, type 1 is bad debt, and type 2 is backstop
 interest. Creation, lookup, and deletion use the generic `new_auction`,
 `get_auction`, and `del_auction` entry points; fills use the corresponding
@@ -386,7 +386,7 @@ User-liquidation creation is permissionless. It:
 - Requires a percentage from 1 through 100.
 - Is bounded by the pool's maximum-position setting.
 - Uses current reserve rates and oracle prices.
-- Uses the v2 incentive and repair-band calculation.
+- Uses the V2 incentive and repair-band calculation.
 - Treats an all-position liquidation above 95% as a checked full liquidation.
 
 Filling transfers bToken collateral and dToken liability shares from the
@@ -398,7 +398,7 @@ An account with an active liquidation auction cannot complete an ordinary
 submission. It may cancel only when status permits and the resulting position
 is healthy. Auction fills remain available while the pool is On-Ice or Frozen.
 
-When a completed auction leaves liabilities and no collateral, v2 transfers
+When a completed auction leaves liabilities and no collateral, V2 transfers
 the residual dToken positions to the backstop for bad-debt resolution.
 
 ### V2-AUCTION-003: Bad debt
@@ -416,8 +416,8 @@ backstop may fill from 1% through 100%. The resulting position must satisfy the
 ordinary maximum-position, minimum-collateral, and health requirements.
 Bad-debt fills remain available while the pool is On-Ice or Frozen.
 
-If the v2 backstop cannot cover residual debt under its frozen minimum and
-auction policy, supplier loss follows the v2 default calculation:
+If the V2 backstop cannot cover residual debt under its frozen minimum and
+auction policy, supplier loss follows the V2 default calculation:
 
 ```text
 default_asset_amount = ceil(d_tokens * d_rate / 10^12)
@@ -452,9 +452,9 @@ backstop provides custody and receives the realized donation.
 
 ### V2-EMISSIONS-001: Reward-zone allocation
 
-After a valid distribution checkpoint, v2 allocates new BLND among reward-zone
+After a valid distribution checkpoint, V2 allocates new BLND among reward-zone
 pools in proportion to nonqueued BLND:USDC LP-token amounts. Integer division
-rounds down under the frozen implementation, and v2 does not carry every
+rounds down under the frozen implementation, and V2 does not carry every
 allocation remainder forward.
 
 Standalone distribution requires at least five seconds since the preceding
@@ -467,7 +467,7 @@ Each pool's accrued allocation is split:
 - 70% to its active backstop depositors.
 - 30% to its configured supply and borrow positions.
 
-The split is fixed in v2 and is not a pool-admin parameter.
+The split is fixed in V2 and is not a pool-admin parameter.
 
 ### V2-EMISSIONS-003: Pool tranche
 
@@ -494,7 +494,7 @@ reserve-token scale.
 
 ### V2-EMISSIONS-004: Candidate backfill and initial drop
 
-The v2 backstop constructor binds an immutable initial-drop recipient list. Its
+The V2 backstop constructor binds an immutable initial-drop recipient list. Its
 aggregate allocation plus the maximum 10-million-BLND backfill MUST fit within
 the emitter's 50-million-BLND drop ceiling.
 
@@ -515,7 +515,7 @@ Before the emitter recognizes the candidate backstop, permissionless
 Public `distribute` returns the newly allocated BLND amount. Public `drop`
 submits the immutable recipient list plus the recorded candidate-backfill
 amount to the emitter and returns no value. The emitter enforces its drop
-lifecycle and ceiling; v2 does not add a separate migration-status entry
+lifecycle and ceiling; V2 does not add a separate migration-status entry
 point. Clients MAY reconstruct lifecycle state from the contract's ledger
 entries without extending their TTL.
 
@@ -535,7 +535,7 @@ V2 uses integer fixed-point arithmetic with explicit seven- and twelve-decimal
 scales. Its exact floor, ceiling, checked, and intentional saturation behavior
 is part of the inherited baseline.
 
-V3 MUST NOT reinterpret a v2 rounding direction merely because a different SDK
+V3 MUST NOT reinterpret a V2 rounding direction merely because a different SDK
 or intermediate integer type is available.
 
 ### V2-SAFETY-002: Bounds and TTL

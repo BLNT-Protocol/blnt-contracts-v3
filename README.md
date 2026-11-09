@@ -1,19 +1,19 @@
-# BLNT Protocol V3 Candidate
+# BLNT V3
 
-This repository contains the experimental BLNT Protocol v3 candidate
-contracts. It is derived from Blend v2 and is not an official or
-production-ready BLNT release.
+This repository contains the source for BLNT V3, an immutable lending protocol
+derived from Blend and designed to support real-world assets. BLNT V3 is
+independently developed and is not an official Blend release.
 
 ## Documentation
 
 The contract specification is composed by
 [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md). It inherits the frozen behavior in
-[docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional v3
+[docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional V3
 changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
 
 ## Audit status
 
-The v3-specific contract changes have not yet undergone an independent
+The V3-specific contract changes have not yet undergone an independent
 security audit.
 
 ## Reserve-token trust
@@ -38,17 +38,17 @@ make
 ```
 
 Artifacts are written to `target/wasm32v1-none/optimized`. The build includes
-the pool factory, v3 BLNT emitter, backstop, and pool. The emitter preserves the
-legacy backstop-replacement API and emits BLNT directly to v3 without replacing
-the v1/v2 BLND emitter. Comet V1.1-based backstop valuation is integrated into
+the pool factory, V3 BLNT emitter, backstop, and pool. The emitter preserves the
+legacy backstop-replacement API and emits BLNT directly to V3 without replacing
+the V1/V2 BLND emitter. Comet V1.1-based backstop valuation is integrated into
 the backstop. The committed `comet.wasm` is the official
 `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact with SHA-256
 `d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687`.
 The build rejects any production
 WASM larger than 120,000 bytes, preserving the Protocol 27 deployment headroom
-established by the candidate's deployment testing.
+established by BLNT V3 deployment testing.
 
-Compare the optimized artifacts with the exact deployed v2 contracts:
+Compare the optimized artifacts with the exact deployed V2 contracts:
 
 ```bash
 make wasm-sizes
