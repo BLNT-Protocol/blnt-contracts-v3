@@ -1,6 +1,8 @@
 # BLNT V3 Contract Specification
 
-Status: Draft 0.2
+Status: Deployed and immutable
+
+Specification version: 1.0
 
 ## 1. Purpose and inheritance
 
