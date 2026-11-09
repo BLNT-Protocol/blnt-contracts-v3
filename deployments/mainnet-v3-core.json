@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015"
+  },
+  "generated_at": "2026-10-25T19:31:21Z",
+  "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+  "source_commit": "5d055ca89afc9ed443d36b7ad34e3de59b487764",
+  "backfill_source_commit": "fe366da68da7f24ef20063c43aaf0b13ea752257",
+  "contracts": {
+    "emitter": "CDSO6FQSBJ3U3AJHBNNLHHKSMKTTDDN3GLGF3KZTMXBFV7SVB43ZJERT",
+    "backfill": "CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA",
+    "pool_factory": "CAKLFWAHB2RIYRBSPUL6EH43AIQ5ILBEM7HTMWYSJRL7PHZQ676KMCV5",
+    "backstop": "CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO",
+    "pool_wasm_hash": "0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356"
+  },
+  "contract_creation": {
+    "emitter": {
+      "transaction_hash": "46fb69b8be008a34be4b78a57a3b7afeefdce302115d0fbfa81576105c71f94a",
+      "ledger": 65134154,
+      "created_at": "2026-10-25T19:29:13Z"
+    },
+    "backfill": {
+      "transaction_hash": "a2f5b9dd5a94cbab3457ad2734ffe5103ab6f9b0b1aea3b16feae307e0e3c5f5",
+      "ledger": 65134164,
+      "created_at": "2026-10-25T19:30:03Z"
+    },
+    "pool_factory": {
+      "transaction_hash": "5f63e7f05dbf83c5257cbfebb5a26e5ce0567a1453d3f5d6788e5d215672b0f1",
+      "ledger": 65134160,
+      "created_at": "2026-10-25T19:29:43Z"
+    },
+    "backstop": {
+      "transaction_hash": "6734eb045dcdcfdc5b288513cc5b799c939b332818a8bcd17e4e457f634bd59a",
+      "ledger": 65134174,
+      "created_at": "2026-10-25T19:30:53Z"
+    }
+  },
+  "assets": {
+    "blnt": "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS",
+    "legacy_blnd": "CD25MNVTZDL4Y3XBCPCJXGXATV5WUHHOWMYFF4YBEGU5FCPGMYTVG5JY",
+    "usdc": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+    "xlm": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"
+  },
+  "comet_v1_1": {
+    "blnt_usdc": "CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3",
+    "blnt_xlm": "CA5HX3D47PQZWC2E7VWXCKH4534P2NOJEOIXAWU47MI4QV2FQUYY3FLC"
+  },
+  "allocations": {
+    "private_grants": {
+      "sha256": "ef8707b6b20e9828c9086ee2b00188fff4025f84418d5bdfa2545d69c8f854a2",
+      "count": 3,
+      "total_raw": "250000000000000"
+    },
+    "backfill_claims": {
+      "sha256": "6786d7f2e8ecf11acf322d768f650aa860e7eaa15566bf047a9a34fbffd9bdd9",
+      "count": 434,
+      "total_raw": "740000000000000"
+    },
+    "conversion_reserve_raw": "510000000000000",
+    "initial_drop_raw": "1500000000000000"
+  },
+  "artifacts": {
+    "emitter": "4fa7d99dee6fe99cad5d07a46ee39e437dc287e53e3ab1f3ccc0aacf7e6cd6c5",
+    "backfill": "dcdc0b1860799629c7c88804955dd7373cb6febaf069e2ba863e98ebbaa95c27",
+    "factory": "985d7eda4b610f28103edcb28faa52408169f455ac9a880c4a39f58ecc0c2135",
+    "backstop": "0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f",
+    "pool": "0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356"
+  },
+  "transactions": {
+    "deploy-v3-emitter": "46fb69b8be008a34be4b78a57a3b7afeefdce302115d0fbfa81576105c71f94a",
+    "upload-v3-pool": "f79e7f0bd31ac991944f95c06b4f4ca37009af851d295bb14988d0e3541aace3",
+    "deploy-v3-factory": "5f63e7f05dbf83c5257cbfebb5a26e5ce0567a1453d3f5d6788e5d215672b0f1",
+    "deploy-blnt-backfill": "a2f5b9dd5a94cbab3457ad2734ffe5103ab6f9b0b1aea3b16feae307e0e3c5f5",
+    "handoff-blnt-admin": "72973fc4464b7b6eb9378cc49bdaa09cc96c18f8c30373dce0d0687cee16628e",
+    "lock-blnt-issuer": "cde0c1457c5ca1ebd8771fa378829fbc288a00b15370c7d20ec0a0937e7a0740",
+    "initialize-v3-emitter": "f0706f58c76f87fb408a6075aaec7db00003a508d0c59c51d3d1fcb9bd68839e",
+    "deploy-v3-backstop": "6734eb045dcdcfdc5b288513cc5b799c939b332818a8bcd17e4e457f634bd59a",
+    "activate-v3-backstop": "5d32b49e72767751a18ef13dd23f38f7b6e550292f1c5427774134871004a2aa",
+    "execute-v3-initial-drop": "55e2765e50898a15f96825e918fa144910702c91d3f9fa1a0a0b5fb629cdb5a2"
+  },
+  "verified_at": "2026-10-25T19:31:21Z"
+}

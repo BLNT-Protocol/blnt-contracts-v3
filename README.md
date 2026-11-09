@@ -23,6 +23,16 @@ dependency pins in this repository are frozen to the exact deployed WASMs.
 Contract behavior changes require a separately identified future protocol
 version and migration path; BLNT V3 cannot be patched in place.
 
+## Mainnet deployment evidence
+
+Canonical mainnet addresses, creation transactions and timestamps, artifact
+hashes, constructor bindings, and verification evidence are maintained in this
+repository. The primary records cover the
+[BLNT asset](deployments/mainnet-v3-token.json),
+[canonical Comet V1.1 pools](deployments/mainnet-v3-comet.json),
+[core contracts](deployments/mainnet-v3-core.json), and
+[Fixed Pool V3](deployments/mainnet-v3-fixed-pool.json).
+
 ## Reserve-token trust
 
 Pools may support generic SEP-41 reserve assets. A generic or upgradeable token
