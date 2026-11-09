@@ -21,7 +21,18 @@ authority.
 
 Normative terms `MUST`, `MUST NOT`, `SHOULD`, and `MAY` describe requirements.
 
-### 1.1 Scoped carry
+### 1.1 Deployed artifact immutability
+
+BLNT V3 denotes the exact immutable contract artifacts recorded by the
+deployment evidence. Production contract source, build settings, dependency
+pins, and embedded metadata MUST continue to reproduce the deployed WASM
+hashes. A change that produces different contract behavior or a different
+production WASM hash MUST NOT be identified as BLNT V3 and MUST instead target
+a separately identified future protocol version and migration path.
+Documentation, tests, and off-chain tooling MAY evolve without changing the
+deployed production artifacts.
+
+### 1.2 Scoped carry
 
 Every calculation that invokes this subsection conserves its floor remainder
 at the stated scope. For amount \(X\), prior carry \(C\), nonnegative weights
@@ -671,7 +682,7 @@ D_i=\left\lfloor
 \]
 
 A zero-value or deauthorized tier is omitted. Each pool and reserve stores one
-pending amount per configured tier and its Section 1.1 carry. Section 3.3
+pending amount per configured tier and its Section 1.2 carry. Section 3.3
 determines eligible value, including capital selected for bad debt until drawn.
 An empty tier list has an immutable zero backstop take rate and therefore
 creates no take-rate credit. If tiers exist but their weighted value denominator
@@ -857,7 +868,7 @@ greater than supply fails atomically. Composition is read in the same
 invocation; checkpoint manipulation exposure is accepted and MUST be
 disclosed.
 
-All stages are bounded and use Section 1.1 at the stated scope:
+All stages are bounded and use Section 1.2 at the stated scope:
 
 | Stage | Required behavior and carry scope |
 | --- | --- |

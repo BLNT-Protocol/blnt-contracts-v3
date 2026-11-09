@@ -4,9 +4,9 @@ These instructions apply to the entire repository.
 
 ## Mission
 
-Build and evaluate the experimental BLNT Protocol v3 contracts while
-preserving Blend v2 behavior except for differences explicitly specified for
-v3.
+Build and evaluate BLNT V3, an immutable lending protocol derived from Blend
+and designed to support real-world assets, while preserving Blend V2 behavior
+except for differences explicitly specified for BLNT V3.
 
 This is financial smart-contract software. Prefer explicit invariants,
 checked arithmetic, conservative state transitions, bounded execution, and
@@ -21,24 +21,32 @@ Read these before changing contract behavior:
 3. `docs/V3_SYSTEM_SPEC.md`
 4. Existing contract tests and the implementation being changed
 
-`docs/SYSTEM_SPEC.md` defines how the specifications compose. Unstated v3
-behavior inherits the frozen v2 baseline. Do not introduce a behavioral
+`docs/SYSTEM_SPEC.md` defines how the specifications compose. Unstated V3
+behavior inherits the frozen V2 baseline. Do not introduce a behavioral
 difference unless `docs/V3_SYSTEM_SPEC.md` classifies and permits it.
 
-If the written v2 specification conflicts with the frozen executable
+If the written V2 specification conflicts with the frozen executable
 baseline, preserve the executable behavior and correct the document. Do not
-silently create a new v3 policy.
+silently create a new V3 policy.
 
 ## Repository boundary
 
-- This repository contains the production v3 contract source, compatibility
-  crates, test mocks, and contract specifications, including candidate-side
-  migration entry points and backfill accounting.
+- This repository contains the production V3 contract source, compatibility
+  crates, test mocks, and contract specifications, including migration-candidate
+  entry points and backfill accounting.
 - Keep cross-version fixtures, deployment runners, and network evidence outside
   this repository.
 - Test mocks and compatibility crates MUST NOT become privileged production
   dependencies or alternate protocol-control paths.
-- Do not describe this candidate as audited, production-ready, or official.
+- Do not describe BLNT V3 as independently audited, production-ready, or an
+  official Blend release.
+- Treat the deployed BLNT V3 production WASMs as immutable. Do not change
+  production contract source, build settings, dependencies, or embedded
+  metadata in a way that changes a deployed WASM hash while identifying the
+  result as BLNT V3.
+- Any contract behavior change MUST target a separately identified future
+  protocol version and migration path. Documentation, tests, and off-chain
+  tooling MAY evolve only without changing the deployed BLNT V3 artifacts.
 
 ## Runtime baseline
 
@@ -46,7 +54,9 @@ silently create a new v3 policy.
   `wasm32v1-none`.
 - Keep the exact toolchain and dependency versions reproducible through
   `rust-toolchain.toml` and the committed lockfiles.
-- Do not add SDK 22 or SDK 26 build lanes to the v3 workspace.
+- When a change could affect a production build, reproduce the optimized WASMs
+  and verify their hashes against the recorded deployment before accepting it.
+- Do not add SDK 22 or SDK 26 build lanes to the V3 workspace.
 - Never disable release overflow checks.
 - Keep `comet.wasm` equal to the official Comet V1.1
   `v1.1.0_contracts_pkg1.0.0_cli25.1.0` release artifact with SHA-256
@@ -68,7 +78,7 @@ silently create a new v3 policy.
 - A token, share, liability, emission, carry, or queued withdrawal must not be
   double-counted across tiers or accounting scopes.
 
-Preserve these specified v3 boundaries unless the specification is changed
+Preserve these specified V3 boundaries unless the specification is changed
 first:
 
 - Each pool immutably configures zero to three positional backstop tiers from
@@ -144,7 +154,7 @@ accounting.
 Before editing:
 
 - Inspect `git status` and preserve unrelated or staged user changes.
-- Identify the inherited v2 behavior and the explicit v3 rule affected.
+- Identify the inherited V2 behavior and the explicit V3 rule affected.
 - Find the tests enforcing the current behavior.
 - Record unresolved economic or administrative choices instead of guessing.
 

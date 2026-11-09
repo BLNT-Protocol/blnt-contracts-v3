@@ -16,6 +16,13 @@ changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
 The V3-specific contract changes have not yet undergone an independent
 security audit.
 
+## Immutability
+
+The deployed BLNT V3 contracts are immutable. The production source and
+dependency pins in this repository are frozen to the exact deployed WASMs.
+Contract behavior changes require a separately identified future protocol
+version and migration path; BLNT V3 cannot be patched in place.
+
 ## Reserve-token trust
 
 Pools may support generic SEP-41 reserve assets. A generic or upgradeable token
