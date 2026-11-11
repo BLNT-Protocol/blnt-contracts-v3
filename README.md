@@ -27,11 +27,13 @@ version and migration path; BLNT V3 cannot be patched in place.
 
 Canonical mainnet addresses, creation transactions and timestamps, artifact
 hashes, constructor bindings, and verification evidence are maintained in this
-repository. The primary records cover the
-[BLNT asset](deployments/mainnet-v3-token.json),
-[canonical Comet V1.1 pools](deployments/mainnet-v3-comet.json),
-[core contracts](deployments/mainnet-v3-core.json), and
-[Fixed Pool V3](deployments/mainnet-v3-fixed-pool.json).
+repository. The primary records cover:
+
+- [BLNT asset](deployments/mainnet-v3-token.json)
+- [Canonical Comet V1.1 pools](deployments/mainnet-v3-comet.json)
+- [Core contracts](deployments/mainnet-v3-core.json)
+- [Fixed Pool V3](deployments/mainnet-v3-fixed-pool.json)
+- [YieldBlent Pool](deployments/mainnet-v3-yieldblent-pool.json)
 
 ## Reserve-token trust
 
