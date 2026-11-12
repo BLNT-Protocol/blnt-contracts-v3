@@ -22,5 +22,4 @@ moderc3156-example = { path = "../mocks/moderc3156" }
 cast = { workspace = true }
 sep-40-oracle = { workspace = true, features = ["testutils"] }
 sep-41-token = { workspace = true, features = ["testutils"] }
-blend-contract-sdk = { workspace = true, features = ["testutils"] }
-
+mock-emitter = { path = "../mocks/mock-emitter" }

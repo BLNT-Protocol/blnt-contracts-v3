@@ -1,5 +1,5 @@
 mod pool_contract {
-    soroban_sdk::contractimport!(file = "../target/wasm32-unknown-unknown/optimized/pool.wasm");
+    soroban_sdk::contractimport!(file = "../target/wasm32v1-none/optimized/pool.wasm");
 }
 pub use pool_contract::WASM as POOL_WASM;
 

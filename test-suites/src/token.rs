@@ -1,10 +1,13 @@
-use sep_41_token::testutils::{MockTokenClient, MockTokenWASM};
-use soroban_sdk::{testutils::Address as _, Address, Env, IntoVal};
+use sep_41_token::testutils::{MockToken, MockTokenClient};
+use soroban_sdk::{
+    testutils::{Address as _, IssuerFlags},
+    Address, Env, IntoVal,
+};
 
 pub fn create_stellar_token<'a>(e: &Env, admin: &Address) -> (Address, MockTokenClient<'a>) {
-    let contract_id = e
-        .register_stellar_asset_contract_v2(admin.clone())
-        .address();
+    let contract = e.register_stellar_asset_contract_v2(admin.clone());
+    contract.issuer().set_flag(IssuerFlags::RevocableFlag);
+    let contract_id = contract.address();
     let client = MockTokenClient::new(e, &contract_id);
     // set admin to bump instance
     client.set_admin(admin);
@@ -18,7 +21,7 @@ pub fn create_token<'a>(
     symbol: &str,
 ) -> (Address, MockTokenClient<'a>) {
     let contract_id = Address::generate(e);
-    e.register_at(&contract_id, MockTokenWASM, ());
+    e.register_at(&contract_id, MockToken, ());
     let client = MockTokenClient::new(e, &contract_id);
     client.initialize(
         admin,

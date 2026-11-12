@@ -52,4 +52,11 @@ pub enum PoolError {
     InvalidLot = 1222,
     ReserveDisabled = 1223,
     MinCollateralNotMet = 1224,
+
+    // Tier-specific interest auction errors
+    InvalidInterestAuction = 1227,
+    NoInterestAuctionCapacity = 1228,
+
+    // Reserve custody errors
+    UnreconciledReserveLoss = 1229,
 }

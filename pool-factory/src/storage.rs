@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env, Symbol};
+use soroban_sdk::{contracttype, unwrap::UnwrapOptimized, Address, BytesN, Env, Symbol, Vec};
 
 /********** Ledger Thresholds **********/
 
@@ -14,6 +14,35 @@ const LEDGER_BUMP_USER: u32 = LEDGER_THRESHOLD_USER + 20 * ONE_DAY_LEDGERS; // ~
 #[contracttype]
 pub enum PoolFactoryDataKey {
     Contracts(Address),
+    BackstopConfig(Address),
+}
+
+/// One of the four canonical assets accepted by the v3 backstop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BackstopAsset {
+    BlntXlm,
+    BlntUsdc,
+    Usdc,
+    Xlm,
+}
+
+/// One immutable loss-waterfall position configured for a pool.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BackstopTierConfig {
+    /// Canonical asset deposited into this waterfall position.
+    pub asset: BackstopAsset,
+    /// Relative take-rate allocation weight from 1 through 100.
+    pub take_rate_weight: u32,
+}
+
+/// Immutable pool configuration consumed by the shared backstop.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PoolBackstopConfig {
+    pub access_controller: Option<Address>,
+    pub tiers: Vec<BackstopTierConfig>,
 }
 
 #[derive(Clone)]
@@ -21,7 +50,7 @@ pub enum PoolFactoryDataKey {
 pub struct PoolInitMeta {
     pub pool_hash: BytesN<32>,
     pub backstop: Address,
-    pub blnd_id: Address,
+    pub blnt_id: Address,
 }
 
 /// Bump the instance rent for the contract
@@ -73,7 +102,12 @@ pub fn is_deployed(e: &Env, contract_id: &Address) -> bool {
 ///
 /// ### Arguments
 /// * `contract_id` - The contract_id that was deployed by the factory
-pub fn set_deployed(e: &Env, contract_id: &Address) {
+pub fn set_deployed(
+    e: &Env,
+    contract_id: &Address,
+    backstop_config: &Vec<BackstopTierConfig>,
+    access_controller: &Option<Address>,
+) {
     let key = PoolFactoryDataKey::Contracts(contract_id.clone());
     e.storage()
         .persistent()
@@ -81,4 +115,32 @@ pub fn set_deployed(e: &Env, contract_id: &Address) {
     e.storage()
         .persistent()
         .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+
+    let config_key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    e.storage().persistent().set(
+        &config_key,
+        &PoolBackstopConfig {
+            access_controller: access_controller.clone(),
+            tiers: backstop_config.clone(),
+        },
+    );
+    e.storage()
+        .persistent()
+        .extend_ttl(&config_key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+}
+
+/// Fetch one deployed pool's immutable backstop configuration.
+pub fn get_backstop_config(e: &Env, contract_id: &Address) -> PoolBackstopConfig {
+    if !is_deployed(e, contract_id) {
+        return PoolBackstopConfig {
+            access_controller: None,
+            tiers: Vec::new(e),
+        };
+    }
+    let key = PoolFactoryDataKey::BackstopConfig(contract_id.clone());
+    let config = e.storage().persistent().get(&key).unwrap_optimized();
+    e.storage()
+        .persistent()
+        .extend_ttl(&key, LEDGER_THRESHOLD_USER, LEDGER_BUMP_USER);
+    config
 }

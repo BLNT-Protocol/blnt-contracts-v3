@@ -181,7 +181,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 10000,
             network_id: Default::default(),
@@ -222,7 +222,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -258,7 +258,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -296,7 +296,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -328,7 +328,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -355,7 +355,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -386,7 +386,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 12592000,
             network_id: Default::default(),
@@ -420,7 +420,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 12592000,
             network_id: Default::default(),
@@ -469,7 +469,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 22592000,
             network_id: Default::default(),
@@ -523,7 +523,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11192000,
             network_id: Default::default(),
@@ -563,7 +563,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11192000,
             network_id: Default::default(),
@@ -590,7 +590,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11000000,
             network_id: Default::default(),
@@ -621,7 +621,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 12592000,
             network_id: Default::default(),
@@ -655,7 +655,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 12592000,
             network_id: Default::default(),
@@ -704,7 +704,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 22592000,
             network_id: Default::default(),
@@ -758,7 +758,7 @@ mod tests {
         };
 
         e.ledger().set(LedgerInfo {
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 1,
             timestamp: 11192000,
             network_id: Default::default(),
