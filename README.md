@@ -37,6 +37,9 @@ repository. The primary records cover:
 
 ### Canonical mainnet addresses
 
+The canonical BLNT asset is
+[`BLNT:GAP2ACGH3O6TRFAERGM4USJ6XWU3U2BFIK224JPV6NI3CUNEEEGTBTFB`](https://stellar.expert/explorer/public/asset/BLNT-GAP2ACGH3O6TRFAERGM4USJ6XWU3U2BFIK224JPV6NI3CUNEEEGTBTFB).
+
 | Component | Contract address | Deployment record |
 | --- | --- | --- |
 | BLNT asset (SAC) | [`CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS`](https://stellar.expert/explorer/public/contract/CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS) | [BLNT asset](deployments/mainnet-v3-token.json) |
