@@ -34,8 +34,11 @@ silently create a new V3 policy.
 - This repository contains the production V3 contract source, compatibility
   crates, test mocks, and contract specifications, including migration-candidate
   entry points and backfill accounting.
-- Keep cross-version fixtures, deployment runners, and network evidence outside
-  this repository.
+- Keep canonical immutable deployment registries in `deployments/`, including
+  the source-artifact provenance and constructor bindings needed to verify the
+  deployed contracts independently.
+- Keep cross-version fixtures, deployment runners, mutable operational
+  configuration, and transient network evidence outside this repository.
 - Test mocks and compatibility crates MUST NOT become privileged production
   dependencies or alternate protocol-control paths.
 - Do not describe BLNT V3 as independently audited, production-ready, or an

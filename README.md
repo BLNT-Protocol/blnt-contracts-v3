@@ -33,11 +33,12 @@ version and migration path; BLNT V3 cannot be patched in place.
 
 Canonical mainnet addresses, creation transactions and timestamps, artifact
 hashes, constructor bindings, and verification evidence are maintained in this
-repository. The primary records cover:
+repository. The records cover:
 
 - [BLNT asset](deployments/mainnet-v3-token.json)
 - [Canonical Comet V1.1 pools](deployments/mainnet-v3-comet.json)
 - [Core contracts](deployments/mainnet-v3-core.json)
+- [Supplemental lockup backfill](deployments/mainnet-v3-lockup-backfill.json)
 - [Fixed Pool V3](deployments/mainnet-v3-fixed-pool.json)
 - [YieldBlent Pool](deployments/mainnet-v3-yieldblent-pool.json)
 
@@ -54,6 +55,7 @@ The canonical BLNT asset is
 | XLM asset (SAC) | [`CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA`](https://stellar.expert/explorer/public/contract/CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA) | [Core contracts](deployments/mainnet-v3-core.json) |
 | Emitter | [`CDSO6FQSBJ3U3AJHBNNLHHKSMKTTDDN3GLGF3KZTMXBFV7SVB43ZJERT`](https://stellar.expert/explorer/public/contract/CDSO6FQSBJ3U3AJHBNNLHHKSMKTTDDN3GLGF3KZTMXBFV7SVB43ZJERT) | [Core contracts](deployments/mainnet-v3-core.json) |
 | BLNT backfill | [`CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA`](https://stellar.expert/explorer/public/contract/CANIE64BDFKLHROLOIY2KTQVBWUZNUKZP75DLXC272QM7TIN5N3M4LVA) | [Core contracts](deployments/mainnet-v3-core.json) |
+| Supplemental lockup backfill | [`CBNRUFL5KYTT7TQMYKRMHQU5KY4LDQEUVXLI6ECKJU7OJGHC3OLGJFBV`](https://stellar.expert/explorer/public/contract/CBNRUFL5KYTT7TQMYKRMHQU5KY4LDQEUVXLI6ECKJU7OJGHC3OLGJFBV) | [Supplemental lockup backfill](deployments/mainnet-v3-lockup-backfill.json) |
 | Pool factory | [`CAKLFWAHB2RIYRBSPUL6EH43AIQ5ILBEM7HTMWYSJRL7PHZQ676KMCV5`](https://stellar.expert/explorer/public/contract/CAKLFWAHB2RIYRBSPUL6EH43AIQ5ILBEM7HTMWYSJRL7PHZQ676KMCV5) | [Core contracts](deployments/mainnet-v3-core.json) |
 | Backstop | [`CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO`](https://stellar.expert/explorer/public/contract/CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO) | [Core contracts](deployments/mainnet-v3-core.json) |
 | BLNT:USDC Comet V1.1 LP | [`CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3`](https://stellar.expert/explorer/public/contract/CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3) | [Canonical Comet V1.1 pools](deployments/mainnet-v3-comet.json) |
@@ -62,6 +64,10 @@ The canonical BLNT asset is
 | Fixed Pool oracle | [`CCVTVW2CVA7JLH4ROQGP3CU4T3EXVCK66AZGSM4MUQPXAI4QHCZPOATS`](https://stellar.expert/explorer/public/contract/CCVTVW2CVA7JLH4ROQGP3CU4T3EXVCK66AZGSM4MUQPXAI4QHCZPOATS) | [Fixed Pool V3](deployments/mainnet-v3-fixed-pool.json) |
 | YieldBlent Pool | [`CAUTPSQDAJEUV5XEU3EXFVYRGDJLEJGVTFJCFZCSPTDCREAMZ573VF4D`](https://stellar.expert/explorer/public/contract/CAUTPSQDAJEUV5XEU3EXFVYRGDJLEJGVTFJCFZCSPTDCREAMZ573VF4D) | [YieldBlent Pool](deployments/mainnet-v3-yieldblent-pool.json) |
 | YieldBlent oracle | [`CDN7JD6SP32RZHB3DHK4S4AWCCQF6GYIUO455UCR4RGRZILZDRD24N36`](https://stellar.expert/explorer/public/contract/CDN7JD6SP32RZHB3DHK4S4AWCCQF6GYIUO455UCR4RGRZILZDRD24N36) | [YieldBlent Pool](deployments/mainnet-v3-yieldblent-pool.json) |
+
+The supplemental lockup backfill was deployed from its own source repository
+after the core BLNT V3 release. It is not part of the frozen `v3.0.2` core
+contract artifacts.
 
 Pool-specific reserve assets are recorded in their respective pool deployment
 records and are not canonical protocol contracts.
