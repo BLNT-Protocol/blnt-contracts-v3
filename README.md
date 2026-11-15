@@ -9,12 +9,18 @@ independently developed and is not an official Blend release.
 The contract specification is composed by
 [docs/SYSTEM_SPEC.md](docs/SYSTEM_SPEC.md). It inherits the frozen behavior in
 [docs/V2_SYSTEM_SPEC.md](docs/V2_SYSTEM_SPEC.md) and defines intentional V3
-changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md).
+changes in [docs/V3_SYSTEM_SPEC.md](docs/V3_SYSTEM_SPEC.md). The
+[Blend V2 versus BLNT V3 safety and security comparison](docs/V2_V3_SECURITY_COMPARISON.md)
+evaluates the deployed V3 source against its inherited V2 baseline. The
+[immutable deployment security response plan](docs/IMMUTABLE_SECURITY_RESPONSE.md)
+defines the response process for a critical finding in contracts that cannot
+be patched in place.
 
 ## Audit status
 
 The V3-specific contract changes have not yet undergone an independent
-security audit.
+security audit. The safety and security comparison is a transparency and review
+aid, not a security certification or substitute for an independent audit.
 
 ## Immutability
 
