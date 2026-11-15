@@ -203,6 +203,82 @@ pub fn create_user_liq_auction_data(
     }
 }
 
+/// Create a complete borrower-exit basket after borrow permission is revoked.
+/// Unlike health-based liquidation, the pool selects every liability and a
+/// proportional slice of every collateral position without requiring the
+/// target to be unhealthy.
+pub fn create_borrower_exit_auction_data(e: &Env, user: &Address) -> AuctionData {
+    if user == &e.current_contract_address() || user == &storage::get_backstop(e) {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+    if storage::has_auction(e, &(AuctionType::UserLiquidation as u32), user) {
+        panic_with_error!(e, PoolError::AuctionInProgress);
+    }
+
+    let mut pool = Pool::load(e);
+    let user_state = User::load(e, user);
+    if !user_state.has_liabilities() || !user_state.has_collateral() {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+    if user_state.positions.effective_count() > pool.config.max_positions {
+        panic_with_error!(e, PoolError::MaxPositionsExceeded);
+    }
+
+    let position_data = PositionData::calculate_from_positions(e, &mut pool, &user_state.positions);
+    if position_data.liability_raw <= 0 || position_data.collateral_raw <= 0 {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+
+    let avg_cf = position_data.collateral_base.fixed_div_floor(
+        e,
+        &position_data.collateral_raw,
+        &position_data.scalar,
+    );
+    let avg_lf = position_data.liability_base.fixed_div_floor(
+        e,
+        &position_data.liability_raw,
+        &position_data.scalar,
+    );
+    if avg_lf <= 0 {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+    let incentive = (position_data.scalar
+        - avg_cf.fixed_div_ceil(e, &avg_lf, &position_data.scalar))
+    .fixed_div_ceil(e, &(2 * position_data.scalar), &position_data.scalar)
+        + position_data.scalar;
+    let required_collateral =
+        position_data
+            .liability_raw
+            .fixed_mul_floor(e, &incentive, &position_data.scalar);
+    let mut collateral_pct =
+        required_collateral.fixed_div_ceil(e, &position_data.collateral_raw, &position_data.scalar);
+    if collateral_pct > position_data.scalar {
+        collateral_pct = position_data.scalar;
+    }
+
+    let reserve_list = storage::get_res_list(e);
+    let mut auction = AuctionData {
+        bid: map![e],
+        lot: map![e],
+        block: e.ledger().sequence() + 1,
+    };
+    for (index, amount) in user_state.positions.liabilities.iter() {
+        auction.bid.set(reserve_list.get_unchecked(index), amount);
+    }
+    for (index, amount) in user_state.positions.collateral.iter() {
+        let lot_amount = amount.fixed_mul_ceil(e, &collateral_pct, &position_data.scalar);
+        if lot_amount > 0 {
+            auction
+                .lot
+                .set(reserve_list.get_unchecked(index), lot_amount);
+        }
+    }
+    if auction.bid.is_empty() || auction.lot.is_empty() {
+        panic_with_error!(e, PoolError::InvalidLiquidation);
+    }
+    auction
+}
+
 pub fn fill_user_liq_auction(
     e: &Env,
     pool: &mut Pool,
@@ -228,7 +304,11 @@ mod tests {
         auctions::auction::AuctionType,
         pool::Positions,
         storage::{self, PoolConfig},
-        testutils::{self, create_pool},
+        testutils::{
+            self, create_pool, create_pool_with_access_controller, MockAccessController,
+            MockAccessControllerClient,
+        },
+        PoolClient, Request,
     };
 
     use super::*;
@@ -252,7 +332,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -300,7 +380,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -336,7 +416,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -372,7 +452,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -408,7 +488,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 100,
             network_id: Default::default(),
             base_reserve: 10,
@@ -440,7 +520,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -539,7 +619,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -638,7 +718,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -737,7 +817,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -836,7 +916,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -950,7 +1030,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1070,7 +1150,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1170,7 +1250,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1270,7 +1350,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1379,7 +1459,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1533,7 +1613,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1649,7 +1729,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1765,7 +1845,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1881,7 +1961,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -1992,7 +2072,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2103,7 +2183,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2213,7 +2293,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2318,7 +2398,7 @@ mod tests {
 
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2422,7 +2502,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 50,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2515,7 +2595,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2625,7 +2705,7 @@ mod tests {
 
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 200 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 200,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -2697,7 +2777,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2807,7 +2887,7 @@ mod tests {
             //scale up modifiers
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 200 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 200,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -2840,7 +2920,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -2950,7 +3030,7 @@ mod tests {
 
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 200 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 200,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -3016,7 +3096,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -3127,7 +3207,7 @@ mod tests {
 
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 220 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 220,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -3204,7 +3284,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -3319,7 +3399,7 @@ mod tests {
 
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 220 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 220,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -3403,7 +3483,7 @@ mod tests {
         e.mock_all_auths();
         e.ledger().set(LedgerInfo {
             timestamp: 12345,
-            protocol_version: 22,
+            protocol_version: 27,
             sequence_number: 175,
             network_id: Default::default(),
             base_reserve: 10,
@@ -3514,7 +3594,7 @@ mod tests {
 
             e.ledger().set(LedgerInfo {
                 timestamp: 12345 + 220 * 5,
-                protocol_version: 22,
+                protocol_version: 27,
                 sequence_number: 176 + 220,
                 network_id: Default::default(),
                 base_reserve: 10,
@@ -3585,5 +3665,126 @@ mod tests {
             assert_eq!(backstop_positions.collateral.len(), 0);
             assert_eq!(backstop_positions.supply.len(), 0);
         });
+    }
+
+    #[test]
+    fn borrower_exit_auction_selects_all_debt_and_proportional_collateral() {
+        let e = Env::default();
+        e.mock_all_auths_allowing_non_root_auth();
+        e.cost_estimate().budget().reset_unlimited();
+        e.ledger().set(LedgerInfo {
+            timestamp: 12345,
+            protocol_version: 27,
+            sequence_number: 50,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 10,
+            min_persistent_entry_ttl: 10,
+            max_entry_ttl: 3_110_400,
+        });
+
+        let admin = Address::generate(&e);
+        let user = Address::generate(&e);
+        let controller = e.register(MockAccessController, ());
+        let pool_address = create_pool_with_access_controller(&e, Some(controller.clone()));
+        let (oracle, oracle_client) = testutils::create_mock_oracle(&e);
+        let (collateral_asset, _) = testutils::create_token_contract(&e, &admin);
+        let (liability_asset, _) = testutils::create_token_contract(&e, &admin);
+
+        let (mut collateral_config, mut collateral_data) = testutils::default_reserve_meta();
+        collateral_config.index = 0;
+        collateral_config.c_factor = 0_8000000;
+        collateral_config.l_factor = 0_9000000;
+        collateral_data.b_supply = 100_0000000;
+        collateral_data.last_time = 12345;
+        testutils::create_reserve(
+            &e,
+            &pool_address,
+            &collateral_asset,
+            &collateral_config,
+            &collateral_data,
+        );
+        let (mut liability_config, mut liability_data) = testutils::default_reserve_meta();
+        liability_config.index = 1;
+        liability_config.c_factor = 0_8000000;
+        liability_config.l_factor = 0_9000000;
+        liability_data.d_supply = 50_0000000;
+        liability_data.last_time = 12345;
+        testutils::create_reserve(
+            &e,
+            &pool_address,
+            &liability_asset,
+            &liability_config,
+            &liability_data,
+        );
+        oracle_client.set_data(
+            &admin,
+            &Asset::Other(Symbol::new(&e, "USD")),
+            &vec![
+                &e,
+                Asset::Stellar(collateral_asset.clone()),
+                Asset::Stellar(liability_asset.clone()),
+            ],
+            &7,
+            &300,
+        );
+        oracle_client.set_price_stable(&vec![&e, 2_0000000, 1_0000000]);
+
+        e.as_contract(&pool_address, || {
+            storage::set_pool_config(
+                &e,
+                &PoolConfig {
+                    oracle,
+                    min_collateral: 1_0000000,
+                    bstop_rate: 0_1000000,
+                    status: 0,
+                    max_positions: 4,
+                },
+            );
+            storage::set_user_positions(
+                &e,
+                &user,
+                &Positions {
+                    collateral: map![&e, (0u32, 100_0000000i128)],
+                    liabilities: map![&e, (1u32, 50_0000000i128)],
+                    supply: map![&e],
+                },
+            );
+        });
+        MockAccessControllerClient::new(&e, &controller).set_permissions(
+            &pool_address,
+            &user,
+            &crate::access::RESERVE_SUPPLY_ALLOWED,
+        );
+
+        let client = PoolClient::new(&e, &pool_address);
+        let auction = client.new_forced_exit_auction(&user);
+        assert_eq!(auction.bid.get(liability_asset), Some(50_0000000));
+        let collateral_lot = auction.lot.get(collateral_asset.clone()).unwrap();
+        assert!(collateral_lot > 0);
+        assert!(collateral_lot <= 100_0000000);
+        assert_eq!(auction.block, 51);
+        assert_eq!(
+            client.get_auction(&(AuctionType::UserLiquidation as u32), &user),
+            auction
+        );
+        assert!(client
+            .try_submit(
+                &user,
+                &user,
+                &user,
+                &vec![
+                    &e,
+                    Request {
+                        request_type: crate::RequestType::DeleteLiquidationAuction as u32,
+                        address: collateral_asset,
+                        amount: 0,
+                    },
+                ],
+            )
+            .is_err());
+        assert!(e.as_contract(&pool_address, || {
+            storage::has_borrower_exit_auction(&e, &user)
+        }));
     }
 }

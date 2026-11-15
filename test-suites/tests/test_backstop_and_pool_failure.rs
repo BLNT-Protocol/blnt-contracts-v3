@@ -29,7 +29,7 @@ fn test_backstop_and_pool_failure() {
 
     /*
      * Backstop starts with 50,000 LP tokens, worth about
-     * 12500 USDC and 500k BLND, or about 62,500 USDC total
+     * 12500 USDC and 500k BLNT, or about 62,500 USDC total
      * at the setup LP weights.
      *
      * Frodo positions:
@@ -203,14 +203,28 @@ fn test_backstop_and_pool_failure() {
 
     // create bad debt auction to empty the backstop
     let pool_backstop_data = fixture.backstop.pool_data(&pool_fixture.pool.address);
-    assert!(pool_backstop_data.tokens > 0);
-    assert!(pool_backstop_data.shares > 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().tokens > 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().shares > 0);
 
+    let elrond_backstop_collateral = 100_000 * stable_scalar;
+    pool_fixture.pool.submit(
+        &elrond,
+        &elrond,
+        &elrond,
+        &vec![
+            &fixture.env,
+            Request {
+                request_type: RequestType::SupplyCollateral as u32,
+                address: stable.address.clone(),
+                amount: elrond_backstop_collateral,
+            },
+        ],
+    );
     let bad_debt_auction = pool_fixture.pool.new_auction(
         &1,
         &fixture.backstop.address,
-        &vec![&fixture.env, stable.address.clone()],
-        &vec![&fixture.env, fixture.lp.address.clone()],
+        &vec![&fixture.env],
+        &vec![&fixture.env],
         &100,
     );
     assert_eq!(bad_debt_auction.bid.len(), 1);
@@ -218,18 +232,20 @@ fn test_backstop_and_pool_failure() {
         bad_debt_auction.bid.get_unchecked(stable.address.clone()),
         bad_debt_1
     );
-    assert_eq!(bad_debt_auction.lot.len(), 1);
+    let blnt_usdc_token = fixture.backstop.backstop_token(
+        &backstop::BackstopTier::SecondLoss,
+        &pool_fixture.pool.address,
+    );
     assert_eq!(
-        bad_debt_auction
-            .lot
-            .get_unchecked(fixture.lp.address.clone()),
-        pool_backstop_data.tokens
+        bad_debt_auction.lot.get(blnt_usdc_token).unwrap(),
+        pool_backstop_data.tiers.get(1).unwrap().tokens
     );
 
     // wait 200 blocks (plus 1 block for auction to start)
     // to fill the full auction (take all backstop tokens)
     fixture.jump_with_sequence(200 * 5 + 5);
 
+    fixture.backstop.distribute();
     pool_fixture.pool.submit(
         &elrond,
         &elrond,
@@ -246,12 +262,17 @@ fn test_backstop_and_pool_failure() {
                 address: stable.address.clone(),
                 amount: elrond_stable_balance / 2,
             },
+            Request {
+                request_type: RequestType::WithdrawCollateral as u32,
+                address: stable.address.clone(),
+                amount: elrond_backstop_collateral * 2,
+            },
         ],
     );
 
     let pool_backstop_data = fixture.backstop.pool_data(&pool_fixture.pool.address);
-    assert_eq!(pool_backstop_data.tokens, 0);
-    assert!(pool_backstop_data.shares > 0);
+    assert_eq!(pool_backstop_data.tiers.get(1).unwrap().tokens, 0);
+    assert!(pool_backstop_data.tiers.get(1).unwrap().shares > 0);
 
     // ***** Liquidate Pippin and auction off the bad debt *****
 
@@ -321,7 +342,7 @@ fn test_backstop_and_pool_failure() {
     // d_rate is barely above 1
     assert_approx_eq_rel(bad_debt_2, 60_000 * stable_scalar, 0_001000);
 
-    // default the bad debt
+    // default the bad debt after every tier is verified exhausted
     pool_fixture.pool.bad_debt(&fixture.backstop.address);
 
     // check b_rate loss (7 decimals)

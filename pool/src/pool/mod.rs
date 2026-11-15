@@ -2,7 +2,10 @@ mod actions;
 pub use actions::{FlashLoan, Request, RequestType};
 
 mod bad_debt;
-pub use bad_debt::{bad_debt, check_and_handle_backstop_bad_debt, check_and_handle_user_bad_debt};
+pub use bad_debt::{bad_debt, check_and_handle_user_bad_debt};
+
+mod clawback;
+pub use clawback::execute_clawback;
 
 mod config;
 pub use config::{
@@ -14,6 +17,9 @@ mod health_factor;
 pub use health_factor::PositionData;
 
 mod interest;
+
+mod permissioned;
+pub use permissioned::execute_force_withdrawal;
 
 mod submit;
 
@@ -30,9 +36,7 @@ mod user;
 pub use user::{Positions, User};
 
 mod status;
-pub use status::{
-    calc_pool_backstop_threshold, execute_set_pool_status, execute_update_pool_status,
-};
+pub use status::{execute_set_pool_status, execute_update_pool_status};
 
 mod gulp;
-pub use gulp::execute_gulp;
+pub use gulp::{execute_gulp, execute_reconcile_loss};

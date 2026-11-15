@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015"
+  },
+  "generated_at": "2026-10-25T19:20:23Z",
+  "deployer": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+  "controller": {
+    "address": "GAFN3MT4JMFDMMXFCIO54Y532VJQK43YQC6FCVFWZNGH26AXYQK76QR4",
+    "locked": true,
+    "thresholds": [
+      100,
+      100,
+      100
+    ],
+    "master_weight": 0,
+    "residual_xlm": "17.4608599",
+    "creation": {
+      "transaction_hash": "c3a95fb56bdd581c2e5544285252e68e69bf87fa58f8621d12c10872cf6f0db5",
+      "ledger": 65134025,
+      "created_at": "2026-10-25T19:18:28Z"
+    }
+  },
+  "artifact": {
+    "release": "v1.1.0_contracts_pkg1.0.0_cli25.1.0",
+    "release_url": "https://github.com/CometDEX/comet-contracts-v1/releases/download/v1.1.0_contracts_pkg1.0.0_cli25.1.0/contracts_v1.0.0.wasm",
+    "sha256": "d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687",
+    "source_commit": "b3a2d827ed6c158341f8e67ea91eb3b0395d3871"
+  },
+  "assets": {
+    "blnt": "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS",
+    "usdc": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+    "xlm": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"
+  },
+  "pools": {
+    "blnt_usdc": {
+      "contract_id": "CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3",
+      "tokens": [
+        "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS",
+        "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
+      ],
+      "weights": [
+        8000000,
+        2000000
+      ],
+      "swap_fee": 30000,
+      "init_balances": [
+        "10000000000",
+        "11750000"
+      ],
+      "join_balances": [
+        "9990000000000",
+        "11738250000"
+      ],
+      "wallet_lp_join": "999000000000",
+      "final_reserves": [
+        "10000000000000",
+        "11750000000"
+      ],
+      "final_lp_supply": "1000000000000",
+      "creation": {
+        "transaction_hash": "b15a2fddc508ddb534c8aa45a2a0b1472d76727497a734dcf4791e4251cfa302",
+        "ledger": 65134030,
+        "created_at": "2026-10-25T19:18:53Z"
+      }
+    },
+    "blnt_xlm": {
+      "contract_id": "CA5HX3D47PQZWC2E7VWXCKH4534P2NOJEOIXAWU47MI4QV2FQUYY3FLC",
+      "tokens": [
+        "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS",
+        "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"
+      ],
+      "weights": [
+        8000000,
+        2000000
+      ],
+      "swap_fee": 30000,
+      "init_balances": [
+        "10000000000",
+        "70000000"
+      ],
+      "join_balances": [
+        "9990000000000",
+        "69930000000"
+      ],
+      "wallet_lp_join": "999000000000",
+      "final_reserves": [
+        "10000000000000",
+        "70000000000"
+      ],
+      "final_lp_supply": "1000000000000",
+      "creation": {
+        "transaction_hash": "5bf932599918cd6b4af75694b492fa07dcd91edb28ecd7eb30eafd3782c35a55",
+        "ledger": 65134032,
+        "created_at": "2026-10-25T19:19:03Z"
+      }
+    }
+  },
+  "transactions": {
+    "create-comet-controller": "c3a95fb56bdd581c2e5544285252e68e69bf87fa58f8621d12c10872cf6f0db5",
+    "trust-controller-blnt": "35118c9a9afa7bc6b61f66b7c649faf933b94093b143a109ee86b850cfe1edd5",
+    "trust-controller-usdc": "0f361573fe50ddfc226779a68fd79f42608156b3d78d903a4892e39fabfe7bca",
+    "deploy-blnt-usdc": "b15a2fddc508ddb534c8aa45a2a0b1472d76727497a734dcf4791e4251cfa302",
+    "deploy-blnt-xlm": "5bf932599918cd6b4af75694b492fa07dcd91edb28ecd7eb30eafd3782c35a55",
+    "fund-controller-blnt": "700efe9d089e3a8776bdf888784336e7edbd7b7adabb888cd11ca14b2c2df78c",
+    "fund-controller-usdc": "e429e836eac9a64b7c971012ccf61865fffdce6433fa7adbad8bb2525cdfe83b",
+    "initialize-blnt-usdc": "074002177acf8e65a990efefa9f404b888345ef482481df7f84c468ace130ec5",
+    "initialize-blnt-xlm": "abadeb9fe597f03b48c3c2f33b9b7ad34b656c6b7780380d6a870d25ec3ba60f",
+    "join-blnt-usdc": "69e3acf8f9b0274c5d8192c39438e959d179c7afaec350dce2abf5b98eb06df9",
+    "join-blnt-xlm": "b52929a40de0e0e446e5f493d4ae8ada44406138b2feebd874d8668093933873",
+    "lock-comet-controller": "dcfe8e88bcd0c886fc0d54bf8cc933c2079a377f53e29c343667e6e35e01e72f"
+  },
+  "verified_at": "2026-10-25T19:20:23Z"
+}
