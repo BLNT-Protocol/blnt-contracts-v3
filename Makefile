@@ -2,17 +2,35 @@ override MAX_WASM_BYTES := 120000
 PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-contracts-v3
+MAINNET_FIXTURE_SHA256 := 58946b483f90329c020a25680cb4bc5217f8ace4a93493d8a2df74680d524e11
+MAINNET_FIXTURE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/blnt-contracts-v3/claim-v1.json
+MAINNET_FIXTURE_API := repos/roman-karpovich/blend-utils/contents/pool/claim-replay/fixtures/core-claim-v1.json?ref=7b407135d50202796bf9206b47cec86650a6a853
 
-.PHONY: default test build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
+.PHONY: default test test-mainnet prepare-mainnet-fixture build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
 
 default: build
 
 build-pool-dependency:
 	cargo build --target wasm32v1-none --release --locked --package backstop
 
-test: build
+test: test-mainnet
 	cargo test --workspace --tests --locked
 	cargo check --manifest-path test-suites/fuzz/Cargo.toml --all-targets --locked
+
+# Preparation is explicit. Tests never refresh network state or fetch a fixture.
+prepare-mainnet-fixture:
+	@mkdir -p "$$(dirname "$(MAINNET_FIXTURE)")"
+	@set -eu; \
+		if test -f "$(MAINNET_FIXTURE)" && \
+			printf '%s  %s\n' '$(MAINNET_FIXTURE_SHA256)' '$(MAINNET_FIXTURE)' | shasum -a 256 -c --status; then exit 0; fi; \
+		tmp="$$(mktemp "$(MAINNET_FIXTURE).XXXXXX")"; \
+		trap 'rm -f "$$tmp"' EXIT; \
+		gh api --hostname github.com -H 'Accept: application/vnd.github.raw+json' '$(MAINNET_FIXTURE_API)' > "$$tmp"; \
+		printf '%s  %s\n' '$(MAINNET_FIXTURE_SHA256)' "$$tmp" | shasum -a 256 -c; \
+		mv "$$tmp" "$(MAINNET_FIXTURE)"
+
+test-mainnet: build
+	BLNT_MAINNET_FIXTURE="$(MAINNET_FIXTURE)" cargo test --manifest-path test-suites/mainnet/Cargo.toml --locked
 
 verify-comet-v1.1:
 	test "$$(shasum -a 256 comet.wasm | cut -d ' ' -f 1)" = "$(COMET_V1_1_WASM_SHA256)"
