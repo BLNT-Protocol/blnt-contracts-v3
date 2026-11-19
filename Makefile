@@ -2,8 +2,9 @@ override MAX_WASM_BYTES := 120000
 PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-contracts-v3
+MAINNET_FIXTURE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/blnt-contracts-v3/oracle-outage-v1.json
 
-.PHONY: default test build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
+.PHONY: default test test-mainnet prepare-mainnet-fixture build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
 
 default: build
 
@@ -13,6 +14,19 @@ build-pool-dependency:
 test: build
 	cargo test --workspace --tests --locked
 	cargo check --manifest-path test-suites/fuzz/Cargo.toml --all-targets --locked
+
+# Capture is explicit and read-only. Existing snapshots are never refreshed.
+prepare-mainnet-fixture: build
+	@mkdir -p "$$(dirname "$(MAINNET_FIXTURE)")"
+	@set -eu; \
+		if test -f "$(MAINNET_FIXTURE)"; then \
+			printf 'Using existing snapshot: %s\n' '$(MAINNET_FIXTURE)'; \
+		else \
+			BLNT_CAPTURE_OUTPUT="$(MAINNET_FIXTURE)" cargo test --manifest-path test-suites/mainnet/Cargo.toml --locked capture_fixture -- --ignored --nocapture; \
+		fi
+
+test-mainnet: build
+	BLNT_MAINNET_FIXTURE="$(MAINNET_FIXTURE)" cargo test --manifest-path test-suites/mainnet/Cargo.toml --locked -- --nocapture
 
 verify-comet-v1.1:
 	test "$$(shasum -a 256 comet.wasm | cut -d ' ' -f 1)" = "$(COMET_V1_1_WASM_SHA256)"

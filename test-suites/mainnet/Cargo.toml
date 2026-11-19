@@ -1,0 +1,14 @@
+[package]
+name = "blnt-mainnet-tests"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.91.1"
+publish = false
+license = "AGPL-3.0"
+
+# Keep the Protocol 29 replay host outside the production SDK 27 workspace.
+[workspace]
+
+[dev-dependencies]
+kanatoko = { version = "=29.1.2", features = ["capture"] }
+sha2 = "=0.10.9"
