@@ -20,11 +20,69 @@ const OWNER: &str = "GDJSH2NU2WF6J4P5DL4522DUCABWSTZOKFQ7BHBCFYQ3QKC6FRYWP6OL";
 const COMET: &str = "CA5HX3D47PQZWC2E7VWXCKH4534P2NOJEOIXAWU47MI4QV2FQUYY3FLC";
 const BLNT: &str = "CCBNWP5L7ZSXA3DBWCMFAVKFVRW3ZHWO7B5J557W42O64DDZNPJP7VDS";
 const XLM: &str = "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA";
-const FIXTURE_SHA256: &str = "58946b483f90329c020a25680cb4bc5217f8ace4a93493d8a2df74680d524e11";
 const NETWORK: &str = "Public Global Stellar Network ; September 2015";
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+// Pin the deployed system, not one contributor's capture of a particular ledger.
+fn validate_capture(path: &Path) -> CapturedFixture {
+    let captured = CapturedFixture::from_file(path, NETWORK)
+        .expect("a complete mainnet capture with valid integrity digests is required");
+    assert_eq!(captured.provenance().protocol_version(), 29);
+    let env = kanatoko::soroban_sdk::Env::default();
+    let entries = &captured.frozen_fixture().ledger_snapshot().ledger_entries;
+    for (contract, expected) in [
+        (
+            BACKSTOP,
+            "0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f",
+        ),
+        (
+            COMET,
+            "d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687",
+        ),
+        (
+            "CDQMIKIHKA5UY3FQJ2UDTLNX3GOPD3GPNZWSPTOBVOHEUMQJQXOPC7Y3",
+            "d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687",
+        ),
+        (
+            "CDSO6FQSBJ3U3AJHBNNLHHKSMKTTDDN3GLGF3KZTMXBFV7SVB43ZJERT",
+            "4fa7d99dee6fe99cad5d07a46ee39e437dc287e53e3ab1f3ccc0aacf7e6cd6c5",
+        ),
+    ] {
+        let address = xdr::ScAddress::from(&Address::from_str(&env, contract));
+        let hash = entries
+            .iter()
+            .find_map(|(_, (entry, _))| {
+                let xdr::LedgerEntryData::ContractData(data) = &entry.data else {
+                    return None;
+                };
+                if data.contract != address || data.key != xdr::ScVal::LedgerKeyContractInstance {
+                    return None;
+                }
+                let xdr::ScVal::ContractInstance(instance) = &data.val else {
+                    return None;
+                };
+                let xdr::ContractExecutable::Wasm(hash) = &instance.executable else {
+                    return None;
+                };
+                Some(hash)
+            })
+            .expect("canonical deployed instance must be captured");
+        assert_eq!(hex(&hash.0), expected, "unexpected deployment: {contract}");
+        let code = entries
+            .iter()
+            .find_map(|(_, (entry, _))| {
+                let xdr::LedgerEntryData::ContractCode(code) = &entry.data else {
+                    return None;
+                };
+                (code.hash == *hash).then_some(code)
+            })
+            .expect("deployed WASM must be captured");
+        assert_eq!(hex(&Sha256::digest(code.code.as_slice())), expected);
+    }
+    captured
 }
 
 // Exclude code entries and normalize only the backstop's executable reference.
@@ -257,15 +315,15 @@ fn replay(path: &Path, candidate: bool) -> Outcome {
 #[test]
 fn source_backstop_matches_mainnet_claim_after_a_market_move() {
     let path = std::env::var_os("BLNT_MAINNET_FIXTURE")
-        .expect("run make test-mainnet to select the pinned fixture");
+        .expect("run make test-mainnet to select the local snapshot");
     let bytes = std::fs::read(&path).expect("run make prepare-mainnet-fixture before testing");
-    assert_eq!(
-        hex(&Sha256::digest(bytes)),
-        FIXTURE_SHA256,
-        "fixture checksum mismatch"
+    let captured = validate_capture(Path::new(&path));
+    println!(
+        "ledger={} ledger_hash={} fixture_sha256={}",
+        captured.provenance().ledger_sequence(),
+        captured.provenance().ledger_hash(),
+        hex(&Sha256::digest(bytes))
     );
-    let captured = CapturedFixture::from_file(&path, NETWORK).unwrap();
-    assert_eq!(captured.provenance().ledger_sequence(), 65_561_470);
     let deployed = replay(Path::new(&path), false);
     println!(
         "deployed: reward={} before={} after={}",
@@ -282,7 +340,7 @@ fn capture_fixture() {
     let path = std::env::var_os("BLNT_CAPTURE_OUTPUT").expect("set BLNT_CAPTURE_OUTPUT");
     assert!(
         !Path::new(&path).exists(),
-        "do not replace the pinned fixture"
+        "choose a new output path; existing snapshots are never replaced"
     );
     mainnet()
         .cache(&path)
@@ -291,8 +349,17 @@ fn capture_fixture() {
             scenario(fork, false);
         })
         .expect("capture and strict replay must succeed");
+    let captured = validate_capture(Path::new(&path));
     let deployed = replay(Path::new(&path), false);
     let candidate = replay(Path::new(&path), true);
     assert_eq!(candidate, deployed);
-    println!("{candidate:?}");
+    println!(
+        "captured ledger={} ledger_hash={} reward={} before={} after={} shares={}",
+        captured.provenance().ledger_sequence(),
+        captured.provenance().ledger_hash(),
+        candidate.reward,
+        candidate.before,
+        candidate.after,
+        candidate.shares
+    );
 }

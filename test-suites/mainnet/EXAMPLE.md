@@ -24,6 +24,10 @@ minimum rejects with contract error 20 and leaves the entire ledger unchanged.
 A retry with a refreshed positive minimum receives exactly the previewed LP and
 credits the same user's originating tier. A further claim receives zero.
 
+The following is an example run from ledger 65,561,470. A new capture can have
+different amounts; the test checks the same invariants and deployed/source
+agreement instead of requiring these historical numbers.
+
 | Measurement | Deployed and source-built backstop |
 | --- | ---: |
 | Accrued reward consumed once | 0.5999136 BLNT |
@@ -43,16 +47,20 @@ the backstop code is substituted. This tests expected behavior, not a new defect
 
 ## Fixture and authorization
 
-The [external fixture](https://github.com/roman-karpovich/blend-utils/blob/7b407135d50202796bf9206b47cec86650a6a853/pool/claim-replay/fixtures/core-claim-v1.json)
-is pinned to a full commit and SHA-256
-`58946b483f90329c020a25680cb4bc5217f8ace4a93493d8a2df74680d524e11`.
-It contains 27 present and 3 confirmed-absent entries from mainnet ledger
-65,561,470, hash
-`e8074b39029b335ebfa104b069bd5beb9f5df46daf7e8a1bdb5f07b5ee8d0427`.
-The deployed backstop code hash is
+Preparation captures state directly from the public Stellar RPC using Kanatoko
+and saves it in the user's local cache, outside this repository. It requires no
+GitHub account, contributor-hosted artifact or shared fixture download. Repeating
+preparation keeps an existing snapshot; it never silently refreshes it.
+
+Replay validates the bundle's integrity digests, mainnet identity, Protocol 29,
+and the deployed backstop, emitter and both Comet WASM hashes. Those code hashes
+come from the [canonical deployment registry](../../deployments/mainnet-v3-core.json)
+and official Comet artifact. The deployed backstop hash is
 `0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f`.
-The bundle stays outside this repository and is downloaded into the user's cache.
-The fixture's BLNT/Comet code retains its AGPL provenance in the external package.
+The test prints the ledger number, ledger hash and file SHA-256 with
+`--nocapture`. Keeping the same file reproduces the same state. A fresh capture
+requires this position to have positive claimable rewards and a supported ledger;
+unavailable state or changed deployments fail rather than substituting mock data.
 
 Protocol balances, positions, rewards and reserves come from the snapshot.
 Only the trader is synthetic: Kanatoko explicitly funds it with 10 XLM, creates
@@ -63,19 +71,20 @@ Local code replacement does not demonstrate an authorized upgrade path.
 
 ## Run
 
-With the repository toolchain, Stellar CLI and authenticated GitHub CLI available:
+With the repository toolchain and Stellar CLI available:
 
 ```sh
 make prepare-mainnet-fixture
 make test-mainnet
 ```
 
-The replay is an explicit local test target. The existing `make test` and CI
-workflow retain their original behavior and do not require the fixture. The
-mainnet test never calls RPC or refreshes its fixture; a missing or altered bundle
-fails. Dependencies may need downloading on the first Cargo invocation.
+The first preparation uses read-only RPC calls. The replay is an explicit local
+test target and runs offline from that snapshot. The existing `make test` and CI
+workflow retain their original behavior and do not require a capture. Missing,
+corrupt or incompatible bundles fail. Dependencies may need downloading on the
+first Cargo invocation.
 
-To select an already downloaded bundle explicitly:
+To select an existing capture explicitly:
 
 ```sh
 make test-mainnet MAINNET_FIXTURE=/absolute/path/to/core-claim-v1.json
@@ -90,5 +99,5 @@ BLNT_CAPTURE_OUTPUT=/absolute/path/to/a-new-file.json \
   capture_fixture -- --ignored --nocapture
 ```
 
-Capture does not update the pin or published artifact. Any refreshed fixture
-requires review of its ledger, code hashes, result table and checksum.
+Use a different output path when intentionally capturing another ledger. The
+test reports each capture's identity and keeps the deployed-code checks fixed.
