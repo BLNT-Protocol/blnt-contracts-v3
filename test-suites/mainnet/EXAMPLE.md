@@ -1,73 +1,65 @@
-# Claim retry against captured mainnet state
+# Repay during an oracle outage
 
-This test runs the backstop WASM built from the current checkout against a saved
-BLNT mainnet system. Kanatoko 29.1.2 loads the state, locally substitutes that WASM
-at the existing backstop address, and runs the same scenario against both the
-deployed and source-built code. Their settlement results must match.
+This test protects partial repayment and collateral top-ups when YieldBlent's
+configured oracle stops providing an XLM price. Further borrowing and collateral
+withdrawals must fail atomically, while the borrower can still reduce risk.
 
-The production workspace stays on SDK 27.0.3 and Rust 1.91.1. This separate test
-workspace uses a Protocol 29 host because the saved ledger is Protocol 29. It
-does not link the production Rust crates or change their dependency resolution.
-The generated client and replacement code both come from
-`target/wasm32v1-none/optimized/backstop.wasm`, built by `make` before testing.
+Kanatoko 29.1.2 executes the actual pool, aggregator, Reflector and asset contracts
+from a mainnet capture. It repeats the scenario with the optimized pool WASM
+built from the current checkout at the same address. Both runs must satisfy the
+assertions and finish with identical storage and TTLs, excluding the pool's code.
+
+## Additional coverage
+
+The common oracle mock's `set_price_stable` returns the current ledger timestamp,
+so time jumps do not make those prices unavailable. The existing
+[`test_submit_no_liabilities_does_not_load_oracle`](../../pool/src/pool/submit.rs#L1121)
+finishes with no debt. Here **debt remains positive during the outage**.
+The aggregator's own 900/901-second boundary is already tested upstream; this
+scenario covers BLNT's continued risk-reducing operations across that boundary.
 
 ## Scenario and results
 
-The existing YieldBlent position belongs to
-`GDJSH2NU2WF6J4P5DL4522DUCABWSTZOKFQ7BHBCFYQ3QKC6FRYWP6OL` in pool
-`CAUTPSQDAJEUV5XEU3EXFVYRGDJLEJGVTFJCFZCSPTDCREAMZ573VF4D`.
-Its FirstLoss tier compounds into the canonical BLNT:XLM Comet pool.
+The local borrower supplies 100 XLM and borrows 1 USDC from the deployed
+YieldBlent pool. No pool reserves, oracle prices or existing positions are
+overwritten. Time is advanced relative to the captured XLM price timestamp,
+without introducing new Reflector rounds.
 
-A local trader sells 1% of the Comet BLNT reserve. That actual Comet swap changes
-the LP output of the pending claim enough to cross a 0.5% minimum. The stale
-minimum rejects with contract error 20 and leaves the entire ledger unchanged.
-A retry with a refreshed positive minimum receives exactly the previewed LP and
-credits the same user's originating tier. A further claim receives zero.
+| Operation | Result for deployed and source-built pool |
+| --- | --- |
+| Borrow another 0.01 USDC at price age 900 seconds | Succeeds; wallet has 1.01 USDC |
+| Read XLM price at age 901 seconds | Unavailable; USDC base price remains 1 |
+| Borrow 0.01 USDC or withdraw 1 XLM collateral | Aborts; entire ledger unchanged |
+| Repay 0.5 USDC with debt remaining | Exact wallet debit, pool credit and debt-share reduction |
+| Add 10 XLM collateral with debt remaining | Exact custody/share increase; debt shares unchanged |
 
-The following is an example run from ledger 65,561,470. A new capture can have
-different amounts; the test checks the same invariants and deployed/source
-agreement instead of requiring these historical numbers.
+Example from ledger **65,562,065**, with XLM round timestamp `1795096200`:
 
-| Measurement | Deployed and source-built backstop |
-| --- | ---: |
-| Accrued reward consumed once | 0.5999136 BLNT |
-| Claim output before trade | 0.0520627 LP |
-| Old minimum | 0.0518023 LP |
-| Claim output after trade | 0.0515472 LP |
-| Refreshed minimum | 0.0512894 LP |
-| Successful retry | 0.0515472 LP |
-| Shares credited | 0.0515472 shares |
-| Trader input | 53,527.3300953 BLNT |
-| Trader output | 2,241.6062021 XLM |
+```text
+candidate=false oracle_round=1795096200 boundary=1795097100 debt_shares=10090772->5095343 partial_repay=5000000 added_collateral=100000000
+candidate=true oracle_round=1795096200 boundary=1795097100 debt_shares=10090772->5095343 partial_repay=5000000 added_collateral=100000000
+```
 
-The test checks exact reward/LP custody deltas, share conversion using the saved
-pool's share/token ratio, unchanged queued withdrawals and other-tier position,
-and equality of both final positions. Storage and TTLs are unchanged when only
-the backstop code is substituted. This tests expected behavior, not a new defect.
+Amounts above use seven decimal places. New captures can produce different
+debt shares; the test derives expected changes from the captured reserve rates.
+The unavailable-price path aborts while the pool unwraps `None`, before its
+separate one-day stale-price check. This is expected behavior, not a new defect.
 
-## Fixture and authorization
+### Regression sensitivity
 
-Preparation captures state directly from the public Stellar RPC using Kanatoko
-and saves it in the user's local cache, outside this repository. It requires no
-GitHub account, contributor-hosted artifact or shared fixture download. Repeating
-preparation keeps an existing snapshot; it never silently refreshes it.
+A temporary mutation moved `PositionData::calculate_from_positions` before the
+`check_health` condition, leaving health assertions conditional. This plausible
+eager-valuation refactor makes partial repayment depend on the collateral oracle.
+At base `771059f6dd232fd35ea29b7b2a987f0e13bb2372`:
 
-Replay validates the bundle's integrity digests, mainnet identity, Protocol 29,
-and the deployed backstop, emitter and both Comet WASM hashes. Those code hashes
-come from the [canonical deployment registry](../../deployments/mainnet-v3-core.json)
-and official Comet artifact. The deployed backstop hash is
-`0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f`.
-The test prints the ledger number, ledger hash and file SHA-256 with
-`--nocapture`. Keeping the same file reproduces the same state. A fresh capture
-requires this position to have positive claimable rewards and a supported ledger;
-unavailable state or changed deployments fail rather than substituting mock data.
+- All 586 existing workspace tests passed with the mutated Rust source.
+- The 46 integration tests were then repeated with a freshly built mutated
+  optimized pool WASM and passed. They are a subset of the 586, not extra tests.
+- This replay passed for the deployed control and failed on the candidate's
+  0.5-USDC repayment because the aggregator returned no XLM price.
+- Restoring the original pool made the replay pass again.
 
-Protocol balances, positions, rewards and reserves come from the snapshot.
-Only the trader is synthetic: Kanatoko explicitly funds it with 10 XLM, creates
-a BLNT trustline, and mints the trade input in a local token-admin context.
-Owner/trader authorization is mocked using local source-account contexts.
-No real private key, signature, public-network transaction or upgrade is involved.
-Local code replacement does not demonstrate an authorized upgrade path.
+The mutation is not included. The deployed contract already behaves correctly.
 
 ## Run
 
@@ -78,26 +70,35 @@ make prepare-mainnet-fixture
 make test-mainnet
 ```
 
-The first preparation uses read-only RPC calls. The replay is an explicit local
-test target and runs offline from that snapshot. The existing `make test` and CI
-workflow retain their original behavior and do not require a capture. Missing,
-corrupt or incompatible bundles fail. Dependencies may need downloading on the
-first Cargo invocation.
+Preparation reads public Stellar RPC into a local cache outside the repository.
+It reuses an existing file without refreshing it; no GitHub account or hosted
+snapshot is needed. Replay is offline. Dependencies may need downloading on the
+first Cargo invocation. The existing `make test` and CI workflow are unchanged;
+they do not automatically run this opt-in test.
 
-To select an existing capture explicitly:
+To use another saved capture or intentionally prepare a new one, pass
+`MAINNET_FIXTURE=/absolute/path/to/oracle-outage.json` to the same commands.
+Choose a new path when refreshing. Preparation requires a supported ledger,
+a fresh XLM price and sufficient liquidity/configuration for the small loan;
+it fails instead of inventing missing state.
 
-```sh
-make test-mainnet MAINNET_FIXTURE=/absolute/path/to/core-claim-v1.json
-```
+## Scope and reproducibility
 
-The ignored capture test is an explicit, read-only maintenance operation. After
-building the contracts, it can write a new bundle and compare both code versions:
+The test validates bundle integrity, mainnet/Protocol 29 identity, the deployed
+pool and aggregator hashes from the [registry](../../deployments/mainnet-v3-yieldblent-pool.json),
+and captured WASM bytes against instance references, including Reflector.
+Reflector's hash is not pinned because that dependency is upgradeable. Keeping
+the same capture preserves its exact code and state. The test prints the ledger
+identity, capture SHA-256, source WASM hash and outcomes.
+Missing, corrupt or incompatible snapshots fail.
 
-```sh
-BLNT_CAPTURE_OUTPUT=/absolute/path/to/a-new-file.json \
-  cargo test --manifest-path test-suites/mainnet/Cargo.toml --locked \
-  capture_fixture -- --ignored --nocapture
-```
+Only the deterministic borrower, its initial 1,000 XLM, USDC trustline and local
+authorization are synthetic. No real keys, signatures or network transactions
+are used. Moving local time models absent feed updates, not a prediction about
+future mainnet state. Code substitution is local, not a deployed upgrade path.
 
-Use a different output path when intentionally capturing another ledger. The
-test reports each capture's identity and keeps the deployed-code checks fixed.
+The production SDK 27 workspace and build settings remain unchanged. The
+separate test package uses a Protocol 29 host to match the captured ledger.
+Local source-built WASM hashes differ from the deployment registry; this test
+establishes behavior for this scenario, not complete artifact reproducibility
+or general equivalence of deployed and source-built code.
