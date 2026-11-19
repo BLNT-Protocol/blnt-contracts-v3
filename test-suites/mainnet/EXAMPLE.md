@@ -70,9 +70,9 @@ make prepare-mainnet-fixture
 make test-mainnet
 ```
 
-`make test` includes this replay as well as the existing workspace tests and fuzz
-check. The existing PR workflow prepares the fixture separately, then runs that
-command. Tests never call RPC or refresh the fixture; a missing or altered bundle
+The replay is an explicit local test target. The existing `make test` and CI
+workflow retain their original behavior and do not require the fixture. The
+mainnet test never calls RPC or refreshes its fixture; a missing or altered bundle
 fails. Dependencies may need downloading on the first Cargo invocation.
 
 To select an already downloaded bundle explicitly:

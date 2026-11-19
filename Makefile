@@ -13,7 +13,7 @@ default: build
 build-pool-dependency:
 	cargo build --target wasm32v1-none --release --locked --package backstop
 
-test: test-mainnet
+test: build
 	cargo test --workspace --tests --locked
 	cargo check --manifest-path test-suites/fuzz/Cargo.toml --all-targets --locked
 
