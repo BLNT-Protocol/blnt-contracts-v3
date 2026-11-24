@@ -2,7 +2,7 @@ override MAX_WASM_BYTES := 120000
 PRODUCTION_WASMS := backstop.wasm emitter.wasm pool.wasm pool_factory.wasm
 COMET_V1_1_WASM_SHA256 := d735c3395f59510172cf5cf838823a1389b97cfec6bf24e580e9bd77d2b3e687
 SOURCE_REPO_META := source_repo=github:BLNT-Protocol/blnt-contracts-v3
-MAINNET_FIXTURE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/blnt-contracts-v3/oracle-outage-v1.json
+MAINNET_FIXTURE ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/blnt-contracts-v3/oracle-outage-p30-v1.json
 
 .PHONY: default test test-mainnet prepare-mainnet-fixture build build-pool-dependency verify-comet-v1.1 verify-source-metadata wasm-sizes wasm-size-report fmt clean generate-js
 

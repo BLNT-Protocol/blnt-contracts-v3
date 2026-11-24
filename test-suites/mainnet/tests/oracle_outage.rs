@@ -47,7 +47,7 @@ fn hex(bytes: &[u8]) -> String {
 fn validate_capture(path: &Path) -> CapturedFixture {
     let captured = CapturedFixture::from_file(path, NETWORK)
         .expect("a complete mainnet capture with valid integrity digests is required");
-    assert_eq!(captured.provenance().protocol_version(), 29);
+    assert_eq!(captured.provenance().protocol_version(), 30);
     let env = soroban_sdk::Env::default();
     let entries = &captured.frozen_fixture().ledger_snapshot().ledger_entries;
     // Pool/aggregator pins come from deployments/mainnet-v3-yieldblent-pool.json.
@@ -129,8 +129,8 @@ struct Outcome {
 
 fn scenario(fork: &ScenarioFork<'_>, candidate: bool) -> Outcome {
     fork.mock_all_auths();
-    assert_eq!(fork.network_protocol_version(), 29);
-    assert_eq!(fork.executed_protocol_version(), 29);
+    assert_eq!(fork.network_protocol_version(), 30);
+    assert_eq!(fork.executed_protocol_version(), 30);
     let env = fork.env();
     let address = fork.contract(POOL);
     if candidate {

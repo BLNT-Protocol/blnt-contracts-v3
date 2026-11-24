@@ -6,9 +6,9 @@ rust-version = "1.91.1"
 publish = false
 license = "AGPL-3.0"
 
-# Keep the Protocol 29 replay host outside the production SDK 27 workspace.
+# Keep the Protocol 30 replay host outside the production SDK 27 workspace.
 [workspace]
 
 [dev-dependencies]
-kanatoko = { version = "=29.1.2", features = ["capture"] }
+kanatoko = { version = "=30.0.0", features = ["capture"] }
 sha2 = "=0.10.9"
