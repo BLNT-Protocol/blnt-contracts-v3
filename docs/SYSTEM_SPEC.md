@@ -56,3 +56,11 @@ Apply the following order:
 If the written V2 specification conflicts with the frozen SDK-22 contracts or
 tests, the executable baseline wins and the document MUST be corrected. A
 conflict MUST NOT be resolved by silently creating a new V3 policy.
+
+If the written V3 specification conflicts with deployed V3 executable
+behavior, the deployed executable baseline wins for purposes of describing V3
+and defining successor-version inheritance, and the document MUST be
+corrected. Correcting the document does not approve the deployed behavior or
+authorize a change to the immutable V3 artifacts. Any intentional behavioral
+correction MUST target a separately identified future protocol version and
+migration path.

@@ -29,6 +29,12 @@ If the written V2 specification conflicts with the frozen executable
 baseline, preserve the executable behavior and correct the document. Do not
 silently create a new V3 policy.
 
+If the written V3 specification conflicts with deployed V3 executable
+behavior, preserve the deployed behavior as the V3 baseline and correct the
+document. This describes immutable V3 and does not classify every deployed
+behavior as safe or desirable. Any intentional behavioral correction must
+target a separately identified future protocol version and migration path.
+
 ## Repository boundary
 
 - This repository contains the production V3 contract source, compatibility

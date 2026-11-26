@@ -34,6 +34,15 @@ a separately identified future protocol version and migration path.
 Documentation, tests, and off-chain tooling MAY evolve without changing the
 deployed production artifacts.
 
+The exact deployed V3 artifacts and their verified source are the frozen V3
+executable baseline. If this document differs from deployed executable
+behavior, the executable behavior wins for purposes of describing V3 and
+defining successor-version inheritance, and this document MUST be corrected.
+This authority rule does not classify every deployed behavior as safe or
+desirable. Any intentional correction to deployed V3 behavior MUST target a
+separately identified future protocol version and be specified there as an
+explicit behavioral delta with regression tests and a reviewed migration path.
+
 ### 1.2 Scoped carry
 
 Every calculation that invokes this subsection conserves its floor remainder
