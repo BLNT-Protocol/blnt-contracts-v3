@@ -4,7 +4,7 @@ This test protects partial repayment and collateral top-ups when YieldBlent's
 configured oracle stops providing an XLM price. Further borrowing and collateral
 withdrawals must fail atomically, while the borrower can still reduce risk.
 
-Kanatoko 30.0.0 executes the actual pool, aggregator, Reflector and asset contracts
+Kanatoko 30.1 executes the actual pool, aggregator, Reflector and asset contracts
 from a mainnet capture. It repeats the scenario with the optimized pool WASM
 built from the current checkout at the same address. Both runs must satisfy the
 assertions and finish with identical storage and TTLs, excluding the pool's code.
@@ -33,12 +33,12 @@ without introducing new Reflector rounds.
 | Repay 0.5 USDC with debt remaining | Exact wallet debit, pool credit and debt-share reduction |
 | Add 10 XLM collateral with debt remaining | Exact custody/share increase; debt shares unchanged |
 
-Example from ledger **65,646,119**, with XLM round timestamp `1795516500`:
+Both pool builds produced these balances on the saved mainnet ledgers.
 
-```text
-candidate=false oracle_round=1795516500 boundary=1795517400 debt_shares=10086661->5093270 partial_repay=5000000 added_collateral=100000000
-candidate=true oracle_round=1795516500 boundary=1795517400 debt_shares=10086661->5093270 partial_repay=5000000 added_collateral=100000000
-```
+| Ledger | Protocol | XLM round timestamp | Debt shares before and after repayment |
+| --- | --- | --- | --- |
+| 65,562,065 | 29 | 1795096200 | 10,090,772 → 5,095,343 |
+| 65,646,119 | 30 | 1795516500 | 10,086,661 → 5,093,270 |
 
 Amounts above use seven decimal places. New captures can produce different
 debt shares; the test derives expected changes from the captured reserve rates.
@@ -79,18 +79,20 @@ they do not automatically run this opt-in test.
 To use another saved capture or intentionally prepare a new one, pass
 `MAINNET_FIXTURE=/absolute/path/to/oracle-outage.json` to the same commands.
 The default cache filename is `oracle-outage-p30-v1.json`. Use a new path
-when refreshing and a Protocol 30 capture when overriding the default.
+when refreshing. The same test also accepts a previously saved Protocol 29 capture.
+To replay after preparation, run `cargo test` in `test-suites/mainnet`. Set
+`BLNT_MAINNET_FIXTURE` to select a different cached file.
 Preparation requires a Protocol 30 ledger, a fresh XLM price and sufficient
 liquidity/configuration for the small loan.
 
 ## Scope and reproducibility
 
-The test validates bundle integrity, mainnet/Protocol 30 identity, the deployed
+The test validates bundle integrity, mainnet identity and the matching Protocol 29 or 30 Host, the deployed
 pool and aggregator hashes from the [registry](../../deployments/mainnet-v3-yieldblent-pool.json),
 and captured WASM bytes against instance references, including Reflector.
 Reflector's hash is not pinned because that dependency is upgradeable. Keeping
-the same capture preserves its exact code and state. The test prints the ledger
-identity, capture SHA-256, source WASM hash and outcomes.
+the same capture preserves its exact code and state. With `--nocapture`, the
+test prints the protocol, oracle round, debt shares and final storage digest.
 Missing, corrupt or incompatible snapshots fail.
 
 Only the deterministic borrower, its initial 1,000 XLM, USDC trustline and local
@@ -99,7 +101,9 @@ are used. Moving local time models absent feed updates, not a prediction about
 future mainnet state. Code substitution is local, not a deployed upgrade path.
 
 The production SDK 27 workspace and build settings remain unchanged. The
-separate test package uses a Protocol 30 host to match the captured ledger.
+test package uses the same SDK 27.0.3 for its arguments and results. Kanatoko
+selects the official Host from the snapshot. Public RPC can prepare a current
+snapshot. Replaying a historical ledger requires a previously saved capture.
 Local source-built WASM hashes differ from the deployment registry; this test
 establishes behavior for this scenario, not complete artifact reproducibility
 or general equivalence of deployed and source-built code.
