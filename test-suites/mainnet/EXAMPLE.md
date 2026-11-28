@@ -72,9 +72,13 @@ make test-mainnet
 
 Preparation reads public Stellar RPC into a local cache outside the repository.
 It reuses an existing file without refreshing it; no GitHub account or hosted
-snapshot is needed. Replay is offline. Dependencies may need downloading on the
-first Cargo invocation. The existing `make test` and CI workflow are unchanged;
-they do not automatically run this opt-in test.
+snapshot is needed for a fresh local capture. Replay is offline. Dependencies
+may need downloading on the first Cargo invocation.
+
+Pull-request CI downloads the versioned Protocol 30 fixture from the
+[`test-fixture-oracle-outage-p30-v1`](https://github.com/BLNT-Protocol/blnt-contracts-v3/releases/tag/test-fixture-oracle-outage-p30-v1)
+release, verifies its pinned SHA-256, and runs the replay offline. Capturing
+fresh mainnet state remains opt-in and is never part of the required CI path.
 
 To use another saved capture or intentionally prepare a new one, pass
 `MAINNET_FIXTURE=/absolute/path/to/oracle-outage.json` to the same commands.

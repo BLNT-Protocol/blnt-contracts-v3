@@ -10,6 +10,6 @@ license = "AGPL-3.0"
 [workspace]
 
 [dev-dependencies]
-kanatoko = "30.1"
+kanatoko = "=30.1.0"
 soroban-sdk = { version = "=27.0.3", features = ["testutils"] }
 sha2 = "=0.10.9"

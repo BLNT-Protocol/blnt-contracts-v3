@@ -37,8 +37,11 @@ silently create a new V3 policy.
 - Keep canonical immutable deployment registries in `deployments/`, including
   the source-artifact provenance and constructor bindings needed to verify the
   deployed contracts independently.
-- Keep cross-version fixtures, deployment runners, mutable operational
-  configuration, and transient network evidence outside this repository.
+- Keep cross-version fixture payloads outside the Git source tree. They MAY be
+  published as clearly labeled, versioned non-production release assets when
+  their provenance and checksums are pinned. Keep deployment runners, mutable
+  operational configuration, and transient network evidence outside this
+  repository.
 - Test mocks and compatibility crates MUST NOT become privileged production
   dependencies or alternate protocol-control paths.
 - Do not describe BLNT V3 as independently audited, production-ready, or an
@@ -54,7 +57,14 @@ silently create a new V3 policy.
 ## Runtime baseline
 
 - Use Rust 1.91.1, Soroban SDK 27.0.3, Stellar Protocol 27, and
-  `wasm32v1-none`.
+  `wasm32v1-none` for production workspace builds and canonical artifact
+  reproduction.
+- Immutable deployed V3 WASMs execute under later Stellar protocols as mainnet
+  upgrades. An isolated non-production compatibility or replay package MAY run
+  the canonical V3 WASMs under a current or historical mainnet Host protocol,
+  provided it does not alter the production workspace, root lockfile, build
+  settings, embedded metadata, or canonical WASM hashes. Pin its tool
+  dependencies and fixture provenance independently.
 - Keep the exact toolchain and dependency versions reproducible through
   `rust-toolchain.toml` and the committed lockfiles.
 - When a change could affect a production build, reproduce the optimized WASMs
