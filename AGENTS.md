@@ -64,7 +64,8 @@ target a separately identified future protocol version and migration path.
 
 - Use Rust 1.91.1, Soroban SDK 27.0.3, Stellar Protocol 27, and
   `wasm32v1-none` for production workspace builds and canonical artifact
-  reproduction.
+  reproduction. The deployed release artifacts were optimized with Stellar CLI
+  28.1.0; CI uses that exact CLI for its build-and-test lane.
 - Immutable deployed V3 WASMs execute under later Stellar protocols as mainnet
   upgrades. An isolated non-production compatibility or replay package MAY run
   the canonical V3 WASMs under a current or historical mainnet Host protocol,
@@ -75,6 +76,8 @@ target a separately identified future protocol version and migration path.
   `rust-toolchain.toml` and the committed lockfiles.
 - When a change could affect a production build, reproduce the optimized WASMs
   and verify their hashes against the recorded deployment before accepting it.
+  CI enforces this by running `make verify-deployed-wasm-hashes` immediately
+  after the x86-64 Linux build, without compiling the contracts a second time.
 - Do not add SDK 22 or SDK 26 build lanes to the V3 workspace.
 - Never disable release overflow checks.
 - Keep `comet.wasm` equal to the official Comet V1.1

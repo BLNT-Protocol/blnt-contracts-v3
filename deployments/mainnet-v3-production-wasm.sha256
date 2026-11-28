@@ -1,0 +1,4 @@
+0469cfb445bedd87478274f265c8776b32cde1e8840fca4684ffa1dc4d5a750f  target/wasm32v1-none/optimized/backstop.wasm
+4fa7d99dee6fe99cad5d07a46ee39e437dc287e53e3ab1f3ccc0aacf7e6cd6c5  target/wasm32v1-none/optimized/emitter.wasm
+0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356  target/wasm32v1-none/optimized/pool.wasm
+985d7eda4b610f28103edcb28faa52408169f455ac9a880c4a39f58ecc0c2135  target/wasm32v1-none/optimized/pool_factory.wasm

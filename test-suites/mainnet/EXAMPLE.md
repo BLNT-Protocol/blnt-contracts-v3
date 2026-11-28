@@ -108,6 +108,9 @@ The production SDK 27 workspace and build settings remain unchanged. The
 test package uses the same SDK 27.0.3 for its arguments and results. Kanatoko
 selects the official Host from the snapshot. Public RPC can prepare a current
 snapshot. Replaying a historical ledger requires a previously saved capture.
-Local source-built WASM hashes differ from the deployment registry; this test
-establishes behavior for this scenario, not complete artifact reproducibility
-or general equivalence of deployed and source-built code.
+CI reproduces the four canonical production WASMs on x86-64 Linux with Rust
+1.91.1 and Stellar CLI 28.1.0, then verifies their hashes against the deployment
+registry before running this replay. Builds on other host architectures remain
+useful for development but are not expected to be byte-identical. The replay
+establishes compatibility for this pinned scenario; it is not a general proof
+covering other captured states, upgradeable dependencies or future protocols.
