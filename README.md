@@ -104,6 +104,22 @@ The build rejects any production
 WASM larger than 120,000 bytes, preserving the Protocol 27 deployment headroom
 established by BLNT V3 deployment testing.
 
+CI builds the four immutable mainnet artifacts with the exact Stellar CLI
+28.1.0 release builder, runs the test suite against those artifacts, and then
+checks their SHA-256 hashes against
+`deployments/mainnet-v3-production-wasm.sha256` without rebuilding them. In a
+clean x86-64 Linux environment with that CLI installed, run the same guard
+after building with:
+
+```bash
+make build
+make verify-deployed-wasm-hashes
+```
+
+`make test` remains portable to other supported development hosts. Exact
+deployed-hash verification requires x86-64 Linux because the optimized output
+is not byte-identical across host architectures.
+
 Compare the optimized artifacts with the exact deployed V2 contracts:
 
 ```bash
