@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "network": {
+    "name": "Public Global Stellar Network",
+    "passphrase": "Public Global Stellar Network ; September 2015"
+  },
+  "generated_at": "2026-10-25T19:47:45Z",
+  "source_commit": "5d055ca89afc9ed443d36b7ad34e3de59b487764",
+  "operator": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+  "source_v2_fixed_pool": "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD",
+  "contracts": {
+    "pool_factory": "CAKLFWAHB2RIYRBSPUL6EH43AIQ5ILBEM7HTMWYSJRL7PHZQ676KMCV5",
+    "backstop": "CAHCUKBPTW5DR5RNXOHCTJD5U76A6EEZXYZAQFRQEEQRXQ3CRUZ6Z3MO",
+    "oracle": "CCVTVW2CVA7JLH4ROQGP3CU4T3EXVCK66AZGSM4MUQPXAI4QHCZPOATS",
+    "pool": "CACSQWCMKG45TUHCQ3LXHOB7YEEJH4W376ZHQPXH2IZ3TE4NJHFZMCY7",
+    "pool_wasm_hash": "0e4f8f45b94e6b0d017a496ac5620ad0e3f866533cf45acd2b070bedda1e7356"
+  },
+  "contract_creation": {
+    "pool": {
+      "transaction_hash": "db1ff1407551e7f1f09f78e5547d41145e57bd6ad09978449c4e89e187782f62",
+      "ledger": 65134362,
+      "created_at": "2026-10-25T19:46:33Z"
+    }
+  },
+  "fixture": {
+    "sha256": "996e60b1771504ce493fa6cf76fbe38491e0dc528d460996bb5cdb6477a5c683"
+  },
+  "configuration": {
+    "name": "Fixed",
+    "operator": "GDEA2WMOWYQ3T56A2PZH5QYYEQBAORW2AUUJYX4FFD5GDPESAICTFTAL",
+    "salt": "8e847c43cb0fcee9531247a2d1e42715f569e04fb017ab9c0791f6154c29abd6",
+    "expected_pool": "CACSQWCMKG45TUHCQ3LXHOB7YEEJH4W376ZHQPXH2IZ3TE4NJHFZMCY7",
+    "backstop_take_rate": 2000000,
+    "max_positions": 6,
+    "min_collateral": "50000000",
+    "access_controller": null,
+    "backstop_config": [
+      {
+        "asset": "BlntXlm",
+        "take_rate_weight": 4
+      },
+      {
+        "asset": "BlntUsdc",
+        "take_rate_weight": 3
+      },
+      {
+        "asset": "Usdc",
+        "take_rate_weight": 2
+      }
+    ],
+    "initial_status": 6,
+    "funded": false,
+    "activated": false,
+    "reward_zone_member": false
+  },
+  "reserves": [
+    {
+      "symbol": "XLM",
+      "asset": "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA",
+      "config": {
+        "c_factor": 7500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 0,
+        "l_factor": 7500000,
+        "max_util": 7000000,
+        "r_base": 100000,
+        "r_one": 300000,
+        "r_three": 50000000,
+        "r_two": 3000000,
+        "reactivity": 50,
+        "supply_cap": "100000000000000000",
+        "util": 4000000
+      }
+    },
+    {
+      "symbol": "USDC",
+      "asset": "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75",
+      "config": {
+        "c_factor": 9500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 1,
+        "l_factor": 9500000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    },
+    {
+      "symbol": "EURC",
+      "asset": "CDTKPWPLOURQA2SGTKTUQOWRCBZEORB4BWBOMJ3D3ZTQQSGE5F6JBQLV",
+      "config": {
+        "c_factor": 9500000,
+        "decimals": 7,
+        "enabled": true,
+        "index": 2,
+        "l_factor": 9500000,
+        "max_util": 9000000,
+        "r_base": 300000,
+        "r_one": 400000,
+        "r_three": 50000000,
+        "r_two": 1200000,
+        "reactivity": 20,
+        "supply_cap": "10000000000000000",
+        "util": 8000000
+      }
+    }
+  ],
+  "transactions": {
+    "deploy-fixed-pool": "db1ff1407551e7f1f09f78e5547d41145e57bd6ad09978449c4e89e187782f62",
+    "queue-fixed-xlm-reserve": "b0706bf9b92aa05261fe073b7ce73a7f0b60c069d3dd7607b3457756dcdc6b3e",
+    "set-fixed-xlm-reserve": "b35916d7ba3d40bfb512197fa4fb5443d97b17e5e0fc01e7db5015d4b4423c5a",
+    "queue-fixed-usdc-reserve": "ff6801ad4b1487ec95074e9ae35c5a6d43ef59b1745ea0b6deeb98fa27d24b31",
+    "set-fixed-usdc-reserve": "3a8c70582e2966f8b99952bfeb76a39cceb9f35a0113b19ac000fac625e51a62",
+    "queue-fixed-eurc-reserve": "8f4d4ee4276849908cacde87003cfdb5c24241c6fbd6e1784687a1ec937bb7aa",
+    "set-fixed-eurc-reserve": "b7cc2a42cea6f81c3959196cfaa782c9ca3302b147c3490644949190edb7bc2f"
+  },
+  "verified_at": "2026-10-25T19:47:45Z"
+}
